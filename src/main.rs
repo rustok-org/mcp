@@ -22,5 +22,6 @@ async fn main() {
     let _cli = Cli::parse();
     tracing::info!("rustok-mcp starting");
 
-    // TODO: initialize core, start transport
+    // TODO(phase-3): implement MCP protocol per modelcontextprotocol.io/spec.
+    // Initialize core bridge, register tools, start stdio / HTTP transport.
 }

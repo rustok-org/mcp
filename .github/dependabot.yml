@@ -16,3 +16,13 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    ignore:
+      # Major action updates are deferred to dedicated CI maintenance sprints.
+      - dependency-name: "actions/checkout"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "codecov/codecov-action"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "actions/upload-artifact"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "actions/download-artifact"
+        update-types: ["version-update:semver-major"]
