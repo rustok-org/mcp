@@ -1,0 +1,14 @@
+.git
+.github
+target
+Dockerfile
+docker-compose.yml
+.dockerignore
+scripts
+ docs
+*.md
+!README.md
+CHANGELOG.md
+LICENSE
+SECURITY.md
+AGENTS.md
