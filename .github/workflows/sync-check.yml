@@ -1,0 +1,48 @@
+name: Sync Check
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  stale-release-check:
+    name: Check for stale release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check latest release date
+        id: check
+        run: |
+          LATEST=$(gh api repos/${{ github.repository }}/releases/latest --jq '.published_at' 2>/dev/null || echo "")
+          if [ -z "$LATEST" ]; then
+            echo "No releases found."
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          DAYS=$(( ($(date +%s) - $(date -d "$LATEST" +%s)) / 86400 ))
+          echo "Latest release: $LATEST ($DAYS days ago)"
+          if [ "$DAYS" -gt 30 ]; then
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "days=$DAYS" >> "$GITHUB_OUTPUT"
+          else
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create stale release reminder
+        if: steps.check.outputs.stale == 'true'
+        run: |
+          gh issue create \
+            --repo ${{ github.repository }} \
+            --title "Stale release reminder: ${{ steps.check.outputs.days }} days since last release" \
+            --body "The latest release is ${{ steps.check.outputs.days }} days old. Consider syncing with the private core repository and publishing a new version." \
+            --label "maintenance"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
