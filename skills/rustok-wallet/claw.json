@@ -1,0 +1,12 @@
+{
+  "name": "rustok-wallet",
+  "version": "0.2.2",
+  "description": "Self-custody Ethereum Agent Wallet — all supported chains enabled by default (Ethereum, Arbitrum, Base, Optimism, zkSync, Sepolia, Arbitrum Sepolia). User assumes all risks. Preview and execute ETH sends, track DeFi positions (Aave, vaults).",
+  "author": "rustok-org",
+  "license": "MIT-0",
+  "permissions": ["network"],
+  "entry": "SKILL.md",
+  "tags": ["crypto", "ethereum", "wallet", "defi", "agent-wallet", "mcp"],
+  "minOpenClawVersion": "0.8.0",
+  "homepage": "https://github.com/rustok-org/mcp"
+}

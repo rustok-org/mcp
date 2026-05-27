@@ -1,0 +1,8 @@
+{
+  "max_single_tx_eth": 0.1,
+  "max_daily_spend_eth": 0.5,
+  "max_gas_fee_gwei": 100,
+  "blocked_addresses": [],
+  "allowed_chain_ids": [1, 10, 42161, 8453],
+  "block_unlimited_approvals": true
+}
