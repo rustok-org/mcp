@@ -1,17 +1,30 @@
-FROM rust:1.85-slim-bookworm AS builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release --bin rustok-mcp
+# syntax=docker/dockerfile:1
+# Multi-stage build for rustok-agent-mcp distribution image.
+# The binary is expected to be present in the build context (downloaded by CI).
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/rustok-mcp /usr/local/bin/rustok-mcp
-RUN useradd -m -u 1000 rustok
+FROM debian:bookworm-slim AS runtime
+
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user and group
+RUN groupadd -r rustok && useradd -r -g rustok -m rustok
+
+# Pre-create data directory so named volumes inherit correct ownership
+RUN mkdir -p /home/rustok/.rustok/agent && chown -R rustok:rustok /home/rustok/.rustok
+
+# Copy prebuilt binary from build context
+ARG BINARY_PATH=rustok-agent-mcp
+COPY --chown=rustok:rustok ${BINARY_PATH} /usr/local/bin/rustok-agent-mcp
+RUN chmod +x /usr/local/bin/rustok-agent-mcp
+
 USER rustok
-VOLUME ["/data"]
-ENV DATA_DIR=/data
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -fsS http://localhost:3000/health || exit 1
-ENTRYPOINT ["rustok-mcp"]
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD bash -c 'printf "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n" > /dev/tcp/localhost/3000' || exit 1
+
+ENTRYPOINT ["/usr/local/bin/rustok-agent-mcp"]
 CMD ["--host", "0.0.0.0", "--port", "3000"]
