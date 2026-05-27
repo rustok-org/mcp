@@ -1,0 +1,23 @@
+# Smithery.ai configuration for rustok-wallet MCP server
+# https://smithery.ai/docs/build/project-config/smithery-yaml
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required: []
+    properties:
+      RUSTOK_AGENT_PASSWORD:
+        type: string
+        title: Wallet Password
+        description: Password to unlock the agent wallet (set via env var)
+  commandFunction: |-
+    (config) => ({
+      command: 'rustok-agent-mcp',
+      args: ['--transport', 'stdio'],
+      env: {
+        RUSTOK_AGENT_PASSWORD: config.RUSTOK_AGENT_PASSWORD || process.env.RUSTOK_AGENT_PASSWORD || ''
+      }
+    })
+  exampleConfig:
+    RUSTOK_AGENT_PASSWORD: "your-strong-password"
