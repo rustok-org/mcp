@@ -1,56 +1,66 @@
-# AGENTS.md — Rustok MCP Server
+# AGENTS.md — Rustok MCP
 
 > Overrides `meta/AGENTS.md` for `mcp/` subtree.
-> Read `meta/AGENTS.md` first, then this file.
+> This is a **distribution repository** — no wallet source code lives here.
 
 ---
 
 ## Stack
 
-- **Language:** Rust 2021, MSRV 1.85
-- **HTTP:** Axum 0.7
-- **Serialization:** serde + serde_json
-- **CLI:** clap v4
-- **Standard:** `~/Workspace/Codex/standards/rust.md`
+- **Purpose:** Distribution layer — install scripts, Docker, CI/CD, docs
+- **License:** MIT-0 (scripts and docs only)
+- **Binary source:** Private `rustok-org/core` workspace
 
 ---
 
-## Dual Transport
+## Repository Rules
 
-| Mode | Use Case | Security |
-|------|----------|----------|
-| **HTTP** | Remote orchestration, cloud deployment | Bearer auth + rate limiting |
-| **stdio** | Claude Desktop, Cursor, local AI | No auth (local process) |
-
-Both modes share the same request/response DTOs and business logic.
-
----
-
-## Key Rules
-
-- **No own keystore** — use `core` keyring via capability tokens
-- **Capability-based permissions** — each tool call checks capability scope
-- **JSON-RPC 2.0** over stdio — handle notifications silently
-- **Graceful shutdown** — `tokio::signal` for both transports
-- **Structured logging** — `tracing` with request IDs
+1. **No source code** — The MCP agent binary is built in the private core repo and published here as a release artifact. Do not add Rust source files that implement wallet logic.
+2. **Scripts must be POSIX-compliant** — `install.sh` targets Linux, macOS, Windows (Git Bash). Test with `shellcheck`.
+3. **Docker security** — Non-root user, read-only root fs, distroless base image where possible.
+4. **No `latest` tag** — GHCR tags must be semver only (`v0.2.0`, `v0.2`, `v0`).
+5. **Checksum verification** — Every release artifact must have SHA-256 checksum. Install script verifies it.
 
 ---
 
-## CI Gates
+## CI/CD Architecture
+
+```
+Private core repo (rustok-org/core)
+    ↓ push tag v*
+    ↓ Build release binary
+    ↓ Publish to public mcp repo Releases (via PAT)
+
+Public mcp repo (rustok-org/mcp)
+    ↓ Release published
+    ↓ Docker image built from binary
+    ↓ GHCR push
+```
+
+**Security invariant:** Public CI never accesses private code. Private CI pushes to public repo with limited-scope PAT (`contents:write` only).
+
+---
+
+## Gates
 
 ```bash
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
+# Shell scripts
+shellcheck scripts/*.sh
+
+# Docker
 docker build -t rustok-mcp .
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | timeout 5 ./target/release/rustok-mcp --transport stdio
+docker run --rm rustok-mcp --help
+
+# Markdown (optional)
+npx markdownlint-cli docs/*.md *.md
 ```
 
 ---
 
-## Protocol Compliance
+## Release Checklist
 
-- Must pass MCP Inspector validation
-- Tools manifest exposed via `tools/list` endpoint
-- All tool calls return structured `Content` array
-- Errors return `jsonrpc` error objects, never panic
+- [ ] Version bumped in `CHANGELOG.md`
+- [ ] `install.sh` URL points to correct release
+- [ ] Docker image builds and runs
+- [ ] Checksums generated for all artifacts
+- [ ] GHCR tags: semver only, no `latest`
