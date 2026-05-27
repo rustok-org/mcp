@@ -1,0 +1,48 @@
+name: MCP CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mcp/**'
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'mcp/**'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cd mcp && cargo test --workspace
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cd mcp && cargo clippy --workspace --all-targets -- -D warnings
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cd mcp && docker build -t rustok-mcp .
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cd mcp && cargo build --release --bin rustok-mcp
+      - run: |
+          cd mcp
+          echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | ./target/release/rustok-mcp --transport stdio
