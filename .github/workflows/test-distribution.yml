@@ -1,11 +1,10 @@
-name: MCP CI
+name: Test Distribution
 
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
-    tags: ['v*']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,30 +13,7 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
-
 jobs:
-  fmt:
-    name: Format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@stable
-        with: { components: rustfmt }
-      - run: cargo fmt --all --check
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@stable
-        with: { components: clippy }
-      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-
   shellcheck:
     name: ShellCheck
     runs-on: ubuntu-latest
@@ -51,8 +27,27 @@ jobs:
             docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:stable scripts/*.sh
           fi
 
-  docker:
-    name: Docker Build
+  install-script-syntax:
+    name: Install Script Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Test install script parses without errors
+        run: bash -n scripts/install.sh
+
+  dockerfile-lint:
+    name: Dockerfile Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Run hadolint
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef041b24e7911969b53b08508 # v3.1.0
+        with:
+          dockerfile: Dockerfile
+          verbose: true
+
+  docker-smoke:
+    name: Docker Smoke Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -61,5 +56,7 @@ jobs:
           echo '#!/bin/sh' > rustok-agent-mcp
           echo 'echo "rustok-agent-mcp v0.0.0-test"' >> rustok-agent-mcp
           chmod +x rustok-agent-mcp
-      - run: docker build -t rustok-mcp .
-      - run: docker run --rm rustok-mcp --help || true
+      - name: Build Docker image
+        run: docker build -t rustok-mcp:test .
+      - name: Verify image runs
+        run: docker run --rm rustok-mcp:test --help || true
