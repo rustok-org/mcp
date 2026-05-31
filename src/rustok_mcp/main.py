@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from rustok_mcp.config import get_settings
+from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.health import router as health_router
+from rustok_mcp.sse import _sessions
 from rustok_mcp.sse import router as sse_router
 
 
@@ -14,7 +16,14 @@ from rustok_mcp.sse import router as sse_router
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Manage application lifespan events."""
     get_settings()  # validate settings load correctly
-    yield
+    protocol, registry = create_protocol_and_registry()
+    app.state.protocol = protocol
+    app.state.registry = registry
+    try:
+        yield
+    finally:
+        # Shutdown: clear all sessions to prevent memory leaks
+        _sessions.clear()
 
 
 app = FastAPI(

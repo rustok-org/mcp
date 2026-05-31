@@ -1,0 +1,100 @@
+"""JSON-RPC protocol layer tests."""
+
+from rustok_mcp.protocol import JsonRpcRequest, McpProtocol
+
+
+async def test_handle_unknown_method() -> None:
+    """Unknown method must return Method Not Found error."""
+    protocol = McpProtocol()
+    request = JsonRpcRequest(jsonrpc="2.0", id=1, method="unknown")
+    response = await protocol.handle(request)
+
+    assert response is not None
+    assert response.id == 1
+    assert response.error is not None
+    assert response.error.code == -32601
+
+
+async def test_handle_notification_returns_none() -> None:
+    """Notifications (no id, notifications/ prefix) return None."""
+    protocol = McpProtocol()
+    called = False
+
+    async def handler(_req: JsonRpcRequest) -> None:
+        nonlocal called
+        called = True
+
+    protocol.register("notifications/initialized", handler)
+    request = JsonRpcRequest(jsonrpc="2.0", method="notifications/initialized")
+    response = await protocol.handle(request)
+
+    assert response is None
+    assert called is True
+
+
+async def test_handle_notification_without_prefix() -> None:
+    """Any request without id is a notification, regardless of method name."""
+    protocol = McpProtocol()
+    called = False
+
+    async def handler(_req: JsonRpcRequest) -> None:
+        nonlocal called
+        called = True
+
+    protocol.register("some_method", handler)
+    request = JsonRpcRequest(jsonrpc="2.0", method="some_method")
+    response = await protocol.handle(request)
+
+    assert response is None
+    assert called is True
+
+
+async def test_handle_successful_request() -> None:
+    """Registered handler result is wrapped in JsonRpcResponse."""
+    protocol = McpProtocol()
+
+    async def handler(_req: JsonRpcRequest) -> dict[str, str]:
+        return {"status": "ok"}
+
+    protocol.register("initialize", handler)
+    request = JsonRpcRequest(jsonrpc="2.0", id=42, method="initialize")
+    response = await protocol.handle(request)
+
+    assert response is not None
+    assert response.id == 42
+    assert response.result == {"status": "ok"}
+    assert response.error is None
+
+
+async def test_handle_value_error() -> None:
+    """ValueError from handler is mapped to Invalid Params."""
+    protocol = McpProtocol()
+
+    async def handler(_req: JsonRpcRequest) -> None:
+        raise ValueError("bad param")
+
+    protocol.register("test", handler)
+    request = JsonRpcRequest(jsonrpc="2.0", id=1, method="test")
+    response = await protocol.handle(request)
+
+    assert response is not None
+    assert response.error is not None
+    assert response.error.code == -32602
+    assert "bad param" in response.error.message
+
+
+async def test_handle_generic_exception() -> None:
+    """Unexpected exceptions are mapped to Internal Error."""
+    protocol = McpProtocol()
+
+    async def handler(_req: JsonRpcRequest) -> None:
+        raise RuntimeError("boom")
+
+    protocol.register("test", handler)
+    request = JsonRpcRequest(jsonrpc="2.0", id=1, method="test")
+    response = await protocol.handle(request)
+
+    assert response is not None
+    assert response.error is not None
+    assert response.error.code == -32603
+    assert "boom" in response.error.message

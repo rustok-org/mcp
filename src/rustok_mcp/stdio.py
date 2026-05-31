@@ -1,16 +1,43 @@
-"""Stdio transport entrypoint for MCP (placeholder)."""
+"""Stdio transport entrypoint for MCP (JSON-RPC over stdin/stdout)."""
 
+import asyncio
+import json
 import sys
-import time
+
+from rustok_mcp.handlers import create_protocol_and_registry
+from rustok_mcp.protocol import JsonRpcError, JsonRpcRequest, JsonRpcResponse
+
+
+async def _stdio_loop() -> None:
+    """Read JSON-RPC requests from stdin and write responses to stdout."""
+    protocol, _registry = create_protocol_and_registry()
+
+    while True:
+        line = await asyncio.to_thread(sys.stdin.readline)
+        if not line:
+            break
+
+        line = line.strip()
+        if not line:
+            continue
+
+        try:
+            data = json.loads(line)
+            request = JsonRpcRequest.model_validate(data)
+        except (json.JSONDecodeError, ValueError) as exc:
+            response = JsonRpcResponse(
+                jsonrpc="2.0",
+                id=None,
+                error=JsonRpcError(code=-32700, message=f"Parse error: {exc}"),
+            )
+            print(response.model_dump_json(), flush=True)
+            continue
+
+        result = await protocol.handle(request)
+        if result is not None:
+            print(result.model_dump_json(), flush=True)
 
 
 def main() -> None:
-    """Placeholder stdio entrypoint for Claude Desktop integration.
-
-    Full JSON-RPC over stdio will be implemented in PR-3.2.
-    The process blocks so Claude Desktop does not see a crash loop.
-    """
-    print("rustok-mcp stdio transport placeholder", file=sys.stderr)
-    # placeholder: real implementation will block on stdin
-    while True:
-        time.sleep(1)
+    """Run the stdio MCP transport."""
+    asyncio.run(_stdio_loop())
