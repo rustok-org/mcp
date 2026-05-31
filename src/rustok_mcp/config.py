@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     """MCP server configuration loaded from environment."""
 
     app_name: str = "rustok-mcp"
-    port: int = 3000
+    port: int = 3001
     gateway_url: str = "http://127.0.0.1:3000"
     log_level: str = "INFO"
 
@@ -20,3 +20,11 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return cached settings instance."""
     return Settings()
+
+
+def clear_settings_cache() -> None:
+    """Clear the cached settings instance.
+
+    Use in tests when monkeypatching environment variables.
+    """
+    get_settings.cache_clear()

@@ -32,7 +32,7 @@ def run() -> None:
 
     settings = get_settings()
     uvicorn.run(
-        "rustok_mcp.main:app",
+        app,
         host="127.0.0.1",
         port=settings.port,
         log_level=settings.log_level.lower(),

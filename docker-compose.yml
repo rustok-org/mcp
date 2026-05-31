@@ -4,23 +4,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        BINARY_PATH: ${BINARY_PATH:-rustok-agent-mcp}
     ports:
-      - "127.0.0.1:3000:3000"
-    volumes:
-      - rustok-data:/home/rustok/.rustok/agent
+      - "127.0.0.1:3001:3001"
     environment:
-      RUSTOK_AGENT_PASSWORD: ${RUSTOK_AGENT_PASSWORD}
-      MCP_CHAIN_IDS: ${MCP_CHAIN_IDS:-421614}
-      MCP_RATE_LIMIT: ${MCP_RATE_LIMIT:-100}
-      MCP_API_KEY: ${MCP_API_KEY}
+      RUSTOK_MCP_PORT: "3001"
+      RUSTOK_MCP_GATEWAY_URL: "http://host.docker.internal:3000"
+      RUSTOK_MCP_LOG_LEVEL: "INFO"
     # Hardening
     read_only: true
     tmpfs:
       - /tmp:noexec,nosuid,size=100m
     user: "1000:1000"
     restart: unless-stopped
-
-volumes:
-  rustok-data:

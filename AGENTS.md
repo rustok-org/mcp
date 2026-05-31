@@ -11,7 +11,7 @@
 - **Framework:** FastAPI 0.115+ with SSE and stdio transports
 - **Package manager:** uv
 - **Key deps:** `fastapi`, `uvicorn`, `httpx`, `pydantic`, `pydantic-settings`
-- **Standards:** `~/codex/python/CORE.md` + `~/codex/python/web/fastapi.md`
+- **Standards:** `~/Workspace/Codex/standards/python.md` + `~/Workspace/Codex/standards/fastapi.md`
 
 ---
 

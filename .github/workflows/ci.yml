@@ -21,6 +21,8 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: astral-sh/setup-uv@9b2b4ae6f19840b9db6a8c51b44ed6f2ac4485a3
+        with:
+          python-version-file: ".python-version"
       - run: uv sync --dev
       - run: uv run ruff check src tests
       - run: uv run ruff format --check src tests
@@ -32,6 +34,8 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: astral-sh/setup-uv@9b2b4ae6f19840b9db6a8c51b44ed6f2ac4485a3
+        with:
+          python-version-file: ".python-version"
       - run: uv sync --dev
       - run: uv run pytest
 
