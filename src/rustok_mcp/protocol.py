@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-JsonRpcHandler = Callable[["JsonRpcRequest"], Awaitable[Any]]
+JsonRpcHandler = Callable[["JsonRpcRequest", dict[str, Any] | None], Awaitable[Any]]
 
 
 class JsonRpcError(BaseModel):
@@ -34,6 +34,14 @@ class JsonRpcResponse(BaseModel):
     error: JsonRpcError | None = None
 
 
+class McpError(ValueError):
+    """Custom error carrying a JSON-RPC error code."""
+
+    def __init__(self, code: int, message: str) -> None:
+        self.code = code
+        super().__init__(message)
+
+
 class McpProtocol:
     """Routes JSON-RPC requests to registered handlers."""
 
@@ -44,7 +52,11 @@ class McpProtocol:
         """Register a handler for a JSON-RPC method."""
         self._handlers[method] = handler
 
-    async def handle(self, request: JsonRpcRequest) -> JsonRpcResponse | None:
+    async def handle(
+        self,
+        request: JsonRpcRequest,
+        context: dict[str, Any] | None = None,
+    ) -> JsonRpcResponse | None:
         """Process a JSON-RPC request and return a response.
 
         Returns ``None`` for notifications (no response required).
@@ -53,7 +65,7 @@ class McpProtocol:
         if request.id is None:
             handler = self._handlers.get(request.method)
             if handler is not None:
-                await handler(request)
+                await handler(request, context)
             return None
 
         handler = self._handlers.get(request.method)
@@ -68,13 +80,14 @@ class McpProtocol:
             )
 
         try:
-            result = await handler(request)
+            result = await handler(request, context)
             return JsonRpcResponse(jsonrpc="2.0", id=request.id, result=result)
         except ValueError as exc:
+            code = getattr(exc, "code", -32602)
             return JsonRpcResponse(
                 jsonrpc="2.0",
                 id=request.id,
-                error=JsonRpcError(code=-32602, message=str(exc)),
+                error=JsonRpcError(code=code, message=str(exc)),
             )
         except Exception as exc:  # noqa: BLE001
             return JsonRpcResponse(

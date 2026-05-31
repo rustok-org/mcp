@@ -3,7 +3,11 @@
 import json
 from typing import Any
 
-from rustok_mcp.protocol import JsonRpcRequest, McpProtocol
+from rustok_mcp.capabilities import (
+    has_capability,
+    parse_capabilities,
+)
+from rustok_mcp.protocol import JsonRpcRequest, McpError, McpProtocol
 from rustok_mcp.tools import Tool, ToolRegistry
 
 
@@ -15,8 +19,16 @@ def _serialize_result(result: Any) -> str:
         return str(result)
 
 
-async def handle_initialize(request: JsonRpcRequest) -> dict[str, Any]:  # noqa: ARG001
+async def handle_initialize(
+    request: JsonRpcRequest,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Handle the ``initialize`` JSON-RPC method."""
+    params = request.params or {}
+    if isinstance(params, dict):
+        caps = parse_capabilities(params.get("capabilities", []))
+        if context is not None:
+            context["capabilities"] = caps
     return {
         "protocolVersion": "2024-11-05",
         "capabilities": {"tools": {}},
@@ -24,12 +36,23 @@ async def handle_initialize(request: JsonRpcRequest) -> dict[str, Any]:  # noqa:
     }
 
 
-async def handle_tools_list(request: JsonRpcRequest, registry: ToolRegistry) -> dict[str, Any]:  # noqa: ARG001
+async def handle_tools_list(
+    request: JsonRpcRequest,  # noqa: ARG001
+    registry: ToolRegistry,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Handle the ``tools/list`` JSON-RPC method."""
-    return {"tools": registry.get_tool_schemas()}
+    schemas = registry.get_tool_schemas()
+    caps = context.get("capabilities", set()) if context else set()
+    schemas = [s for s in schemas if has_capability(s["name"], caps)]
+    return {"tools": schemas}
 
 
-async def handle_tools_call(request: JsonRpcRequest, registry: ToolRegistry) -> dict[str, Any]:
+async def handle_tools_call(
+    request: JsonRpcRequest,
+    registry: ToolRegistry,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Handle the ``tools/call`` JSON-RPC method."""
     params = request.params or {}
     if not isinstance(params, dict):
@@ -42,6 +65,10 @@ async def handle_tools_call(request: JsonRpcRequest, registry: ToolRegistry) -> 
         raise ValueError("Missing 'name' in tools/call params")
     if not isinstance(arguments, dict):
         raise ValueError("tools/call arguments must be an object")
+
+    caps = context.get("capabilities", set()) if context else set()
+    if not has_capability(name, caps):
+        raise McpError(-32001, f"Tool '{name}' requires additional capability")
 
     result = await registry.call(name, arguments)
     return {
@@ -149,8 +176,20 @@ def create_protocol_and_registry() -> tuple[McpProtocol, ToolRegistry]:
     )
 
     # Wire JSON-RPC handlers
+    async def _tools_list_handler(
+        req: JsonRpcRequest,
+        ctx: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await handle_tools_list(req, registry, ctx)
+
+    async def _tools_call_handler(
+        req: JsonRpcRequest,
+        ctx: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await handle_tools_call(req, registry, ctx)
+
     protocol.register("initialize", handle_initialize)
-    protocol.register("tools/list", lambda req: handle_tools_list(req, registry))
-    protocol.register("tools/call", lambda req: handle_tools_call(req, registry))
+    protocol.register("tools/list", _tools_list_handler)
+    protocol.register("tools/call", _tools_call_handler)
 
     return protocol, registry

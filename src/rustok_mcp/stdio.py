@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sys
+from typing import Any
 
 from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.protocol import JsonRpcError, JsonRpcRequest, JsonRpcResponse
@@ -11,6 +12,7 @@ from rustok_mcp.protocol import JsonRpcError, JsonRpcRequest, JsonRpcResponse
 async def _stdio_loop() -> None:
     """Read JSON-RPC requests from stdin and write responses to stdout."""
     protocol, _registry = create_protocol_and_registry()
+    context: dict[str, Any] = {}
 
     while True:
         line = await asyncio.to_thread(sys.stdin.readline)
@@ -33,7 +35,7 @@ async def _stdio_loop() -> None:
             print(response.model_dump_json(), flush=True)
             continue
 
-        result = await protocol.handle(request)
+        result = await protocol.handle(request, context)
         if result is not None:
             print(result.model_dump_json(), flush=True)
 
