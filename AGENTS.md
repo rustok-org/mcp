@@ -1,58 +1,56 @@
 # AGENTS.md — Rustok MCP
 
 > Overrides `meta/AGENTS.md` for `mcp/` subtree.
-> This is a **distribution repository** — no wallet source code lives here.
+> This repo now hosts the **Python MCP Server** implementation.
 
 ---
 
 ## Stack
 
-- **Purpose:** Distribution layer — install scripts, Docker, CI/CD, docs
-- **License:** MIT-0 (scripts and docs only)
-- **Binary source:** Private `rustok-org/core` workspace
+- **Language:** Python 3.12+
+- **Framework:** FastAPI 0.115+ with SSE and stdio transports
+- **Package manager:** uv
+- **Key deps:** `fastapi`, `uvicorn`, `httpx`, `pydantic`, `pydantic-settings`
+- **Standards:** `~/Workspace/Codex/standards/python.md` + `~/Workspace/Codex/standards/fastapi.md`
 
 ---
 
 ## Repository Rules
 
-1. **No source code** — The MCP agent binary is built in the private core repo and published here as a release artifact. Do not add Rust source files that implement wallet logic.
+1. **No secrets in source** — API keys, tokens, passwords only via env vars (`RUSTOK_MCP_*`).
 2. **Scripts must be POSIX-compliant** — `install.sh` targets Linux, macOS, Windows (Git Bash). Test with `shellcheck`.
-3. **Docker security** — Non-root user, read-only root fs, distroless base image where possible.
+3. **Docker security** — Non-root user, read-only root fs where possible, distroless or slim base image.
 4. **No `latest` tag** — GHCR tags must be semver only (`v0.2.0`, `v0.2`, `v0`).
 5. **Checksum verification** — Every release artifact must have SHA-256 checksum. Install script verifies it.
 
 ---
 
-## CI/CD Architecture
+## Architecture
+
+The MCP Server is a thin JSON-RPC adapter between LLM agents (Claude Desktop, Cursor, cloud agents) and the Rustok Gateway.
 
 ```
-Private core repo (rustok-org/core)
-    ↓ push tag v*
-    ↓ Build release binary
-    ↓ Publish to public mcp repo Releases (via PAT)
-
-Public mcp repo (rustok-org/mcp)
-    ↓ Release published
-    ↓ Docker image built from binary
-    ↓ GHCR push
+Claude Desktop (stdio)  →  MCP Server (Python)  →  Gateway (Axum)  →  Core (Rust)
+Cloud agent (SSE)       →  /mcp/sse
 ```
 
-**Security invariant:** Public CI never accesses private code. Private CI pushes to public repo with limited-scope PAT (`contents:write` only).
+- **No wallet logic here** — all crypto, signing, and key material lives in `core/`.
+- **No persistent state** — MCP Server is stateless; state lives in Gateway / Core.
+- **Capability-based security** — client selects capabilities on connect (`read_wallet`, `preview_tx`, `execute_tx`).
 
 ---
 
 ## Gates
 
 ```bash
+# Python
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run mypy src
+uv run pytest
+
 # Shell scripts
 shellcheck scripts/*.sh
-
-# Docker
-docker build -t rustok-mcp .
-docker run --rm rustok-mcp --help
-
-# Markdown (optional)
-npx markdownlint-cli docs/*.md *.md
 ```
 
 ---
@@ -60,7 +58,7 @@ npx markdownlint-cli docs/*.md *.md
 ## Release Checklist
 
 - [ ] Version bumped in `CHANGELOG.md`
-- [ ] `install.sh` URL points to correct release
+- [ ] `pyproject.toml` version matches release tag
 - [ ] Docker image builds and runs
 - [ ] Checksums generated for all artifacts
 - [ ] GHCR tags: semver only, no `latest`

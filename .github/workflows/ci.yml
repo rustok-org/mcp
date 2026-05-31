@@ -14,29 +14,30 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
-
 jobs:
-  fmt:
-    name: Format
+  lint:
+    name: Lint & Type Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@stable
-        with: { components: rustfmt }
-      - run: cargo fmt --all --check
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          python-version-file: ".python-version"
+      - run: uv sync --dev
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run mypy src
 
-  clippy:
-    name: Clippy
+  test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@stable
-        with: { components: clippy }
-      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          python-version-file: ".python-version"
+      - run: uv sync --dev
+      - run: uv run pytest
 
   shellcheck:
     name: ShellCheck
@@ -50,16 +51,3 @@ jobs:
           else
             docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:stable scripts/*.sh
           fi
-
-  docker:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Create dummy binary for build test
-        run: |
-          echo '#!/bin/sh' > rustok-agent-mcp
-          echo 'echo "rustok-agent-mcp v0.0.0-test"' >> rustok-agent-mcp
-          chmod +x rustok-agent-mcp
-      - run: docker build -t rustok-mcp .
-      - run: docker run --rm rustok-mcp --help || true

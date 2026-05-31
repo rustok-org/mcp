@@ -2,52 +2,39 @@
 
 [![CI](https://github.com/rustok-org/mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/rustok-org/mcp/actions/workflows/ci.yml)
 [![License: MIT-0](https://img.shields.io/badge/License-MIT--0-blue.svg)](https://github.com/rustok-org/mcp/blob/main/LICENSE)
-[![GHCR](https://img.shields.io/badge/GHCR-latest-orange)](https://github.com/rustok-org/mcp/pkgs/container/rustok-mcp)
 
-> **Distribution repository** for the Rustok MCP agent. This repo contains installation scripts, Docker images, and documentation. The agent binary is built from the private core repository and published here as a release artifact.
+> MCP Server for Rustok — connects Claude Desktop, Cursor, and cloud agents to the Rustok wallet via Gateway.
 
-## Quick Install
+## Quick Start (Development)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rustok-org/mcp/main/scripts/install.sh | bash
-```
+# Install dependencies
+uv sync --dev
 
-Supports **Linux (x86_64, arm64)**, **macOS (Apple Silicon, Intel)**, and **Windows (x86_64)**.
+# Run the server
+uv run rustok-mcp
+
+# Or run stdio transport
+uv run rustok-mcp-stdio
+```
 
 ## Docker
 
+> ⚠️ Docker image and install script are not yet updated for the Python rewrite.
+> They will be adapted in a follow-up PR. For now, use `uv run rustok-mcp`.
+
 ```bash
-docker run -p 127.0.0.1:3000:3000 \
-  -v ~/.rustok/agent:/data \
-  -e RUSTOK_AGENT_PASSWORD="your-strong-password" \
-  ghcr.io/rustok-org/rustok-mcp:v0.2
-```
-
-## Claude Desktop / Cursor
-
-Add to your MCP server config:
-
-```json
-{
-  "mcpServers": {
-    "rustok-wallet": {
-      "command": "rustok-agent-mcp",
-      "args": ["--transport", "stdio"],
-      "env": {
-        "RUSTOK_AGENT_PASSWORD": "your-strong-password"
-      }
-    }
-  }
-}
+docker build -t rustok-mcp .
+docker run -p 127.0.0.1:3001:3001 rustok-mcp
 ```
 
 ## What is Rustok?
 
-Rustok is a **self-custody AI-native crypto wallet**. The MCP agent runs entirely on your local machine — private keys never leave localhost.
+Rustok is a **self-custody AI-native crypto wallet**. The MCP Server runs as a bridge between LLM agents and the Rustok Gateway — private keys never leave the Core service.
 
 - **All supported chains enabled by default**: Ethereum, Arbitrum, Base, Optimism, zkSync, Sepolia, Arbitrum Sepolia
-- **Policy enforcement**: Spending limits, daily budgets, blocklists — enforced in code, not prompts
-- **Audit logging**: Every action is append-only logged to SQLite
+- **Policy enforcement**: Spending limits, daily budgets, blocklists — enforced in Core, not prompts
+- **Audit logging**: Every action is append-only logged to SQLite in Core
 - **Preview before execute**: Always simulate before signing
 
 ## Documentation
@@ -60,6 +47,6 @@ Rustok is a **self-custody AI-native crypto wallet**. The MCP agent runs entirel
 
 ## License
 
-This repository (scripts, docs, Dockerfiles) is licensed under **MIT-0**.
+This repository is licensed under **MIT-0**.
 
-The Rustok agent binary is a proprietary artifact built from the private core repository. See [LICENSE](LICENSE) for details.
+The Rustok Core wallet engine is a proprietary artifact built from the private `rustok-org/core` repository.
