@@ -7,6 +7,7 @@ from rustok_mcp.capabilities import (
     has_capability,
     parse_capabilities,
 )
+from rustok_mcp.gateway import GatewayClient
 from rustok_mcp.protocol import JsonRpcRequest, McpError, McpProtocol
 from rustok_mcp.tools import Tool, ToolRegistry
 
@@ -17,6 +18,14 @@ def _serialize_result(result: Any) -> str:
         return json.dumps(result)
     except (TypeError, ValueError):
         return str(result)
+
+
+def _require(args: dict[str, Any], key: str) -> Any:
+    """Return ``args[key]`` or raise ValueError (-> JSON-RPC -32602 Invalid params)."""
+    try:
+        return args[key]
+    except KeyError as exc:
+        raise ValueError(f"Missing required argument: {key}") from exc
 
 
 async def handle_initialize(
@@ -82,6 +91,7 @@ async def handle_tools_call(
 
 
 async def _stub_get_wallet_context(_args: dict[str, Any]) -> dict[str, Any]:
+    """TODO: Gateway REST endpoint not yet implemented (PR-3.5)."""
     return {
         "address": "0x0000000000000000000000000000000000000000",
         "balances": [],
@@ -89,30 +99,54 @@ async def _stub_get_wallet_context(_args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _stub_get_balances(_args: dict[str, Any]) -> dict[str, Any]:
+    """TODO: Gateway REST endpoint not yet implemented (PR-3.5)."""
     return {"balances": []}
 
 
-async def _stub_preview_send(_args: dict[str, Any]) -> dict[str, str]:
-    return {"preview_id": "stub-preview-id", "estimated_gas": "21000"}
+def _make_preview_send_handler(client: GatewayClient | None) -> Any:
+    async def handler(args: dict[str, Any]) -> Any:
+        if client is None:
+            return {"preview_id": "stub-preview-id", "estimated_gas": "21000"}
+        return await client.preview_send(
+            to=_require(args, "to"),
+            amount=_require(args, "amount"),
+            chain_id=_require(args, "chain_id"),
+        )
+
+    return handler
 
 
-async def _stub_execute_send(_args: dict[str, Any]) -> dict[str, str]:
-    return {"tx_hash": "0xstubtxhash"}
+def _make_execute_send_handler(client: GatewayClient | None) -> Any:
+    async def handler(args: dict[str, Any]) -> Any:
+        if client is None:
+            return {"tx_hash": "0xstubtxhash"}
+        return await client.execute_send(preview_id=_require(args, "preview_id"))
+
+    return handler
 
 
-async def _stub_sign_message(_args: dict[str, Any]) -> dict[str, str]:
-    return {"signature": "0xstubsignature"}
+def _make_sign_message_handler(client: GatewayClient | None) -> Any:
+    async def handler(args: dict[str, Any]) -> Any:
+        if client is None:
+            return {"signature": "0xstubsignature"}
+        return await client.sign_message(
+            message=_require(args, "message"),
+            sign_type=args.get("sign_type", "eip191"),
+        )
+
+    return handler
 
 
-def create_protocol_and_registry() -> tuple[McpProtocol, ToolRegistry]:
-    """Wire handlers and stub tools into a protocol instance.
+def create_protocol_and_registry(
+    gateway_client: GatewayClient | None = None,
+) -> tuple[McpProtocol, ToolRegistry]:
+    """Wire handlers and tools into a protocol instance.
 
     Returns a tuple of ``(protocol, registry)`` ready to handle requests.
     """
     registry = ToolRegistry()
     protocol = McpProtocol()
 
-    # Register stub tools (Gateway integration comes in PR-3.4)
     registry.register(
         Tool(
             name="get_wallet_context",
@@ -143,7 +177,7 @@ def create_protocol_and_registry() -> tuple[McpProtocol, ToolRegistry]:
                 "required": ["to", "amount", "chain_id"],
             },
         ),
-        _stub_preview_send,
+        _make_preview_send_handler(gateway_client),
     )
     registry.register(
         Tool(
@@ -157,7 +191,7 @@ def create_protocol_and_registry() -> tuple[McpProtocol, ToolRegistry]:
                 "required": ["preview_id"],
             },
         ),
-        _stub_execute_send,
+        _make_execute_send_handler(gateway_client),
     )
     registry.register(
         Tool(
@@ -172,7 +206,7 @@ def create_protocol_and_registry() -> tuple[McpProtocol, ToolRegistry]:
                 "required": ["message"],
             },
         ),
-        _stub_sign_message,
+        _make_sign_message_handler(gateway_client),
     )
 
     # Wire JSON-RPC handlers

@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     port: int = 3001
     gateway_url: str = "http://127.0.0.1:3000"
     log_level: str = "INFO"
+    # Read from RUSTOK_MCP_API_KEY, consistent with every other setting's prefix.
+    api_key: str | None = None
 
     model_config = SettingsConfigDict(env_prefix="RUSTOK_MCP_")
 
