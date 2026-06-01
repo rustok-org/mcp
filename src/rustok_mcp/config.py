@@ -2,7 +2,6 @@
 
 from functools import lru_cache
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,7 +12,8 @@ class Settings(BaseSettings):
     port: int = 3001
     gateway_url: str = "http://127.0.0.1:3000"
     log_level: str = "INFO"
-    api_key: str | None = Field(default=None, alias="MCP_API_KEY")
+    # Read from RUSTOK_MCP_API_KEY, consistent with every other setting's prefix.
+    api_key: str | None = None
 
     model_config = SettingsConfigDict(env_prefix="RUSTOK_MCP_")
 
