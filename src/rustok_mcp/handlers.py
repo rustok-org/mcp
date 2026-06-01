@@ -20,6 +20,14 @@ def _serialize_result(result: Any) -> str:
         return str(result)
 
 
+def _require(args: dict[str, Any], key: str) -> Any:
+    """Return ``args[key]`` or raise ValueError (-> JSON-RPC -32602 Invalid params)."""
+    try:
+        return args[key]
+    except KeyError as exc:
+        raise ValueError(f"Missing required argument: {key}") from exc
+
+
 async def handle_initialize(
     request: JsonRpcRequest,
     context: dict[str, Any] | None = None,
@@ -100,9 +108,9 @@ def _make_preview_send_handler(client: GatewayClient | None) -> Any:
         if client is None:
             return {"preview_id": "stub-preview-id", "estimated_gas": "21000"}
         return await client.preview_send(
-            to=args["to"],
-            amount=args["amount"],
-            chain_id=args["chain_id"],
+            to=_require(args, "to"),
+            amount=_require(args, "amount"),
+            chain_id=_require(args, "chain_id"),
         )
 
     return handler
@@ -112,7 +120,7 @@ def _make_execute_send_handler(client: GatewayClient | None) -> Any:
     async def handler(args: dict[str, Any]) -> Any:
         if client is None:
             return {"tx_hash": "0xstubtxhash"}
-        return await client.execute_send(preview_id=args["preview_id"])
+        return await client.execute_send(preview_id=_require(args, "preview_id"))
 
     return handler
 
@@ -122,7 +130,7 @@ def _make_sign_message_handler(client: GatewayClient | None) -> Any:
         if client is None:
             return {"signature": "0xstubsignature"}
         return await client.sign_message(
-            message=args["message"],
+            message=_require(args, "message"),
             sign_type=args.get("sign_type", "eip191"),
         )
 

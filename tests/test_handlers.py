@@ -276,3 +276,66 @@ async def test_sign_message_uses_gateway_client() -> None:
     assert response.result is not None
     assert "0xreal" in response.result["content"][0]["text"]
     mock_client.sign_message.assert_awaited_once_with(message="hello", sign_type="eip191")
+
+
+async def test_preview_send_missing_arg_returns_invalid_params() -> None:
+    """Missing required argument maps to -32602 (Invalid params), not -32603."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=8,
+        method="tools/call",
+        params={
+            "name": "preview_send",
+            "arguments": {"amount": "1.0", "chain_id": 1},  # missing "to"
+        },
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.error is not None
+    assert response.error.code == -32602
+    assert "to" in response.error.message
+    mock_client.preview_send.assert_not_awaited()
+
+
+async def test_execute_send_missing_arg_returns_invalid_params() -> None:
+    """execute_send without preview_id maps to -32602, Gateway not called."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=9,
+        method="tools/call",
+        params={"name": "execute_send", "arguments": {}},  # missing "preview_id"
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.error is not None
+    assert response.error.code == -32602
+    assert "preview_id" in response.error.message
+    mock_client.execute_send.assert_not_awaited()
+
+
+async def test_sign_message_missing_arg_returns_invalid_params() -> None:
+    """sign_message without message maps to -32602, Gateway not called."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=10,
+        method="tools/call",
+        params={"name": "sign_message", "arguments": {"sign_type": "eip191"}},  # missing "message"
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.error is not None
+    assert response.error.code == -32602
+    assert "message" in response.error.message
+    mock_client.sign_message.assert_not_awaited()
