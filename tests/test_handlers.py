@@ -1,8 +1,10 @@
 """MCP handler tests."""
 
 from typing import Any
+from unittest.mock import AsyncMock
 
 from rustok_mcp.capabilities import Capability
+from rustok_mcp.gateway import GatewayClient
 from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.protocol import JsonRpcRequest
 
@@ -188,3 +190,89 @@ async def test_tools_call_serializes_non_dict_result() -> None:
     assert response.result is not None
     text = response.result["content"][0]["text"]
     assert text == "[1, 2, 3]"
+
+
+async def test_preview_send_uses_gateway_client() -> None:
+    """preview_send tool delegates to GatewayClient when provided."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.preview_send = AsyncMock(return_value={"preview_id": "real-id"})
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=5,
+        method="tools/call",
+        params={
+            "name": "preview_send",
+            "arguments": {"to": "0xabc", "amount": "1.0", "chain_id": 1},
+        },
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    assert "real-id" in response.result["content"][0]["text"]
+    mock_client.preview_send.assert_awaited_once_with(to="0xabc", amount="1.0", chain_id=1)
+
+
+async def test_preview_send_falls_back_to_stub() -> None:
+    """preview_send tool returns stub when no GatewayClient is provided."""
+    protocol, _registry = create_protocol_and_registry()
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=5,
+        method="tools/call",
+        params={
+            "name": "preview_send",
+            "arguments": {"to": "0xabc", "amount": "1.0", "chain_id": 1},
+        },
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    assert "stub-preview-id" in response.result["content"][0]["text"]
+
+
+async def test_execute_send_uses_gateway_client() -> None:
+    """execute_send tool delegates to GatewayClient when provided."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.execute_send = AsyncMock(return_value={"tx_hash": "0xreal"})
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=6,
+        method="tools/call",
+        params={"name": "execute_send", "arguments": {"preview_id": "abc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    assert "0xreal" in response.result["content"][0]["text"]
+    mock_client.execute_send.assert_awaited_once_with(preview_id="abc")
+
+
+async def test_sign_message_uses_gateway_client() -> None:
+    """sign_message tool delegates to GatewayClient when provided."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.sign_message = AsyncMock(return_value={"signature": "0xreal"})
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=7,
+        method="tools/call",
+        params={"name": "sign_message", "arguments": {"message": "hello", "sign_type": "eip191"}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    assert "0xreal" in response.result["content"][0]["text"]
+    mock_client.sign_message.assert_awaited_once_with(message="hello", sign_type="eip191")
