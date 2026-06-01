@@ -1,5 +1,8 @@
 """MCP handler tests."""
 
+from typing import Any
+
+from rustok_mcp.capabilities import Capability
 from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.protocol import JsonRpcRequest
 
@@ -16,11 +19,28 @@ async def test_initialize_handler() -> None:
     assert response.result["serverInfo"]["name"] == "rustok-mcp"
 
 
+async def test_initialize_stores_capabilities() -> None:
+    """initialize parses and stores client capabilities in context."""
+    protocol, _registry = create_protocol_and_registry()
+    context: dict[str, set[str]] = {}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=1,
+        method="initialize",
+        params={"capabilities": ["read_wallet", "preview_tx"]},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert context["capabilities"] == {Capability.READ_WALLET, Capability.PREVIEW_TX}
+
+
 async def test_tools_list_handler() -> None:
     """tools/list returns registered stub tools."""
     protocol, _registry = create_protocol_and_registry()
+    context = {"capabilities": set(Capability)}
     request = JsonRpcRequest(jsonrpc="2.0", id=2, method="tools/list")
-    response = await protocol.handle(request)
+    response = await protocol.handle(request, context)
 
     assert response is not None
     assert response.result is not None
@@ -31,16 +51,45 @@ async def test_tools_list_handler() -> None:
     assert "preview_send" in names
 
 
+async def test_tools_list_filters_by_capability() -> None:
+    """tools/list only returns tools allowed by session capabilities."""
+    protocol, _registry = create_protocol_and_registry()
+    context = {"capabilities": {Capability.READ_WALLET}}
+    request = JsonRpcRequest(jsonrpc="2.0", id=2, method="tools/list")
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    tools = response.result["tools"]
+    assert len(tools) == 2
+    names = {t["name"] for t in tools}
+    assert "get_wallet_context" in names
+    assert "get_balances" in names
+    assert "preview_send" not in names
+
+
+async def test_tools_list_denies_all_without_context() -> None:
+    """tools/list without context returns empty list (fail-closed)."""
+    protocol, _registry = create_protocol_and_registry()
+    request = JsonRpcRequest(jsonrpc="2.0", id=2, method="tools/list")
+    response = await protocol.handle(request)
+
+    assert response is not None
+    assert response.result is not None
+    assert response.result["tools"] == []
+
+
 async def test_tools_call_handler_success() -> None:
     """tools/call executes a stub tool."""
     protocol, _registry = create_protocol_and_registry()
+    context = {"capabilities": set(Capability)}
     request = JsonRpcRequest(
         jsonrpc="2.0",
         id=3,
         method="tools/call",
         params={"name": "get_wallet_context", "arguments": {}},
     )
-    response = await protocol.handle(request)
+    response = await protocol.handle(request, context)
 
     assert response is not None
     assert response.result is not None
@@ -77,29 +126,63 @@ async def test_tools_call_handler_unknown_tool() -> None:
 
     assert response is not None
     assert response.error is not None
+    assert response.error.code == -32001
+
+
+async def test_tools_call_capability_denied() -> None:
+    """tools/call without required capability returns authorization error."""
+    protocol, _registry = create_protocol_and_registry()
+    context = {"capabilities": {Capability.READ_WALLET}}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=3,
+        method="tools/call",
+        params={"name": "execute_send", "arguments": {"preview_id": "abc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.error is not None
+    assert response.error.code == -32001
+    assert "requires additional capability" in response.error.message
+
+
+async def test_tools_call_capability_denied_without_context() -> None:
+    """tools/call without context denies all mapped tools (fail-closed)."""
+    protocol, _registry = create_protocol_and_registry()
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=3,
+        method="tools/call",
+        params={"name": "get_wallet_context", "arguments": {}},
+    )
+    response = await protocol.handle(request)
+
+    assert response is not None
+    assert response.error is not None
+    assert response.error.code == -32001
 
 
 async def test_tools_call_serializes_non_dict_result() -> None:
     """Non-dict results are serialized as JSON, not str()."""
     protocol, registry = create_protocol_and_registry()
 
-    async def _return_list(_args: dict[str, str]) -> list[int]:
+    async def _return_list(_args: dict[str, Any]) -> list[int]:
         return [1, 2, 3]
 
-    from rustok_mcp.tools import Tool
+    # Re-register get_wallet_context with a list-returning handler
+    tools = registry.list_tools()
+    wallet_tool = next(t for t in tools if t.name == "get_wallet_context")
+    registry.register(wallet_tool, _return_list)
 
-    registry.register(
-        Tool(name="echo_list", description="Echo list", inputSchema={"type": "object"}),
-        _return_list,
-    )
-
+    context = {"capabilities": set(Capability)}
     request = JsonRpcRequest(
         jsonrpc="2.0",
         id=4,
         method="tools/call",
-        params={"name": "echo_list", "arguments": {}},
+        params={"name": "get_wallet_context", "arguments": {}},
     )
-    response = await protocol.handle(request)
+    response = await protocol.handle(request, context)
 
     assert response is not None
     assert response.result is not None

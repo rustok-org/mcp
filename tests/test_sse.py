@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException, Request
 
+from rustok_mcp.capabilities import Session
 from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.protocol import JsonRpcRequest
 from rustok_mcp.sse import _sessions, mcp_message, mcp_sse
@@ -40,7 +41,7 @@ async def test_sse_message_roundtrip() -> None:
     """POST /mcp/message forwards the JSON-RPC response via SSE queue."""
     session_id = "test-session"
     queue: asyncio.Queue[str] = asyncio.Queue()
-    _sessions[session_id] = queue
+    _sessions[session_id] = Session(session_id=session_id, queue=queue)
 
     protocol, _registry = create_protocol_and_registry()
 
@@ -91,3 +92,27 @@ async def test_sse_message_invalid_session_id() -> None:
     with pytest.raises(HTTPException) as exc_info:
         await mcp_message(mock_request, init_request)
     assert exc_info.value.status_code == 404
+
+
+async def test_sse_stores_capabilities_on_initialize() -> None:
+    """Initialize request stores capabilities in the session."""
+    session_id = "cap-session"
+    queue: asyncio.Queue[str] = asyncio.Queue()
+    _sessions[session_id] = Session(session_id=session_id, queue=queue)
+
+    protocol, _registry = create_protocol_and_registry()
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.query_params = {"session_id": session_id}
+    mock_request.app.state.protocol = protocol
+
+    init_request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=1,
+        method="initialize",
+        params={"capabilities": ["read_wallet", "preview_tx"]},
+    )
+    await mcp_message(mock_request, init_request)
+
+    session = _sessions[session_id]
+    assert session.capabilities == {"read_wallet", "preview_tx"}

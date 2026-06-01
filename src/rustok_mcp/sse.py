@@ -8,12 +8,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from rustok_mcp.capabilities import Session, parse_capabilities
 from rustok_mcp.protocol import JsonRpcRequest, McpProtocol
 
 router = APIRouter(prefix="/mcp")
 
-# In-memory session store: session_id -> message queue
-_sessions: dict[str, asyncio.Queue[str]] = {}
+# In-memory session store: session_id -> Session
+_sessions: dict[str, Session] = {}
 
 
 class _MessageResponse(BaseModel):
@@ -30,8 +31,8 @@ async def mcp_sse(request: Request) -> StreamingResponse:
     Responses are streamed back via SSE ``message`` events.
     """
     session_id = str(uuid.uuid4())
-    queue: asyncio.Queue[str] = asyncio.Queue()
-    _sessions[session_id] = queue
+    session = Session(session_id=session_id, queue=asyncio.Queue())
+    _sessions[session_id] = session
 
     async def event_stream() -> AsyncGenerator[str, None]:
         try:
@@ -40,8 +41,9 @@ async def mcp_sse(request: Request) -> StreamingResponse:
             yield f"event: endpoint\ndata: {endpoint}\n\n"
 
             while True:
+                assert session.queue is not None  # noqa: S101
                 try:
-                    message = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    message = await asyncio.wait_for(session.queue.get(), timeout=30.0)
                 except TimeoutError:
                     # SSE comment keeps the connection alive
                     yield ": keepalive\n\n"
@@ -67,10 +69,19 @@ async def mcp_message(request: Request, body: JsonRpcRequest) -> _MessageRespons
     if not session_id or session_id not in _sessions:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    session = _sessions[session_id]
     protocol: McpProtocol = request.app.state.protocol
-    response = await protocol.handle(body)
+
+    # Intercept initialize to store client capabilities (only on first initialize)
+    if body.method == "initialize" and isinstance(body.params, dict) and not session.capabilities:
+        caps = parse_capabilities(body.params.get("capabilities", []))
+        session.capabilities = caps
+
+    context = {"capabilities": session.capabilities}
+    response = await protocol.handle(body, context)
 
     if response is not None:
-        await _sessions[session_id].put(response.model_dump_json())
+        assert session.queue is not None  # noqa: S101
+        await session.queue.put(response.model_dump_json())
 
     return _MessageResponse(status="ok")
