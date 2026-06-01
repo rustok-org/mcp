@@ -123,3 +123,63 @@ async def test_auth_header_not_set_without_api_key() -> None:
     await client.preview_send("0x123", "1.0", 1)
     assert "authorization" not in {k.lower() for k in received_headers}
     await client.close()
+
+
+async def test_connect_error_raises_gateway_unreachable() -> None:
+    """A refused connection maps to McpError(-32603) 'Gateway unreachable'."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(McpError) as exc_info:
+        await client.preview_send("0x123", "1.0", 1)
+    assert exc_info.value.code == -32603
+    assert "unreachable" in str(exc_info.value).lower()
+    await client.close()
+
+
+async def test_timeout_raises_gateway_timeout() -> None:
+    """A request timeout maps to McpError(-32603) 'Gateway timeout'."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(McpError) as exc_info:
+        await client.execute_send("preview-123")
+    assert exc_info.value.code == -32603
+    assert "timeout" in str(exc_info.value).lower()
+    await client.close()
+
+
+async def test_generic_request_error_hits_fallback() -> None:
+    """A non-timeout, non-connect transport error hits the RequestError fallback."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.WriteError("write failed", request=request)
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(McpError) as exc_info:
+        await client.preview_send("0x123", "1.0", 1)
+    assert exc_info.value.code == -32603
+    assert str(exc_info.value) == "Gateway request failed"
+    await client.close()
+
+
+async def test_5xx_body_not_leaked_to_client() -> None:
+    """5xx response body is not forwarded in the error message."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="Traceback: internal secret detail")
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(McpError) as exc_info:
+        await client.sign_message("hello", "eip191")
+    assert exc_info.value.code == -32603
+    assert "secret" not in str(exc_info.value)
+    await client.close()
