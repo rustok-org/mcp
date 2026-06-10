@@ -106,9 +106,19 @@ def _make_get_balances_handler(client: GatewayClient | None) -> Any:
     async def handler(args: dict[str, Any]) -> Any:
         if client is None:
             return {"balances": []}
+        address = args.get("address")
+        chain_id = args.get("chain_id")
+        if address is not None:
+            # Explicit address — query a single chain via GET /wallet/balance.
+            if chain_id is None:
+                raise ValueError("Missing required argument: chain_id (required with address)")
+            result = await client.get_balance(address, chain_id)
+            return {
+                "balances": [{"chain_id": chain_id, "balance": result.get("balance")}],
+            }
+        # Active wallet — balances come with the wallet context.
         context = await client.wallet_context()
         balances = context.get("balances", [])
-        chain_id = args.get("chain_id")
         if chain_id is not None:
             balances = [b for b in balances if b.get("chain_id") == chain_id]
         return {"balances": balances}
@@ -171,13 +181,17 @@ def create_protocol_and_registry(
     registry.register(
         Tool(
             name="get_balances",
-            description="Get token balances for the active wallet.",
+            description="Get token balances for the active wallet, or for an explicit address.",
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "address": {
+                        "type": "string",
+                        "description": "Optional address to query instead of the active wallet (requires chain_id)",
+                    },
                     "chain_id": {
                         "type": "integer",
-                        "description": "Optional chain ID filter",
+                        "description": "Chain ID: optional filter for the active wallet, required with address",
                     },
                 },
             },
