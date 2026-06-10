@@ -1,14 +1,25 @@
+# VCS / CI
 .git
 .github
-target
+
+# Python artifacts
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Not needed in the image (Dockerfile copies pyproject.toml, uv.lock, README.md, src/)
+tests
+docs
+scripts
 Dockerfile
 docker-compose.yml
 .dockerignore
-scripts
- docs
+smithery.yaml
 *.md
 !README.md
-CHANGELOG.md
-LICENSE
-SECURITY.md
-AGENTS.md
+
+# Legacy Rust artifacts
+target

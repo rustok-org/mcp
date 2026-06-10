@@ -104,8 +104,30 @@ class GatewayClient:
                 # 5xx bodies may carry internal details — log, do not forward.
                 logger.warning("gateway %s response: %s", status, exc.response.text)
                 raise McpError(-32603, "Gateway internal error") from exc
-            # 4xx: forward the body by design — validation messages are actionable
-            # for the caller. Caveat: a misconfigured dev Gateway could return a
-            # stack trace/SQL here; that is the Gateway's responsibility, not the MCP's.
-            raise ValueError(f"Gateway request failed: {exc.response.text}") from exc
+            # 4xx: forward only the `message` field of the known Gateway error
+            # shape ({"error": ..., "message": ...}) — validation messages are
+            # actionable for the caller. Anything else (e.g. a stack trace from
+            # a misconfigured dev Gateway) is logged and masked.
+            message = self._known_error_message(exc.response)
+            if message is not None:
+                raise ValueError(f"Gateway request failed: {message}") from exc
+            logger.warning(
+                "gateway %s response with unrecognized body: %s",
+                status,
+                exc.response.text,
+            )
+            raise ValueError("Gateway request failed") from exc
         return response.json()
+
+    @staticmethod
+    def _known_error_message(response: httpx.Response) -> str | None:
+        """Return the `message` field if the body matches the Gateway error shape."""
+        try:
+            body = response.json()
+        except ValueError:
+            return None
+        if isinstance(body, dict):
+            message = body.get("message")
+            if isinstance(message, str):
+                return message
+        return None

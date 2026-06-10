@@ -120,6 +120,37 @@ async def test_preview_send_4xx_raises_valueerror() -> None:
     await client.close()
 
 
+async def test_4xx_known_shape_forwards_message_only() -> None:
+    """4xx with the Gateway error shape forwards the message field."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={"error": "bad_request", "message": "unsupported chain id: 99"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(ValueError, match="unsupported chain id: 99"):
+        await client.preview_send("0x123", "1.0", 99)
+    await client.close()
+
+
+async def test_4xx_unknown_body_is_masked() -> None:
+    """4xx with an unrecognized body (e.g. a stack trace) is masked."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, text="Traceback (most recent call last): secret")
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(ValueError) as exc_info:
+        await client.preview_send("0x123", "1.0", 1)
+    assert "secret" not in str(exc_info.value)
+    assert "Traceback" not in str(exc_info.value)
+    await client.close()
+
+
 async def test_unauthorized_raises_mcperror() -> None:
     """401/403 responses raise McpError with code -32002."""
 

@@ -298,6 +298,51 @@ async def test_get_balances_filters_by_chain_id() -> None:
     assert '"chain_id": 1,' not in text
 
 
+async def test_get_balances_with_address_uses_balance_endpoint() -> None:
+    """get_balances with an explicit address queries /wallet/balance."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.get_balance = AsyncMock(return_value={"balance": "42"})
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=18,
+        method="tools/call",
+        params={
+            "name": "get_balances",
+            "arguments": {"address": "0xabc", "chain_id": 1},
+        },
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    assert "42" in response.result["content"][0]["text"]
+    mock_client.get_balance.assert_awaited_once_with("0xabc", 1)
+    mock_client.wallet_context.assert_not_awaited()
+
+
+async def test_get_balances_address_without_chain_id_is_invalid() -> None:
+    """get_balances with address but no chain_id returns invalid params."""
+    mock_client = AsyncMock(spec=GatewayClient)
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=19,
+        method="tools/call",
+        params={"name": "get_balances", "arguments": {"address": "0xabc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.error is not None
+    assert response.error.code == -32602
+    assert "chain_id" in response.error.message
+
+
 async def test_preview_send_uses_gateway_client() -> None:
     """preview_send tool delegates to GatewayClient when provided."""
     mock_client = AsyncMock(spec=GatewayClient)
