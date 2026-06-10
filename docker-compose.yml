@@ -7,6 +7,7 @@ services:
     ports:
       - "127.0.0.1:3001:3001"
     environment:
+      RUSTOK_MCP_HOST: "0.0.0.0"
       RUSTOK_MCP_PORT: "3001"
       RUSTOK_MCP_GATEWAY_URL: "http://host.docker.internal:3000"
       RUSTOK_MCP_LOG_LEVEL: "INFO"

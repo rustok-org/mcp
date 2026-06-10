@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     """MCP server configuration loaded from environment."""
 
     app_name: str = "rustok-mcp"
+    host: str = "127.0.0.1"
     port: int = 3001
     gateway_url: str = "http://127.0.0.1:3000"
     log_level: str = "INFO"

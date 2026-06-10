@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Distribution repository scaffold: install scripts, Docker, docs
+- `get_wallet_context` and `get_balances` tools wired to Gateway REST
+  (`GET /api/v1/wallet/context`) — stubs removed (PR-3.5)
+- Optional `chain_id` filter argument for `get_balances`
+- `RUSTOK_MCP_HOST` setting (default `127.0.0.1`; set `0.0.0.0` in Docker)
+
+### Changed
+- Dockerfile rewritten for the Python server (uv multi-stage build,
+  non-root runtime, SSE entrypoint); legacy Rust-binary image removed
 
 ## [0.2.2] — 2026-05-27
 

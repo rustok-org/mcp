@@ -90,17 +90,30 @@ async def handle_tools_call(
     }
 
 
-async def _stub_get_wallet_context(_args: dict[str, Any]) -> dict[str, Any]:
-    """TODO: Gateway REST endpoint not yet implemented (PR-3.5)."""
-    return {
-        "address": "0x0000000000000000000000000000000000000000",
-        "balances": [],
-    }
+def _make_get_wallet_context_handler(client: GatewayClient | None) -> Any:
+    async def handler(_args: dict[str, Any]) -> Any:
+        if client is None:
+            return {
+                "address": "0x0000000000000000000000000000000000000000",
+                "balances": [],
+            }
+        return await client.wallet_context()
+
+    return handler
 
 
-async def _stub_get_balances(_args: dict[str, Any]) -> dict[str, Any]:
-    """TODO: Gateway REST endpoint not yet implemented (PR-3.5)."""
-    return {"balances": []}
+def _make_get_balances_handler(client: GatewayClient | None) -> Any:
+    async def handler(args: dict[str, Any]) -> Any:
+        if client is None:
+            return {"balances": []}
+        context = await client.wallet_context()
+        balances = context.get("balances", [])
+        chain_id = args.get("chain_id")
+        if chain_id is not None:
+            balances = [b for b in balances if b.get("chain_id") == chain_id]
+        return {"balances": balances}
+
+    return handler
 
 
 def _make_preview_send_handler(client: GatewayClient | None) -> Any:
@@ -153,15 +166,23 @@ def create_protocol_and_registry(
             description="Get the active wallet address and chain balances.",
             inputSchema={"type": "object", "properties": {}},
         ),
-        _stub_get_wallet_context,
+        _make_get_wallet_context_handler(gateway_client),
     )
     registry.register(
         Tool(
             name="get_balances",
             description="Get token balances for the active wallet.",
-            inputSchema={"type": "object", "properties": {}},
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "chain_id": {
+                        "type": "integer",
+                        "description": "Optional chain ID filter",
+                    },
+                },
+            },
         ),
-        _stub_get_balances,
+        _make_get_balances_handler(gateway_client),
     )
     registry.register(
         Tool(

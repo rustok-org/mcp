@@ -34,6 +34,15 @@ class GatewayClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    async def wallet_context(self) -> Any:
+        return await self._get("/api/v1/wallet/context")
+
+    async def get_balance(self, address: str, chain_id: int) -> Any:
+        return await self._get(
+            "/api/v1/wallet/balance",
+            params={"address": address, "chain_id": chain_id},
+        )
+
     async def preview_send(self, to: str, amount: str, chain_id: int) -> Any:
         return await self._post(
             "/api/v1/wallet/preview_send",
@@ -67,6 +76,19 @@ class GatewayClient:
         except httpx.RequestError as exc:
             # Any other transport-level error (read/write/protocol) — do not
             # leak the raw httpx exception to the client.
+            logger.warning("gateway request error for %s: %s", path, exc)
+            raise McpError(-32603, "Gateway request failed") from exc
+        return self._handle_response(response)
+
+    async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """Send a GET request, mapping transport failures to McpError."""
+        try:
+            response = await self._client.get(path, params=params)
+        except httpx.TimeoutException as exc:
+            raise McpError(-32603, "Gateway timeout") from exc
+        except httpx.ConnectError as exc:
+            raise McpError(-32603, "Gateway unreachable") from exc
+        except httpx.RequestError as exc:
             logger.warning("gateway request error for %s: %s", path, exc)
             raise McpError(-32603, "Gateway request failed") from exc
         return self._handle_response(response)

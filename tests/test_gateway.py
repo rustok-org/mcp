@@ -53,6 +53,60 @@ async def test_sign_message_success() -> None:
     await client.close()
 
 
+async def test_wallet_context_success() -> None:
+    """wallet_context returns Gateway response on 200."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/v1/wallet/context"
+        return httpx.Response(
+            200,
+            json={
+                "address": "0xabc",
+                "balances": [{"chain_id": 1, "symbol": "ETH", "balance": "100"}],
+                "allowed_chains": [1],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    result = await client.wallet_context()
+    assert result["address"] == "0xabc"
+    assert result["balances"][0]["chain_id"] == 1
+    await client.close()
+
+
+async def test_get_balance_success() -> None:
+    """get_balance passes query params and returns balance on 200."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/v1/wallet/balance"
+        assert request.url.params["address"] == "0xabc"
+        assert request.url.params["chain_id"] == "1"
+        return httpx.Response(200, json={"balance": "42"})
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    result = await client.get_balance("0xabc", 1)
+    assert result == {"balance": "42"}
+    await client.close()
+
+
+async def test_wallet_context_connect_error_raises_mcperror() -> None:
+    """GET transport failures map to McpError like POST ones."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(McpError) as exc_info:
+        await client.wallet_context()
+    assert exc_info.value.code == -32603
+    await client.close()
+
+
 async def test_preview_send_4xx_raises_valueerror() -> None:
     """4xx responses raise ValueError with Gateway message."""
 
