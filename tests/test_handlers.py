@@ -192,6 +192,112 @@ async def test_tools_call_serializes_non_dict_result() -> None:
     assert text == "[1, 2, 3]"
 
 
+async def test_get_wallet_context_uses_gateway_client() -> None:
+    """get_wallet_context tool delegates to GatewayClient when provided."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.wallet_context = AsyncMock(
+        return_value={
+            "address": "0xreal",
+            "balances": [{"chain_id": 1, "symbol": "ETH", "balance": "100"}],
+            "allowed_chains": [1],
+        },
+    )
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=15,
+        method="tools/call",
+        params={"name": "get_wallet_context", "arguments": {}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    assert "0xreal" in response.result["content"][0]["text"]
+    mock_client.wallet_context.assert_awaited_once_with()
+
+
+async def test_get_wallet_context_falls_back_to_stub() -> None:
+    """get_wallet_context returns zero-address stub without GatewayClient."""
+    protocol, _registry = create_protocol_and_registry()
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=15,
+        method="tools/call",
+        params={"name": "get_wallet_context", "arguments": {}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    assert "0x0000000000000000000000000000000000000000" in response.result["content"][0]["text"]
+
+
+async def test_get_balances_uses_gateway_client() -> None:
+    """get_balances tool returns balances from wallet context."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.wallet_context = AsyncMock(
+        return_value={
+            "address": "0xreal",
+            "balances": [
+                {"chain_id": 1, "symbol": "ETH", "balance": "100"},
+                {"chain_id": 8453, "symbol": "ETH", "balance": "7"},
+            ],
+            "allowed_chains": [1, 8453],
+        },
+    )
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=16,
+        method="tools/call",
+        params={"name": "get_balances", "arguments": {}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    text = response.result["content"][0]["text"]
+    assert "8453" in text
+    mock_client.wallet_context.assert_awaited_once_with()
+
+
+async def test_get_balances_filters_by_chain_id() -> None:
+    """get_balances applies the optional chain_id filter."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.wallet_context = AsyncMock(
+        return_value={
+            "address": "0xreal",
+            "balances": [
+                {"chain_id": 1, "symbol": "ETH", "balance": "100"},
+                {"chain_id": 8453, "symbol": "ETH", "balance": "7"},
+            ],
+            "allowed_chains": [1, 8453],
+        },
+    )
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=17,
+        method="tools/call",
+        params={"name": "get_balances", "arguments": {"chain_id": 8453}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    text = response.result["content"][0]["text"]
+    assert "8453" in text
+    assert '"chain_id": 1,' not in text
+
+
 async def test_preview_send_uses_gateway_client() -> None:
     """preview_send tool delegates to GatewayClient when provided."""
     mock_client = AsyncMock(spec=GatewayClient)

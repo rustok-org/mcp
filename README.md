@@ -20,13 +20,16 @@ uv run rustok-mcp-stdio
 
 ## Docker
 
-> ⚠️ Docker image and install script are not yet updated for the Python rewrite.
-> They will be adapted in a follow-up PR. For now, use `uv run rustok-mcp`.
-
 ```bash
 docker build -t rustok-mcp .
-docker run -p 127.0.0.1:3001:3001 rustok-mcp
+docker run -p 127.0.0.1:3001:3001 -e RUSTOK_MCP_HOST=0.0.0.0 rustok-mcp
 ```
+
+To run the full stack (MCP → Gateway → Core + Redis), use the compose file
+in [`rustok-org/meta`](https://github.com/rustok-org/meta).
+
+> ⚠️ `scripts/install.sh` still targets the legacy Rust binary release;
+> it will be adapted in a follow-up PR.
 
 ## What is Rustok?
 
