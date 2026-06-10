@@ -46,14 +46,26 @@ jobs:
   docker-smoke:
     name: Docker Smoke Test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - name: Create dummy binary for build test
-        run: |
-          echo '#!/bin/sh' > rustok-agent-mcp
-          echo 'echo "rustok-agent-mcp v0.0.0-test"' >> rustok-agent-mcp
-          chmod +x rustok-agent-mcp
       - name: Build Docker image
         run: docker build -t rustok-mcp:test .
-      - name: Verify image runs
-        run: docker run --rm rustok-mcp:test --help || true
+      - name: Verify server starts and /health responds
+        run: |
+          docker run -d --name mcp-smoke \
+            -e RUSTOK_MCP_HOST=0.0.0.0 \
+            -p 127.0.0.1:3001:3001 \
+            rustok-mcp:test
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3001/health; then
+              echo "health OK"
+              docker rm -f mcp-smoke
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "health check never came up" >&2
+          docker logs mcp-smoke >&2
+          docker rm -f mcp-smoke
+          exit 1
