@@ -1,8 +1,22 @@
 """Application settings via pydantic-settings."""
 
 from functools import lru_cache
+from typing import Annotated
 
+from pydantic import BeforeValidator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _empty_to_none(value: str | None) -> str | None:
+    """Treat a set-but-empty env var as unset.
+
+    ``RUSTOK_MCP_INBOUND_API_KEY=`` must never read as enabled auth, otherwise
+    an empty value would be mistaken for a configured key (and could match an
+    empty client token). Blank/whitespace-only collapses to ``None``.
+    """
+    if value is None:
+        return None
+    return value.strip() or None
 
 
 class Settings(BaseSettings):
@@ -13,8 +27,11 @@ class Settings(BaseSettings):
     port: int = 3001
     gateway_url: str = "http://127.0.0.1:3000"
     log_level: str = "INFO"
-    # Read from RUSTOK_MCP_API_KEY, consistent with every other setting's prefix.
+    # Outbound key for MCP -> Gateway calls (RUSTOK_MCP_API_KEY).
     api_key: str | None = None
+    # Inbound bearer secret clients must present to MCP (RUSTOK_MCP_INBOUND_API_KEY).
+    # Distinct trust boundary from api_key; empty string normalizes to None.
+    inbound_api_key: Annotated[str | None, BeforeValidator(_empty_to_none)] = None
 
     model_config = SettingsConfigDict(env_prefix="RUSTOK_MCP_")
 

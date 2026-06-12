@@ -1,5 +1,6 @@
 """FastAPI application entrypoint."""
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -12,11 +13,18 @@ from rustok_mcp.health import router as health_router
 from rustok_mcp.sse import _sessions
 from rustok_mcp.sse import router as sse_router
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Manage application lifespan events."""
     settings = get_settings()
+    if settings.inbound_api_key is None:
+        logger.warning(
+            "inbound auth disabled — set RUSTOK_MCP_INBOUND_API_KEY to require a "
+            "bearer token on the SSE transport (never expose MCP publicly without it)"
+        )
     gateway_client = GatewayClient(
         base_url=settings.gateway_url,
         api_key=settings.api_key,
