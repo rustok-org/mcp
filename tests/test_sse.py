@@ -51,7 +51,23 @@ async def test_message_accepts_valid_token_when_key_set(
         json=_INIT_BODY,
         headers={"Authorization": "Bearer secret"},
     )
+    # 404 with the handler's own detail proves auth passed and the request
+    # reached mcp_message's session lookup (not a routing 404 / 401).
     assert response.status_code == 404
+    assert response.json()["detail"] == "Session not found"
+
+
+async def test_message_rejects_non_bearer_scheme_when_key_set(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-Bearer scheme (e.g. Basic) is rejected with 401, not let through."""
+    _set_inbound_key(monkeypatch, "secret")
+    response = await client.post(
+        "/mcp/message",
+        json=_INIT_BODY,
+        headers={"Authorization": "Basic c2VjcmV0"},
+    )
+    assert response.status_code == 401
 
 
 async def test_message_open_when_key_unset(
