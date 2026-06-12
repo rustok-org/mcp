@@ -31,6 +31,27 @@ in [`rustok-org/meta`](https://github.com/rustok-org/meta).
 > ⚠️ `scripts/install.sh` still targets the legacy Rust binary release;
 > it will be adapted in a follow-up PR.
 
+## Authentication
+
+The network-facing SSE transport is gated by a shared bearer token.
+
+- **Inbound** (`RUSTOK_MCP_INBOUND_API_KEY`) — clients must send
+  `Authorization: Bearer <token>` to reach `/mcp/sse` and `/mcp/message`.
+  Distinct from the **outbound** `RUSTOK_MCP_API_KEY` (MCP → Gateway).
+- **Dev:** leave it empty — the loopback flow stays open and the server logs a
+  warning at startup.
+- **Prod:** required. The token must travel in the request header, **never in a
+  query string** (query strings leak into access logs). Generate one with
+  `openssl rand -hex 32`.
+- The browser `EventSource` API cannot set headers and is **not** a supported
+  client; use an MCP client that sends request headers.
+- `/health` is always public (used by the container healthcheck).
+- The local **stdio** transport is process-trusted and not gated.
+
+> ⚠️ A publicly exposed MCP has **no brute-force / rate-limit protection** until
+> PR-5.2 (observability + rate limiting). Do not expose it to the internet
+> before then, even with a high-entropy token.
+
 ## What is Rustok?
 
 Rustok is a **self-custody AI-native crypto wallet**. The MCP Server runs as a bridge between LLM agents and the Rustok Gateway — private keys never leave the Core service.

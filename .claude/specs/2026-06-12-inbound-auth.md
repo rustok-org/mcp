@@ -94,8 +94,10 @@ a test.
      (env `RUSTOK_MCP_INBOUND_API_KEY`) + validator normalizing `""` → `None` (D5).
   2. New `src/rustok_mcp/auth.py`: `require_auth` FastAPI dependency —
      `HTTPBearer(auto_error=False)`, `secrets.compare_digest` against the
-     request-time `inbound_api_key`, raises `401` (generic detail) on
-     mismatch/absent; passes when no key configured (D2/D3).
+     request-time `inbound_api_key`, raises `401` (generic detail — never echo
+     the token/header) on mismatch/absent; passes when no key configured
+     (D2/D3). Log a `warning` on each failed auth (no token/header value in the
+     message) so brute-force is observable before PR-5.2 (review F2).
   3. `sse.py`: attach `require_auth` to the `/mcp` router (covers `/sse` and
      `/message`).
   4. `main.py`: log a startup warning when `inbound_api_key` is unset.
@@ -105,13 +107,21 @@ a test.
      `RUSTOK_MCP_INBOUND_API_KEY` + existing `RUSTOK_MCP_*` settings,
      placeholders only.
   7. `README.md`: short "Authentication" section — inbound vs outbound key,
-     dev (no key) vs prod (required), stdio exemption, header-not-query rule (D4).
-  8. Tests:
+     dev (no key) vs prod (required), stdio exemption, header-not-query rule
+     (D4), browser `EventSource` explicitly unsupported (adversarial Q1), token
+     generation example `openssl rand -hex 32` (review F3), and a deploy
+     warning: a public MCP has no brute-force/rate-limit protection until PR-5.2
+     — do not expose publicly before then (review F1).
+  8. `.env.example`: comment the token-generation command next to
+     `RUSTOK_MCP_INBOUND_API_KEY` (review F3).
+  9. Tests:
      - `test_config.py`: `inbound_api_key` read from prefixed env / defaults
        None / **empty-string `""` → None** (D5).
      - `test_auth.py` (new): dependency unit tests — valid token, wrong token,
        missing header, malformed/`Basic` header, empty Bearer token,
-       no-key-configured pass-through; `compare_digest` path exercised.
+       no-key-configured pass-through; `compare_digest` path exercised; a
+       failed attempt emits a warning log AND the 401 detail does not contain
+       the token (review F2 + adversarial Q3).
      - `test_sse.py`: integration via `client` — `/mcp/sse` and `/mcp/message`
        return `401` without token / success with token when key set; still
        open when key unset.
@@ -157,6 +167,15 @@ a test.
 - PR merged to `main` (squash), branch deleted.
 - Gates + `/security-review` evidence in the Gate 2 report.
 - Unblocks PR-5.1 resume conditions 1 (auth PR merged).
+
+## Carry-forward to PR-5.1 / PR-5.2 (from Gate 1 review)
+
+- **PR-5.1 (D2 condition):** the `prod` compose profile must not start without
+  `RUSTOK_MCP_INBOUND_API_KEY` (Caddy injects it as a required env), with an
+  acceptance test asserting `401` for an unauthenticated request through Caddy.
+- **PR-5.2 (review F1):** add brute-force / rate-limit protection for the
+  inbound API key as an acceptance criterion; until then the public MCP has no
+  such protection (documented in README).
 
 ## Test plan
 

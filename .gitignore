@@ -46,5 +46,14 @@ target/
 **/*.rs.bk
 *.pdb
 
+# Secrets — never commit real env files; the example is tracked.
+.env
+.env.*
+!.env.example
+
+# Workflow artifacts
+.claude/reports/
+.review.diff
+
 # Misc
 .DS_Store

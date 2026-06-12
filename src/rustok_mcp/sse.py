@@ -4,14 +4,17 @@ import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from rustok_mcp.auth import require_auth
 from rustok_mcp.capabilities import Session, parse_capabilities
 from rustok_mcp.protocol import JsonRpcRequest, McpProtocol
 
-router = APIRouter(prefix="/mcp")
+# require_auth gates every route on this router (/sse and /message). /health
+# lives on a separate prefix-less router and stays public.
+router = APIRouter(prefix="/mcp", dependencies=[Depends(require_auth)])
 
 # In-memory session store: session_id -> Session
 _sessions: dict[str, Session] = {}

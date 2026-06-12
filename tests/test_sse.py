@@ -6,17 +6,70 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException, Request
+from httpx import AsyncClient
 
 from rustok_mcp.capabilities import Session
+from rustok_mcp.config import clear_settings_cache
 from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.protocol import JsonRpcRequest
 from rustok_mcp.sse import _sessions, mcp_message, mcp_sse
+
+_INIT_BODY = {"jsonrpc": "2.0", "method": "initialize", "id": 1}
 
 
 @pytest.fixture(autouse=True)
 def _clear_sessions() -> None:
     """Remove test sessions between tests."""
     _sessions.clear()
+
+
+def _set_inbound_key(monkeypatch: pytest.MonkeyPatch, value: str | None) -> None:
+    """Configure (or clear) the inbound key and refresh the settings cache."""
+    if value is None:
+        monkeypatch.delenv("RUSTOK_MCP_INBOUND_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("RUSTOK_MCP_INBOUND_API_KEY", value)
+    clear_settings_cache()
+
+
+async def test_message_rejected_without_token_when_key_set(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /mcp/message without a bearer token returns 401 when a key is set."""
+    _set_inbound_key(monkeypatch, "secret")
+    response = await client.post("/mcp/message", json=_INIT_BODY)
+    assert response.status_code == 401
+
+
+async def test_message_accepts_valid_token_when_key_set(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A valid token passes auth — request reaches session lookup (404, not 401)."""
+    _set_inbound_key(monkeypatch, "secret")
+    response = await client.post(
+        "/mcp/message",
+        json=_INIT_BODY,
+        headers={"Authorization": "Bearer secret"},
+    )
+    assert response.status_code == 404
+
+
+async def test_message_open_when_key_unset(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no key, the request passes auth and reaches session lookup (404)."""
+    _set_inbound_key(monkeypatch, None)
+    response = await client.post("/mcp/message", json=_INIT_BODY)
+    assert response.status_code == 404
+
+
+async def test_sse_get_rejected_without_token_when_key_set(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /mcp/sse is gated before streaming starts — 401 without a token."""
+    _set_inbound_key(monkeypatch, "secret")
+    response = await client.get("/mcp/sse")
+    assert response.status_code == 401
 
 
 async def test_sse_yields_endpoint_event() -> None:
