@@ -9,6 +9,7 @@ from rustok_mcp.config import get_settings
 from rustok_mcp.gateway import GatewayClient
 from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.protocol import JsonRpcError, JsonRpcRequest, JsonRpcResponse
+from rustok_mcp.telemetry import init_telemetry
 
 
 async def _stdio_loop() -> None:
@@ -52,4 +53,8 @@ async def _stdio_loop() -> None:
 
 def main() -> None:
     """Run the stdio MCP transport."""
+    settings = get_settings()
+    # JSON logs to stderr (stdout carries JSON-RPC) + httpx tracing when an OTLP
+    # endpoint is set. No FastAPI server span in stdio mode.
+    init_telemetry(settings.app_name, settings.log_level)
     asyncio.run(_stdio_loop())
