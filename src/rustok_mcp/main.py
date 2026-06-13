@@ -12,6 +12,7 @@ from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.health import router as health_router
 from rustok_mcp.sse import _sessions
 from rustok_mcp.sse import router as sse_router
+from rustok_mcp.telemetry import init_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +53,19 @@ app.include_router(sse_router)
 def run() -> None:
     """Run the MCP server with uvicorn."""
     import uvicorn
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
     settings = get_settings()
+    # JSON logging always; OTLP tracing only when RUSTOK_OTLP_ENDPOINT is set.
+    if init_telemetry(settings.app_name, settings.log_level):
+        # /health is excluded — the Docker healthcheck would otherwise emit a
+        # span every 30s.
+        FastAPIInstrumentor.instrument_app(app, excluded_urls="health")
+    # log_config=None: defer to the JSON root logging configured in init_telemetry
+    # (otherwise uvicorn installs its own text formatter).
     uvicorn.run(
         app,
         host=settings.host,
         port=settings.port,
-        log_level=settings.log_level.lower(),
+        log_config=None,
     )
