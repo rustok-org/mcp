@@ -21,9 +21,12 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
-from opentelemetry import trace
+from opentelemetry import metrics, trace
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -75,22 +78,34 @@ def _resolve_endpoint() -> str | None:
 def _init_tracing(service_name: str, endpoint: str) -> None:
     global _httpx_instrumented
 
-    # The OTLP/HTTP exporter uses the constructor ``endpoint`` verbatim (it does
-    # not append the signal path), so build ``<base>/v1/traces`` explicitly.
-    traces_url = f"{endpoint.rstrip('/')}/v1/traces"
+    resource = Resource.create({"service.name": service_name})
 
-    provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
+    # The OTLP/HTTP exporters use the constructor ``endpoint`` verbatim (they do
+    # not append the signal path), so build ``<base>/v1/{traces,metrics}``.
+    base = endpoint.rstrip("/")
+    traces_url = f"{base}/v1/traces"
+    metrics_url = f"{base}/v1/metrics"
+
+    provider = TracerProvider(resource=resource)
     # BatchSpanProcessor exports on a background thread — never on the request path.
     provider.add_span_processor(
         BatchSpanProcessor(OTLPSpanExporter(endpoint=traces_url, timeout=_OTLP_TIMEOUT_SECONDS))
     )
     trace.set_tracer_provider(provider)
 
+    # Metrics: a PeriodicExportingMetricReader (background thread) pushes OTLP
+    # metrics; the FastAPI/httpx instrumentation then auto-emits HTTP server/client
+    # duration metrics against this global meter provider.
+    metric_reader = PeriodicExportingMetricReader(
+        OTLPMetricExporter(endpoint=metrics_url, timeout=_OTLP_TIMEOUT_SECONDS)
+    )
+    metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[metric_reader]))
+
     if not _httpx_instrumented:
         HTTPXClientInstrumentor().instrument()
         _httpx_instrumented = True
 
-    logger.info("telemetry: JSON logs + OTLP traces -> %s", _redact(traces_url))
+    logger.info("telemetry: JSON logs + OTLP traces & metrics -> %s", _redact(base))
 
 
 def _redact(url: str) -> str:

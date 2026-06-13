@@ -18,15 +18,29 @@ from rustok_mcp.telemetry import (
 
 
 @pytest.fixture(autouse=True)
-def _restore_root_logging():
-    """Telemetry init replaces the root logging handlers; restore them so the
-    JSON config never leaks into other test modules (e.g. caplog)."""
+def _isolate_telemetry_globals():
+    """Telemetry init mutates process-global state — the root logging handlers and
+    the OpenTelemetry tracer/meter providers (which install **once** per process).
+    Snapshot the logging config and reset the install-once providers after each
+    test so nothing leaks into other tests/modules."""
     root = logging.getLogger()
     saved_handlers = root.handlers[:]
     saved_level = root.level
     yield
     root.handlers = saved_handlers
     root.setLevel(saved_level)
+    _reset_otel_providers()
+
+
+def _reset_otel_providers() -> None:
+    """Reset the install-once global tracer/meter providers (test isolation)."""
+    from opentelemetry import metrics, trace
+    from opentelemetry.util._once import Once
+
+    trace._TRACER_PROVIDER_SET_ONCE = Once()
+    trace._TRACER_PROVIDER = None
+    metrics._internal._METER_PROVIDER_SET_ONCE = Once()
+    metrics._internal._METER_PROVIDER = None
 
 
 # httpx -> Gateway traceparent injection is OpenTelemetry's own instrumentation
@@ -62,14 +76,19 @@ def test_init_telemetry_logs_only_returns_false(monkeypatch: pytest.MonkeyPatch)
     assert init_telemetry("rustok-mcp", "INFO") is False
 
 
-def test_init_telemetry_enables_tracing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With an endpoint set, tracing is enabled and httpx is instrumented."""
+def test_init_telemetry_enables_tracing_and_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With an endpoint set, tracing + metrics are enabled and httpx instrumented."""
+    from opentelemetry import metrics
+    from opentelemetry.sdk.metrics import MeterProvider
+
     monkeypatch.setenv(_ENV, "http://alloy:4318")
     monkeypatch.setattr(telemetry, "_httpx_instrumented", False)
     try:
         assert init_telemetry("rustok-mcp", "INFO") is True
         assert telemetry._httpx_instrumented is True
         assert HTTPXClientInstrumentor().is_instrumented_by_opentelemetry is True
+        # A real SDK meter provider is installed (not the default no-op proxy).
+        assert isinstance(metrics.get_meter_provider(), MeterProvider)
     finally:
         HTTPXClientInstrumentor().uninstrument()
         telemetry._httpx_instrumented = False
