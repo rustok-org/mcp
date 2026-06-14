@@ -5,6 +5,13 @@
 
 > MCP Server for Rustok — connects Claude Desktop, Cursor, and cloud agents to the Rustok wallet via Gateway.
 
+## Install (self-custody wallet)
+
+The wallet ships as one self-contained Docker image (Core + Gateway + MCP over
+**stdio**); keys live only in a local Docker volume and never leave your machine.
+Follow the [Installation Guide](docs/INSTALL.md): run `create-wallet` once, then
+add it as a stdio MCP server in Claude Desktop / Cursor.
+
 ## Quick Start (Development)
 
 ```bash
@@ -28,9 +35,6 @@ docker run -p 127.0.0.1:3001:3001 -e RUSTOK_MCP_HOST=0.0.0.0 rustok-mcp
 To run the full stack (MCP → Gateway → Core + Redis), use the compose file
 in [`rustok-org/meta`](https://github.com/rustok-org/meta).
 
-> ⚠️ `scripts/install.sh` still targets the legacy Rust binary release;
-> it will be adapted in a follow-up PR.
-
 ## Authentication
 
 The network-facing SSE transport is gated by a shared bearer token.
@@ -48,18 +52,31 @@ The network-facing SSE transport is gated by a shared bearer token.
 - `/health` is always public (used by the container healthcheck).
 - The local **stdio** transport is process-trusted and not gated.
 
-> ⚠️ A publicly exposed MCP has **no brute-force / rate-limit protection** until
-> PR-5.2 (observability + rate limiting). Do not expose it to the internet
-> before then, even with a high-entropy token.
+> ⚠️ The MCP has **no built-in brute-force / rate-limit protection**. Terminate it
+> behind the edge proxy (Caddy) with host-level rate limiting (see the
+> [`rustok-org/meta`](https://github.com/rustok-org/meta) deploy docs); do not
+> expose it to the internet directly.
 
 ## What is Rustok?
 
-Rustok is a **self-custody AI-native crypto wallet**. The MCP Server runs as a bridge between LLM agents and the Rustok Gateway — private keys never leave the Core service.
+Rustok is a **self-custody AI-native crypto wallet**. The MCP Server is a thin
+bridge between LLM agents and the Rustok Gateway — private keys never leave the
+Core service (they stay in the local keystore volume).
 
-- **All supported chains enabled by default**: Ethereum, Arbitrum, Base, Optimism, zkSync, Sepolia, Arbitrum Sepolia
-- **Policy enforcement**: Spending limits, daily budgets, blocklists — enforced in Core, not prompts
-- **Audit logging**: Every action is append-only logged to SQLite in Core
-- **Preview before execute**: Always simulate before signing
+- **Self-custody**: keys are encrypted at rest (Argon2id + AES-256-GCM) and only
+  decrypted inside Core on your machine.
+- **Capability-gated tools** (`read_wallet` / `preview_tx` / `execute_tx`): the
+  stdio transport is process-trusted (all by default; restrict with
+  `RUSTOK_MCP_CAPABILITIES`); the network-facing SSE transport is bearer-gated.
+- **No spending policy by design**: no hard-coded limits, budgets, or blocklists —
+  you consciously accept the risk of funds on the agent wallet. `txguard` surfaces
+  a risk level on preview but does not block. Opt-in limits may come later.
+- **Chains are opt-in**: set `RUSTOK_ALLOWED_CHAINS` (default `1,8453` — Ethereum +
+  Base); enable another chain by providing its RPC (`RUSTOK_RPC_URLS_<id>` or an
+  Alchemy key).
+- **Preview before execute**: `preview_send` returns gas + a txguard risk level;
+  `execute_send` broadcasts a previewed transaction.
+- **Audit logging**: every action is append-only logged to SQLite in Core.
 
 ## Documentation
 
