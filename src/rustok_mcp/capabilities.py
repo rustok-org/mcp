@@ -23,6 +23,7 @@ class Capability(StrEnum):
 CAPABILITY_MAP: dict[str, Capability] = {
     "get_wallet_context": Capability.READ_WALLET,
     "get_balances": Capability.READ_WALLET,
+    "get_positions": Capability.READ_WALLET,
     "preview_send": Capability.PREVIEW_TX,
     "execute_send": Capability.EXECUTE_TX,
     "sign_message": Capability.EXECUTE_TX,

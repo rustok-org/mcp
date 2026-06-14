@@ -43,6 +43,11 @@ class GatewayClient:
             params={"address": address, "chain_id": chain_id},
         )
 
+    async def get_positions(self, address: str | None = None) -> Any:
+        # Empty/None address → the active wallet's own positions (Core resolves it).
+        params = {"address": address} if address else None
+        return await self._get("/api/v1/wallet/positions", params=params)
+
     async def preview_send(self, to: str, amount: str, chain_id: int) -> Any:
         return await self._post(
             "/api/v1/wallet/preview_send",
