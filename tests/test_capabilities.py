@@ -1,11 +1,16 @@
 """Capability model tests."""
 
+import logging
+
+import pytest
+
 from rustok_mcp.capabilities import (
     CAPABILITY_MAP,
     Capability,
     Session,
     has_capability,
     parse_capabilities,
+    resolve_stdio_capabilities,
 )
 
 
@@ -41,6 +46,29 @@ def test_parse_capabilities_skips_unknown() -> None:
 def test_parse_capabilities_empty() -> None:
     """Empty input yields empty set."""
     assert parse_capabilities([]) == set()
+
+
+def test_resolve_stdio_capabilities_unset_is_all() -> None:
+    """Unset/blank grants all capabilities — stdio is process-trusted, not gated."""
+    assert resolve_stdio_capabilities(None) == set(Capability)
+    assert resolve_stdio_capabilities("") == set(Capability)
+    assert resolve_stdio_capabilities("   ") == set(Capability)
+
+
+def test_resolve_stdio_capabilities_subset() -> None:
+    """A comma-separated value restricts stdio to that subset (whitespace-tolerant)."""
+    caps = resolve_stdio_capabilities("read_wallet, preview_tx")
+    assert caps == {Capability.READ_WALLET, Capability.PREVIEW_TX}
+
+
+def test_resolve_stdio_capabilities_set_but_invalid_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A set-but-unparseable value gates everything but logs a warning (no silent gate)."""
+    with caplog.at_level(logging.WARNING):
+        caps = resolve_stdio_capabilities("admin")
+    assert caps == set()
+    assert "RUSTOK_MCP_CAPABILITIES" in caplog.text
 
 
 def test_has_capability_with_required() -> None:

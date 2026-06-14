@@ -37,6 +37,52 @@ async def test_initialize_stores_capabilities() -> None:
     assert context["capabilities"] == {Capability.READ_WALLET, Capability.PREVIEW_TX}
 
 
+async def test_initialize_keeps_seeded_default_for_object() -> None:
+    """A standard MCP capabilities *object* must not wipe the seeded default."""
+    protocol, _registry = create_protocol_and_registry()
+    context: dict[str, Any] = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=1,
+        method="initialize",
+        params={"capabilities": {"roots": {}, "sampling": {}}},
+    )
+    await protocol.handle(request, context)
+    assert context["capabilities"] == set(Capability)
+
+
+async def test_initialize_keeps_seeded_default_when_absent() -> None:
+    """No capabilities field keeps the seeded default (stdio stays usable)."""
+    protocol, _registry = create_protocol_and_registry()
+    context: dict[str, Any] = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize")
+    await protocol.handle(request, context)
+    assert context["capabilities"] == set(Capability)
+
+
+async def test_initialize_list_overrides_seeded_default() -> None:
+    """An explicit rustok list narrows the seeded default."""
+    protocol, _registry = create_protocol_and_registry()
+    context: dict[str, Any] = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=1,
+        method="initialize",
+        params={"capabilities": ["read_wallet"]},
+    )
+    await protocol.handle(request, context)
+    assert context["capabilities"] == {Capability.READ_WALLET}
+
+
+async def test_initialize_empty_context_defaults_to_empty_set() -> None:
+    """With no seed and no caps, context defaults to an empty (gated) set."""
+    protocol, _registry = create_protocol_and_registry()
+    context: dict[str, Any] = {}
+    request = JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize")
+    await protocol.handle(request, context)
+    assert context["capabilities"] == set()
+
+
 async def test_tools_list_handler() -> None:
     """tools/list returns registered stub tools."""
     protocol, _registry = create_protocol_and_registry()

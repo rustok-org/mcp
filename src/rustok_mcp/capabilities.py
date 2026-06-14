@@ -51,6 +51,34 @@ def parse_capabilities(values: Iterable[str]) -> set[Capability]:
     return result
 
 
+def resolve_stdio_capabilities(raw: str | None) -> set[Capability]:
+    """Resolve the capabilities granted to the process-trusted stdio transport.
+
+    Whoever launches the stdio container owns the local machine, so stdio is not
+    a security boundary — it defaults to *all* capabilities (matching the
+    "stdio is not gated" contract). An explicit comma-separated value restricts
+    it (e.g. ``read_wallet`` for a read-only agent). A set-but-unparseable value
+    resolves to the empty set and logs a warning, so a typo never silently gates
+    every tool.
+
+    Args:
+        raw: The raw ``RUSTOK_MCP_CAPABILITIES`` value, or ``None`` when unset.
+
+    Returns:
+        The granted capability set.
+    """
+    if raw is None or not raw.strip():
+        return set(Capability)
+    caps = parse_capabilities(part.strip() for part in raw.split(","))
+    if not caps:
+        logger.warning(
+            "RUSTOK_MCP_CAPABILITIES set but no valid capabilities parsed (%r) — "
+            "all tools are gated",
+            raw,
+        )
+    return caps
+
+
 def has_capability(tool_name: str, capabilities: set[Capability]) -> bool:
     """Check whether the given capabilities allow access to a tool.
 

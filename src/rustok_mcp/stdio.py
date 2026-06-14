@@ -5,6 +5,7 @@ import json
 import sys
 from typing import Any
 
+from rustok_mcp.capabilities import resolve_stdio_capabilities
 from rustok_mcp.config import get_settings
 from rustok_mcp.gateway import GatewayClient
 from rustok_mcp.handlers import create_protocol_and_registry
@@ -21,7 +22,12 @@ async def _stdio_loop() -> None:
     )
     try:
         protocol, _registry = create_protocol_and_registry(gateway_client)
-        context: dict[str, Any] = {}
+        # stdio is process-trusted: seed the granted capabilities so a standard
+        # MCP client (which cannot send the rustok capability list) still sees the
+        # tools. `initialize` only narrows this if the client sends an explicit list.
+        context: dict[str, Any] = {
+            "capabilities": resolve_stdio_capabilities(settings.capabilities),
+        }
 
         while True:
             line = await asyncio.to_thread(sys.stdin.readline)
