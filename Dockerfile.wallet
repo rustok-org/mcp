@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1
+# All-in-one self-custody wallet image: Core (gRPC) + Gateway (HTTP) + MCP, with
+# the MCP spoken over stdio. One `docker run -i` is the whole wallet — keys live
+# in the user's mounted volume. Source stays private: the Core/Gateway binaries
+# come from the published binary image, not from source.
+#
+# Build (local, against a locally-built core image):
+#   docker build -f Dockerfile.wallet --build-arg CORE_IMAGE=rustok-core:v0.1.0 \
+#     -t rustok-wallet:v0.1.0 .
+# Onboard:  docker run -it --rm -v rustok-wallet:/data -e RUSTOK_KEYRING_PASSWORD=… \
+#     rustok-wallet:v0.1.0 create-wallet
+# Run (MCP stdio): docker run -i --rm --init -v rustok-wallet:/data \
+#     -e RUSTOK_KEYRING_PASSWORD=… -e RUSTOK_RPC_URLS_1=… rustok-wallet:v0.1.0
+
+ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.1.0
+
+# --- Core/Gateway binaries (private source; public binary image) ---
+FROM ${CORE_IMAGE} AS core
+
+# --- MCP Python environment (uv, locked) ---
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY README.md ./
+COPY src/ ./src/
+RUN uv sync --frozen --no-dev
+
+# --- Runtime ---
+FROM python:3.12-slim-bookworm AS runtime
+
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user (matches the core/mcp images: uid/gid 1000).
+RUN groupadd -g 1000 rustok && useradd -u 1000 -g rustok -m rustok \
+    && mkdir -p /data && chown -R rustok:rustok /data
+
+# MCP venv.
+COPY --from=builder --chown=rustok:rustok /app /app
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Core + Gateway binaries from the binary image.
+COPY --from=core /usr/local/bin/core-server /usr/local/bin/core-server
+COPY --from=core /usr/local/bin/gateway /usr/local/bin/gateway
+
+COPY scripts/rustok-wallet-entrypoint.sh /usr/local/bin/rustok-wallet-entrypoint
+RUN chmod +x /usr/local/bin/rustok-wallet-entrypoint /usr/local/bin/core-server /usr/local/bin/gateway
+
+LABEL org.opencontainers.image.title="rustok-wallet" \
+      org.opencontainers.image.description="Rustok self-custody Ethereum agent wallet — all-in-one MCP (stdio)" \
+      org.opencontainers.image.licenses="LicenseRef-Proprietary"
+
+USER rustok
+ENV RUSTOK_DATA_DIR=/data
+VOLUME ["/data"]
+
+# tini = PID 1: forwards signals to the MCP process and reaps zombies. The
+# backgrounded core/gateway are torn down with the ephemeral (--rm) container.
+ENTRYPOINT ["tini", "--", "/usr/local/bin/rustok-wallet-entrypoint"]

@@ -31,6 +31,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caches, tests); legacy Rust patterns dropped
 - `get_positions` tool (Aave v3 + ERC-4626) gated by `read_wallet`, backed by
   Gateway `GET /api/v1/wallet/positions`
+- **Self-custody all-in-one image** `ghcr.io/rustok-org/rustok-wallet`
+  (`Dockerfile.wallet`): runs Core + Gateway + MCP in one container and speaks
+  MCP over **stdio** — keys stay in the user's local volume. One-time onboarding
+  via `… create-wallet` (prints the 24-word recovery phrase once). Published by
+  `.github/workflows/wallet-publish.yml` on version tags.
+- The `rustok-wallet` skill (`skills/rustok-wallet/`) + `smithery.yaml` rewritten
+  for the stdio Docker command (works on ClawHub, Smithery, Claude Desktop).
+
+> **Migration (v1 → v2):** the wallet is now a Docker image run over stdio, not a
+> single native binary. Existing v1 ClawHub installs keep working until you
+> migrate: pull `rustok-wallet`, run `create-wallet`, and update your MCP config
+> to the new `docker run -i` command (see `docs/INSTALL.md`).
 
 ### Removed
 - v1 Rust-binary distribution: the fake-binary `release.yml` workflow, the

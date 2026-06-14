@@ -1,0 +1,68 @@
+name: Wallet Image Publish
+
+# Builds the all-in-one self-custody wallet image (Core + Gateway + MCP, spoken
+# over stdio) and pushes it to GHCR on version tags. The Core/Gateway binaries
+# come from the published ghcr.io/<owner>/rustok-core image at the same tag, so
+# rustok-core:<tag> must be published (and pullable) first.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/rustok-wallet
+
+concurrency:
+  group: wallet-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: Build and push wallet image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2320dab5c3854e96c456 # v3.10.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a335babd2b4 # v5.7.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+          labels: |
+            org.opencontainers.image.title=rustok-wallet
+            org.opencontainers.image.description=Rustok self-custody Ethereum agent wallet (all-in-one MCP, stdio)
+            org.opencontainers.image.licenses=LicenseRef-Proprietary
+
+      - name: Build and push
+        uses: docker/build-push-action@14487ce63c7a62a4a3b0ec56c71f785e41fa6d7f # v6.16.0
+        with:
+          context: .
+          file: ./Dockerfile.wallet
+          build-args: |
+            CORE_IMAGE=${{ env.REGISTRY }}/${{ github.repository_owner }}/rustok-core:${{ github.ref_name }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
