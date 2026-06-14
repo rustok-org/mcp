@@ -10,9 +10,9 @@
 - [ ] chore
 
 ## Checklist
-- [ ] Code follows project style guidelines (`cargo fmt`, `cargo clippy`)
+- [ ] Lint/format pass (`uv run ruff check .`, `uv run ruff format --check .`)
+- [ ] Types pass (`uv run mypy src`)
+- [ ] Tests pass (`uv run pytest`)
 - [ ] Self-review completed
 - [ ] Tests added/updated
-- [ ] `cargo deny check` passes
 - [ ] Docker build passes
-- [ ] Integration test passes (`echo ... | rustok-mcp --transport stdio`)
