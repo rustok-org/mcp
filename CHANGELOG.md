@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **Package reset:** the MCP server was rewritten from the v1 Rust binary
+> `rustok-agent-mcp` (AGPL, ≤ 0.2.2) to a Python package **`rustok-mcp`** and the
+> version line was reset to **0.1.0** (see `pyproject.toml`). The `[0.2.2]`,
+> `[0.2.1]` and `[0.1.0]` entries below are **superseded v1 (Rust) history**, kept
+> for the record.
+
 ### Added
 - Distribution repository scaffold: install scripts, Docker, docs
 - `get_wallet_context` and `get_balances` tools wired to Gateway REST
@@ -23,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   forwarded; unrecognized bodies (e.g. dev stack traces) are logged and masked
 - `.dockerignore` updated for the Python layout (`.venv`, `__pycache__`,
   caches, tests); legacy Rust patterns dropped
+- `get_positions` tool (Aave v3 + ERC-4626) gated by `read_wallet`, backed by
+  Gateway `GET /api/v1/wallet/positions`
+
+### Removed
+- v1 Rust-binary distribution: the fake-binary `release.yml` workflow, the
+  dummy-`rustok-agent-mcp` build step in `docker-publish.yml`, and the dropped
+  hard-policy example (`skills/rustok-wallet/examples/policy.json`). The MCP is a
+  Python package/image now; the spend-limit/budget policy model is intentionally
+  not part of the wallet (risk is the user's to accept).
+- `cargo`-based checklist in the PR template (replaced with ruff/mypy/pytest).
 
 ## [0.2.2] — 2026-05-27
 
