@@ -1,69 +1,42 @@
 # Configuration
 
-## Environment Variables
+All configuration is via environment variables passed to the wallet container.
+
+## Environment variables
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `RUSTOK_AGENT_PASSWORD` | Yes | — | Wallet unlock password. **Never commit this.** |
-| `MCP_API_KEY` | No | — | Bearer token for HTTP API auth. Empty = disabled. |
-| `MCP_CHAIN_IDS` | No | `421614` | Comma-separated allowed chain IDs. |
-| `MCP_RATE_LIMIT` | No | `100` | Requests per minute limit. `0` = disabled. |
+| `RUSTOK_KEYRING_PASSWORD` | Yes | — | Unlocks your local keystore (set at `create-wallet`). **Never commit it.** |
+| `RUSTOK_ALLOWED_CHAINS` | No | `1,8453` | Comma-separated chain IDs to enable (e.g. `1,8453,42161,10`). |
+| `RUSTOK_RPC_URLS_<chain>` | No¹ | — | RPC URL(s) for a chain, e.g. `RUSTOK_RPC_URLS_1=https://…`. Comma-separated for fallbacks. |
+| `RUSTOK_ALCHEMY_API_KEY` | No¹ | — | Alchemy key (primary RPC for supported chains). |
+| `RUSTOK_VAULTS_<chain>` | No | — | Comma-separated ERC-4626 vault addresses to track on a chain (opt-in). |
+| `RUSTOK_DATA_DIR` | No | `/data` | Keystore directory inside the container (mount a volume here). |
 
-## Claude Desktop Config
+¹ Provide **either** an Alchemy key **or** a public RPC URL per enabled chain;
+otherwise that chain is skipped (no balances/positions for it).
 
-Add to `claude_desktop_config.json`:
+## Data & keys
 
-```json
-{
-  "mcpServers": {
-    "rustok-wallet": {
-      "command": "rustok-agent-mcp",
-      "args": ["--transport", "stdio"],
-      "env": {
-        "RUSTOK_AGENT_PASSWORD": "your-strong-password"
-      }
-    }
-  }
-}
-```
+- Mount a named volume at `/data`: `-v rustok-wallet:/data`. It holds the
+  encrypted `keystore.json`. Back it up (or the 24-word phrase) — losing both
+  loses the wallet.
+- Keys are encrypted at rest (Argon2id + AES-256-GCM) and only ever decrypted
+  inside the container on your machine.
 
-## Policy Configuration
+## Capabilities (security)
 
-Create `policy.json` for custom limits:
+Tools are gated by capabilities the MCP client grants on connect:
 
-```json
-{
-  "max_single_tx_eth": 0.5,
-  "max_daily_spend_eth": 2.0,
-  "max_gas_fee_gwei": 100,
-  "allowed_chain_ids": [1, 42161, 8453, 421614],
-  "blocked_addresses": [],
-  "block_unlimited_approvals": true
-}
-```
+| Capability | Tools |
+|------------|-------|
+| `read_wallet` | `get_wallet_context`, `get_balances`, `get_positions` |
+| `preview_tx` | `preview_send` |
+| `execute_tx` | `execute_send`, `sign_message` |
 
-Run with policy:
+## No spending policy
 
-```bash
-rustok-agent-mcp --transport http --policy-config policy.json
-```
-
-## HTTP Server Options
-
-```bash
-rustok-agent-mcp --transport http --host 127.0.0.1 --port 3000
-```
-
-## Data Directory
-
-Default: `~/.rustok/agent/`
-
-Contains:
-- `keystore/` — encrypted wallet files
-- `audit.db` — SQLite append-only audit log
-
-Override:
-
-```bash
-rustok-agent-mcp --data-dir /custom/path
-```
+This wallet has **no hard-coded spending limits, budgets, or blocklists** — by
+design (you consciously accept the risk of funds on the agent wallet). `txguard`
+still analyses transactions and surfaces a risk level on preview, but it does not
+block. Opt-in user-configurable limits may be added later.

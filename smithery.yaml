@@ -1,23 +1,43 @@
-# Smithery.ai configuration for rustok-wallet MCP server
+# Smithery.ai configuration for the rustok-wallet self-custody MCP server.
 # https://smithery.ai/docs/build/project-config/smithery-yaml
-
+#
+# The wallet is a single self-contained image run over stdio. Keys live in YOUR
+# local Docker volume (self-custody) — they never leave your machine.
+#
+# One-time onboarding BEFORE first use (run in a terminal, back up the 24 words):
+#   docker run -it --rm -v rustok-wallet:/data \
+#     -e RUSTOK_KEYRING_PASSWORD=your-strong-password \
+#     ghcr.io/rustok-org/rustok-wallet:latest create-wallet
 startCommand:
   type: stdio
   configSchema:
     type: object
-    required: []
+    required: ["RUSTOK_KEYRING_PASSWORD"]
     properties:
-      RUSTOK_AGENT_PASSWORD:
+      RUSTOK_KEYRING_PASSWORD:
         type: string
-        title: Wallet Password
-        description: Password to unlock the agent wallet (set via env var)
+        title: Wallet password
+        description: Password that unlocks your local keystore (the one you set at create-wallet).
+      RUSTOK_RPC_URLS_1:
+        type: string
+        title: Ethereum RPC URL
+        description: RPC endpoint for Ethereum mainnet (an Alchemy key URL, or a public RPC).
   commandFunction: |-
     (config) => ({
-      command: 'rustok-agent-mcp',
-      args: ['--transport', 'stdio'],
+      command: 'docker',
+      args: [
+        'run', '-i', '--rm', '--init',
+        '-v', 'rustok-wallet:/data',
+        '-e', 'RUSTOK_KEYRING_PASSWORD',
+        '-e', 'RUSTOK_ALLOWED_CHAINS=1,8453',
+        '-e', 'RUSTOK_RPC_URLS_1',
+        'ghcr.io/rustok-org/rustok-wallet:latest'
+      ],
       env: {
-        RUSTOK_AGENT_PASSWORD: config.RUSTOK_AGENT_PASSWORD || process.env.RUSTOK_AGENT_PASSWORD || ''
+        RUSTOK_KEYRING_PASSWORD: config.RUSTOK_KEYRING_PASSWORD || '',
+        RUSTOK_RPC_URLS_1: config.RUSTOK_RPC_URLS_1 || ''
       }
     })
   exampleConfig:
-    RUSTOK_AGENT_PASSWORD: "your-strong-password"
+    RUSTOK_KEYRING_PASSWORD: "your-strong-password"
+    RUSTOK_RPC_URLS_1: "https://ethereum-rpc.publicnode.com"

@@ -14,6 +14,7 @@ __pycache__
 tests
 docs
 scripts
+!scripts/rustok-wallet-entrypoint.sh
 Dockerfile
 docker-compose.yml
 .dockerignore

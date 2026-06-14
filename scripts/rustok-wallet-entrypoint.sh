@@ -1,0 +1,51 @@
+#!/bin/sh
+# Entrypoint for the all-in-one self-custody wallet image.
+#
+# Default: start Core (gRPC) + Gateway (HTTP) in the background on loopback, wait
+# for them to be ready, then hand the container's stdin/stdout to the MCP stdio
+# server. The MCP JSON-RPC channel is stdout — so ALL backend logs go to stderr.
+#
+# `create-wallet`: one-shot onboarding — create the keystore and print the 24-word
+# recovery phrase on the TTY (`docker run -it ... create-wallet`), then exit.
+set -e
+
+: "${RUSTOK_DATA_DIR:=/data}"
+export RUSTOK_DATA_DIR
+
+if [ "$1" = "create-wallet" ]; then
+    exec core-server create-wallet
+fi
+
+# Backend in the background; stdout -> stderr so it never pollutes the MCP channel.
+# Core MUST be up before the Gateway starts — the Gateway connects to Core once
+# at startup, so a race leaves it with no Core client (/health never serving).
+
+# 1. Core (gRPC) first.
+RUSTOK_GRPC_ADDR="127.0.0.1:50051" core-server 1>&2 &
+
+# 2. Wait for Core's gRPC port to accept connections, then start the Gateway.
+i=0
+while ! python -c "import socket,sys; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',50051)); s.close(); sys.exit(0 if r==0 else 1)" 2>/dev/null; do
+    i=$((i + 1))
+    if [ "$i" -gt 60 ]; then
+        echo "rustok-wallet: core (gRPC) not ready after 60s — is RUSTOK_KEYRING_PASSWORD set and a wallet created (run 'create-wallet' first)?" 1>&2
+        exit 1
+    fi
+    sleep 1
+done
+
+RUSTOK_GATEWAY_ADDR="127.0.0.1:3000" RUSTOK_CORE_ADDR="http://127.0.0.1:50051" gateway 1>&2 &
+
+# 3. Wait until the gateway reports the core serving.
+i=0
+while ! python -c "import urllib.request,sys; sys.exit(0 if b'\"core\":\"serving\"' in urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=2).read() else 1)" 2>/dev/null; do
+    i=$((i + 1))
+    if [ "$i" -gt 30 ]; then
+        echo "rustok-wallet: gateway not ready after 30s" 1>&2
+        exit 1
+    fi
+    sleep 1
+done
+
+# stdin/stdout become the MCP JSON-RPC channel; talks to the local gateway.
+RUSTOK_MCP_GATEWAY_URL="http://127.0.0.1:3000" exec rustok-mcp-stdio
