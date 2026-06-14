@@ -47,9 +47,10 @@ async def test_tools_list_handler() -> None:
     assert response is not None
     assert response.result is not None
     tools = response.result["tools"]
-    assert len(tools) == 5
+    assert len(tools) == 6
     names = {t["name"] for t in tools}
     assert "get_wallet_context" in names
+    assert "get_positions" in names
     assert "preview_send" in names
 
 
@@ -63,10 +64,11 @@ async def test_tools_list_filters_by_capability() -> None:
     assert response is not None
     assert response.result is not None
     tools = response.result["tools"]
-    assert len(tools) == 2
+    assert len(tools) == 3
     names = {t["name"] for t in tools}
     assert "get_wallet_context" in names
     assert "get_balances" in names
+    assert "get_positions" in names
     assert "preview_send" not in names
 
 
@@ -341,6 +343,70 @@ async def test_get_balances_address_without_chain_id_is_invalid() -> None:
     assert response.error is not None
     assert response.error.code == -32602
     assert "chain_id" in response.error.message
+
+
+async def test_get_positions_uses_gateway_client() -> None:
+    """get_positions (no address) delegates to the active wallet."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.get_positions = AsyncMock(
+        return_value={
+            "positions": [
+                {"protocol": "aave_v3", "chain_id": 1, "asset_symbol": "USD"},
+            ],
+        },
+    )
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=20,
+        method="tools/call",
+        params={"name": "get_positions", "arguments": {}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    assert "aave_v3" in response.result["content"][0]["text"]
+    mock_client.get_positions.assert_awaited_once_with(None)
+
+
+async def test_get_positions_with_explicit_address() -> None:
+    """get_positions forwards an explicit address to the Gateway."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.get_positions = AsyncMock(return_value={"positions": []})
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=21,
+        method="tools/call",
+        params={"name": "get_positions", "arguments": {"address": "0xabc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    mock_client.get_positions.assert_awaited_once_with("0xabc")
+
+
+async def test_get_positions_falls_back_to_stub() -> None:
+    """get_positions returns an empty list without a GatewayClient."""
+    protocol, _registry = create_protocol_and_registry()
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=22,
+        method="tools/call",
+        params={"name": "get_positions", "arguments": {}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    assert '"positions": []' in response.result["content"][0]["text"]
 
 
 async def test_preview_send_uses_gateway_client() -> None:

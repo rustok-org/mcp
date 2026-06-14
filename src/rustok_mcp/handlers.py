@@ -126,6 +126,16 @@ def _make_get_balances_handler(client: GatewayClient | None) -> Any:
     return handler
 
 
+def _make_get_positions_handler(client: GatewayClient | None) -> Any:
+    async def handler(args: dict[str, Any]) -> Any:
+        if client is None:
+            return {"positions": []}
+        # Empty/omitted address → the active wallet's own positions.
+        return await client.get_positions(args.get("address"))
+
+    return handler
+
+
 def _make_preview_send_handler(client: GatewayClient | None) -> Any:
     async def handler(args: dict[str, Any]) -> Any:
         if client is None:
@@ -197,6 +207,22 @@ def create_protocol_and_registry(
             },
         ),
         _make_get_balances_handler(gateway_client),
+    )
+    registry.register(
+        Tool(
+            name="get_positions",
+            description="Get on-chain DeFi positions (Aave v3, ERC-4626) for the active wallet, or for an explicit address.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "address": {
+                        "type": "string",
+                        "description": "Optional address to query instead of the active wallet",
+                    },
+                },
+            },
+        ),
+        _make_get_positions_handler(gateway_client),
     )
     registry.register(
         Tool(

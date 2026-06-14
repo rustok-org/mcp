@@ -20,6 +20,7 @@ def test_capability_map() -> None:
     """CAPABILITY_MAP covers all stub tools."""
     assert CAPABILITY_MAP["get_wallet_context"] == Capability.READ_WALLET
     assert CAPABILITY_MAP["get_balances"] == Capability.READ_WALLET
+    assert CAPABILITY_MAP["get_positions"] == Capability.READ_WALLET
     assert CAPABILITY_MAP["preview_send"] == Capability.PREVIEW_TX
     assert CAPABILITY_MAP["execute_send"] == Capability.EXECUTE_TX
     assert CAPABILITY_MAP["sign_message"] == Capability.EXECUTE_TX

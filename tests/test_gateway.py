@@ -93,6 +93,37 @@ async def test_get_balance_success() -> None:
     await client.close()
 
 
+async def test_get_positions_success() -> None:
+    """get_positions forwards the address param and returns positions on 200."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/v1/wallet/positions"
+        assert request.url.params["address"] == "0xabc"
+        return httpx.Response(200, json={"positions": [{"protocol": "aave_v3"}]})
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    result = await client.get_positions("0xabc")
+    assert result["positions"][0]["protocol"] == "aave_v3"
+    await client.close()
+
+
+async def test_get_positions_no_address_omits_param() -> None:
+    """get_positions without an address sends no query params (active wallet)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/wallet/positions"
+        assert "address" not in request.url.params
+        return httpx.Response(200, json={"positions": []})
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    result = await client.get_positions()
+    assert result == {"positions": []}
+    await client.close()
+
+
 async def test_wallet_context_connect_error_raises_mcperror() -> None:
     """GET transport failures map to McpError like POST ones."""
 
