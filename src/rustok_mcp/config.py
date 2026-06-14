@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # Inbound bearer secret clients must present to MCP (RUSTOK_MCP_INBOUND_API_KEY).
     # Distinct trust boundary from api_key; empty string normalizes to None.
     inbound_api_key: Annotated[str | None, BeforeValidator(_empty_to_none)] = None
+    # Capabilities granted to the process-trusted stdio transport
+    # (RUSTOK_MCP_CAPABILITIES). Unset → all (stdio is not a security boundary);
+    # a comma-separated subset restricts it (e.g. "read_wallet" for a read-only
+    # agent). The network-facing SSE transport ignores this and stays gated.
+    capabilities: Annotated[str | None, BeforeValidator(_empty_to_none)] = None
 
     model_config = SettingsConfigDict(env_prefix="RUSTOK_MCP_")
 

@@ -86,8 +86,9 @@ For **Claude Desktop / Cursor** (stdio MCP), add to the MCP config:
 
 ## Tools
 
-Tools are capability-gated; the client grants `read_wallet` / `preview_tx` /
-`execute_tx`.
+The stdio wallet image is process-trusted and exposes **all** tools by default.
+To run a restricted agent, set `RUSTOK_MCP_CAPABILITIES` to a subset
+(`read_wallet` / `preview_tx` / `execute_tx`) — e.g. `read_wallet` for read-only.
 
 | Tool | Capability | What it does |
 |------|-----------|--------------|

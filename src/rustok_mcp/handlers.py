@@ -32,12 +32,22 @@ async def handle_initialize(
     request: JsonRpcRequest,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Handle the ``initialize`` JSON-RPC method."""
+    """Handle the ``initialize`` JSON-RPC method.
+
+    Capabilities come from the rustok-specific ``params.capabilities`` *list*. A
+    client that omits it — or sends the standard MCP capabilities *object* — keeps
+    the transport-seeded default, so the process-trusted stdio transport (seeded
+    with all capabilities) stays usable by standard MCP clients. A non-empty list
+    overrides the default, letting a client opt into a narrower set.
+    """
     params = request.params or {}
-    if isinstance(params, dict):
-        caps = parse_capabilities(params.get("capabilities", []))
-        if context is not None:
+    if isinstance(params, dict) and context is not None:
+        raw_caps = params.get("capabilities", [])
+        caps = parse_capabilities(raw_caps) if isinstance(raw_caps, list) else set()
+        if caps:
             context["capabilities"] = caps
+        else:
+            context.setdefault("capabilities", set())
     return {
         "protocolVersion": "2024-11-05",
         "capabilities": {"tools": {}},

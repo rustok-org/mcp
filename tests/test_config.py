@@ -52,3 +52,23 @@ def test_inbound_api_key_whitespace_normalizes_to_none(
     """Whitespace-only value collapses to None — no accidental blank token."""
     monkeypatch.setenv("RUSTOK_MCP_INBOUND_API_KEY", "   ")
     assert Settings().inbound_api_key is None
+
+
+def test_capabilities_read_from_prefixed_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """capabilities is read from RUSTOK_MCP_CAPABILITIES."""
+    monkeypatch.setenv("RUSTOK_MCP_CAPABILITIES", "read_wallet,preview_tx")
+    assert Settings().capabilities == "read_wallet,preview_tx"
+
+
+def test_capabilities_defaults_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """capabilities defaults to None when unset (stdio then grants all)."""
+    monkeypatch.delenv("RUSTOK_MCP_CAPABILITIES", raising=False)
+    assert Settings().capabilities is None
+
+
+def test_capabilities_empty_string_normalizes_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A set-but-empty value reads as unset (→ all caps), never as a blank set."""
+    monkeypatch.setenv("RUSTOK_MCP_CAPABILITIES", "")
+    assert Settings().capabilities is None
