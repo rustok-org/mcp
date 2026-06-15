@@ -16,9 +16,9 @@ from rustok_mcp.capabilities import (
 
 def test_capability_enum_values() -> None:
     """Capability enum contains expected members."""
-    assert Capability.READ_WALLET == "read_wallet"
-    assert Capability.PREVIEW_TX == "preview_tx"
-    assert Capability.EXECUTE_TX == "execute_tx"
+    assert Capability.READ_WALLET.value == "read_wallet"
+    assert Capability.PREVIEW_TX.value == "preview_tx"
+    assert Capability.EXECUTE_TX.value == "execute_tx"
 
 
 def test_capability_map() -> None:

@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections.abc import Iterator
 
 import pytest
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
@@ -18,7 +19,7 @@ from rustok_mcp.telemetry import (
 
 
 @pytest.fixture(autouse=True)
-def _isolate_telemetry_globals():
+def _isolate_telemetry_globals() -> Iterator[None]:
     """Telemetry init mutates process-global state — the root logging handlers and
     the OpenTelemetry tracer/meter providers (which install **once** per process).
     Snapshot the logging config and reset the install-once providers after each
