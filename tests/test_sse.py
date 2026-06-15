@@ -98,7 +98,7 @@ async def test_sse_yields_endpoint_event() -> None:
 
     body = ""
     async for chunk in response.body_iterator:
-        body += chunk
+        body += chunk if isinstance(chunk, str) else bytes(chunk).decode()
         if "\n\n" in body:
             break
 
