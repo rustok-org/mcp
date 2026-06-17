@@ -131,9 +131,7 @@ class GatewayClient:
         if error_code is not None:
             match error_code:
                 case "tx_blocked":
-                    return McpError(
-                        ERR_TX_BLOCKED, f"Transaction blocked by policy: {message}"
-                    )
+                    return McpError(ERR_TX_BLOCKED, f"Transaction blocked by policy: {message}")
                 case "precondition_failed":
                     return McpError(ERR_PRECONDITION, message)
                 case "not_supported":
