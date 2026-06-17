@@ -5,7 +5,16 @@ from typing import Any
 
 import httpx
 
-from rustok_mcp.protocol import McpError
+from rustok_mcp.protocol import (
+    ERR_CORE_UNAVAILABLE,
+    ERR_INTERNAL,
+    ERR_INVALID_PARAMS,
+    ERR_NOT_SUPPORTED,
+    ERR_PRECONDITION,
+    ERR_TX_BLOCKED,
+    ERR_UNAUTHORIZED,
+    McpError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,37 +111,73 @@ class GatewayClient:
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code
-            if status in (401, 403):
-                raise McpError(-32002, "Unauthorized") from exc
-            if status >= 500:
-                # 5xx bodies may carry internal details — log, do not forward.
-                logger.warning("gateway %s response: %s", status, exc.response.text)
-                raise McpError(-32603, "Gateway internal error") from exc
-            # 4xx: forward only the `message` field of the known Gateway error
-            # shape ({"error": ..., "message": ...}) — validation messages are
-            # actionable for the caller. Anything else (e.g. a stack trace from
-            # a misconfigured dev Gateway) is logged and masked.
-            message = self._known_error_message(exc.response)
-            if message is not None:
-                raise ValueError(f"Gateway request failed: {message}") from exc
-            logger.warning(
-                "gateway %s response with unrecognized body: %s",
-                status,
-                exc.response.text,
-            )
-            raise ValueError("Gateway request failed") from exc
+            raise self._error_from_response(exc.response) from exc
         return response.json()
 
     @staticmethod
-    def _known_error_message(response: httpx.Response) -> str | None:
-        """Return the `message` field if the body matches the Gateway error shape."""
-        try:
-            body = response.json()
-        except ValueError:
-            return None
-        if isinstance(body, dict):
-            message = body.get("message")
-            if isinstance(message, str):
-                return message
-        return None
+    def _error_from_response(response: httpx.Response) -> McpError:
+        """Map a non-2xx Gateway response to a structured MCP error.
+
+        Routes on the machine-readable ``error`` field when the body matches the
+        known Gateway shape; masks unrecognized 4xx/5xx bodies so internal
+        details never reach the agent.
+        """
+        status = response.status_code
+        if status in (401, 403):
+            return McpError(ERR_UNAUTHORIZED, "Unauthorized")
+
+        error_code, message = _parse_gateway_error(response)
+
+        if error_code is not None:
+            match error_code:
+                case "tx_blocked":
+                    return McpError(
+                        ERR_TX_BLOCKED, f"Transaction blocked by policy: {message}"
+                    )
+                case "precondition_failed":
+                    return McpError(ERR_PRECONDITION, message)
+                case "not_supported":
+                    return McpError(ERR_NOT_SUPPORTED, message)
+                case "bad_request":
+                    return McpError(ERR_INVALID_PARAMS, message)
+                case "core_unavailable":
+                    return McpError(ERR_CORE_UNAVAILABLE, f"Core unavailable: {message}")
+                case _:
+                    # Known shape but unrecognized error code — still safer to mask.
+                    logger.warning(
+                        "gateway returned unrecognized error code %r (status %s): %s",
+                        error_code,
+                        status,
+                        response.text,
+                    )
+                    return McpError(ERR_INTERNAL, "Gateway internal error")
+
+        # No recognized error shape: 5xx bodies and unrecognized 4xx bodies may
+        # carry internal details — log server-side, mask client-side.
+        if status >= 500:
+            logger.warning("gateway %s response: %s", status, response.text)
+        else:
+            logger.warning(
+                "gateway %s response with unrecognized body: %s",
+                status,
+                response.text,
+            )
+        return McpError(ERR_INTERNAL, "Gateway internal error")
+
+
+def _parse_gateway_error(response: httpx.Response) -> tuple[str | None, str]:
+    """Extract (error_code, message) from a Gateway error body.
+
+    Returns ``(None, "")`` when the body does not match the expected shape.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return None, ""
+    if not isinstance(body, dict):
+        return None, ""
+    error_code = body.get("error")
+    message = body.get("message", "")
+    if isinstance(error_code, str) and isinstance(message, str):
+        return error_code, message
+    return None, ""
