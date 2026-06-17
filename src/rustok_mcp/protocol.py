@@ -34,6 +34,19 @@ class JsonRpcResponse(BaseModel):
     error: JsonRpcError | None = None
 
 
+# JSON-RPC 2.0 standard errors
+ERR_INVALID_PARAMS = -32602
+ERR_INTERNAL = -32603
+
+# Application-defined server errors (-32000..-32099)
+ERR_UNAUTHORIZED = -32002
+ERR_CAPABILITY_REQUIRED = -32001
+ERR_TX_BLOCKED = -32010
+ERR_PRECONDITION = -32011
+ERR_NOT_SUPPORTED = -32012
+ERR_CORE_UNAVAILABLE = -32013
+
+
 class McpError(ValueError):
     """Custom error carrying a JSON-RPC error code."""
 

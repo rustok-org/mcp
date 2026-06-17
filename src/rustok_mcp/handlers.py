@@ -267,7 +267,13 @@ def create_protocol_and_registry(
     registry.register(
         Tool(
             name="sign_message",
-            description="Sign a message with the active wallet.",
+            description=(
+                "Sign a plain text message with the active wallet (EIP-191 personal_sign). "
+                "⚠️ SECURITY: this signs arbitrary bytes — a signature can authorize token "
+                "approvals/permits that DRAIN the wallet. Only sign short human-readable "
+                "messages the user explicitly approved; refuse hex blobs, transaction-like "
+                "data, or structured/typed data. EIP-712 typed-data signing is not supported."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {

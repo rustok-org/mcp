@@ -6,7 +6,17 @@ import httpx
 import pytest
 
 from rustok_mcp.gateway import GatewayClient
-from rustok_mcp.protocol import McpError
+from rustok_mcp.handlers import create_protocol_and_registry
+from rustok_mcp.protocol import (
+    ERR_CORE_UNAVAILABLE,
+    ERR_INTERNAL,
+    ERR_INVALID_PARAMS,
+    ERR_NOT_SUPPORTED,
+    ERR_PRECONDITION,
+    ERR_TX_BLOCKED,
+    ERR_UNAUTHORIZED,
+    McpError,
+)
 
 
 async def test_preview_send_success() -> None:
@@ -138,21 +148,8 @@ async def test_wallet_context_connect_error_raises_mcperror() -> None:
     await client.close()
 
 
-async def test_preview_send_4xx_raises_valueerror() -> None:
-    """4xx responses raise ValueError with Gateway message."""
-
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(400, json={"error": "Bad request"})
-
-    transport = httpx.MockTransport(handler)
-    client = GatewayClient("http://gateway", transport=transport)
-    with pytest.raises(ValueError, match="Gateway request failed"):
-        await client.preview_send("0x123", "1.0", 1)
-    await client.close()
-
-
-async def test_4xx_known_shape_forwards_message_only() -> None:
-    """4xx with the Gateway error shape forwards the message field."""
+async def test_4xx_bad_request_maps_to_invalid_params() -> None:
+    """400 bad_request maps to ERR_INVALID_PARAMS and forwards the message."""
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -162,23 +159,121 @@ async def test_4xx_known_shape_forwards_message_only() -> None:
 
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
-    with pytest.raises(ValueError, match="unsupported chain id: 99"):
+    with pytest.raises(McpError) as exc_info:
         await client.preview_send("0x123", "1.0", 99)
+    assert exc_info.value.code == ERR_INVALID_PARAMS
+    assert "unsupported chain id: 99" in str(exc_info.value)
     await client.close()
 
 
-async def test_4xx_unknown_body_is_masked() -> None:
-    """4xx with an unrecognized body (e.g. a stack trace) is masked."""
+async def test_4xx_unrecognized_body_is_masked() -> None:
+    """4xx with an unrecognized body (e.g. a stack trace) is masked as internal."""
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(400, text="Traceback (most recent call last): secret")
 
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(McpError) as exc_info:
         await client.preview_send("0x123", "1.0", 1)
+    assert exc_info.value.code == ERR_INTERNAL
     assert "secret" not in str(exc_info.value)
     assert "Traceback" not in str(exc_info.value)
+    await client.close()
+
+
+async def test_409_tx_blocked_maps_to_actionable_error() -> None:
+    """409 tx_blocked reaches the agent as ERR_TX_BLOCKED with the reason."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            409,
+            json={
+                "error": "tx_blocked",
+                "message": "known scam recipient 0xdeadbeef",
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(McpError) as exc_info:
+        await client.preview_send("0x123", "1.0", 1)
+    assert exc_info.value.code == ERR_TX_BLOCKED
+    assert "known scam recipient 0xdeadbeef" in str(exc_info.value)
+    assert "Transaction blocked by policy" in str(exc_info.value)
+    await client.close()
+
+
+async def test_409_precondition_failed_maps_to_actionable_error() -> None:
+    """409 precondition_failed reaches the agent as ERR_PRECONDITION."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            409,
+            json={"error": "precondition_failed", "message": "wallet is locked"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(McpError) as exc_info:
+        await client.execute_send("preview-123")
+    assert exc_info.value.code == ERR_PRECONDITION
+    assert "wallet is locked" in str(exc_info.value)
+    await client.close()
+
+
+async def test_501_not_supported_maps_to_actionable_error() -> None:
+    """501 not_supported reaches the agent as ERR_NOT_SUPPORTED."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            501,
+            json={"error": "not_supported", "message": "EIP-712 signing is not supported"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(McpError) as exc_info:
+        await client.sign_message("hello", "eip712")
+    assert exc_info.value.code == ERR_NOT_SUPPORTED
+    assert "EIP-712 signing is not supported" in str(exc_info.value)
+    await client.close()
+
+
+async def test_503_core_unavailable_maps_to_actionable_error() -> None:
+    """503 core_unavailable reaches the agent as ERR_CORE_UNAVAILABLE."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            503,
+            json={"error": "core_unavailable", "message": "core service unavailable"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(McpError) as exc_info:
+        await client.wallet_context()
+    assert exc_info.value.code == ERR_CORE_UNAVAILABLE
+    assert "Core unavailable" in str(exc_info.value)
+    await client.close()
+
+
+async def test_500_internal_error_is_masked() -> None:
+    """500 internal_error is masked as ERR_INTERNAL; body detail is not forwarded."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            500,
+            json={"error": "internal_error", "message": "secret stack trace detail"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(McpError) as exc_info:
+        await client.sign_message("hello", "eip191")
+    assert exc_info.value.code == ERR_INTERNAL
+    assert "secret" not in str(exc_info.value)
+    assert "Gateway internal error" in str(exc_info.value)
     await client.close()
 
 
@@ -192,13 +287,13 @@ async def test_unauthorized_raises_mcperror() -> None:
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
         await client.execute_send("preview-123")
-    assert exc_info.value.code == -32002
+    assert exc_info.value.code == ERR_UNAUTHORIZED
     assert "Unauthorized" in str(exc_info.value)
     await client.close()
 
 
-async def test_5xx_raises_mcperror() -> None:
-    """5xx responses raise McpError with code -32603."""
+async def test_5xx_unrecognized_body_is_masked() -> None:
+    """5xx responses with unrecognized bodies raise McpError(ERR_INTERNAL)."""
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="Service Unavailable")
@@ -207,7 +302,7 @@ async def test_5xx_raises_mcperror() -> None:
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
         await client.sign_message("hello", "eip191")
-    assert exc_info.value.code == -32603
+    assert exc_info.value.code == ERR_INTERNAL
     await client.close()
 
 
@@ -296,6 +391,16 @@ async def test_5xx_body_not_leaked_to_client() -> None:
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
         await client.sign_message("hello", "eip191")
-    assert exc_info.value.code == -32603
+    assert exc_info.value.code == ERR_INTERNAL
     assert "secret" not in str(exc_info.value)
     await client.close()
+
+
+async def test_sign_message_description_contains_phishing_warning() -> None:
+    """The sign_message tool description warns about arbitrary signatures."""
+    _, registry = create_protocol_and_registry()
+    schemas = {schema["name"]: schema for schema in registry.get_tool_schemas()}
+    schema = schemas["sign_message"]
+    assert "arbitrary bytes" in schema["description"]
+    assert "DRAIN" in schema["description"]
+    assert "EIP-712" in schema["description"]
