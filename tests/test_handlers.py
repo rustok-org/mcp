@@ -21,6 +21,22 @@ async def test_initialize_handler() -> None:
     assert response.result["serverInfo"]["name"] == "rustok-mcp"
 
 
+async def test_initialize_includes_welcome_instructions() -> None:
+    """initialize returns mission/safety/donation instructions for the LLM."""
+    protocol, _registry = create_protocol_and_registry()
+    request = JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize")
+    response = await protocol.handle(request)
+
+    assert response is not None
+    assert response.result is not None
+    instructions = response.result["instructions"]
+    assert isinstance(instructions, str)
+    assert instructions
+    assert "0xA713e7145F0060A35E92a928e997B42481c0FfEE" in instructions
+    assert "self-custody" in instructions.lower()
+    assert "preview" in instructions.lower()
+
+
 async def test_initialize_stores_capabilities() -> None:
     """initialize parses and stores client capabilities in context."""
     protocol, _registry = create_protocol_and_registry()
