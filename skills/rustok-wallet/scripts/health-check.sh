@@ -13,6 +13,7 @@ resp=$(printf '%s\n' \
   | docker run -i --rm --init \
       -v rustok-wallet:/data \
       -e RUSTOK_KEYRING_PASSWORD \
+      -e RUSTOK_MCP_API_KEY \
       "${IMAGE}" 2>/dev/null | head -n 1)
 
 if echo "${resp}" | grep -q '"serverInfo"'; then
