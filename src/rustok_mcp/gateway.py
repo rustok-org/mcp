@@ -18,6 +18,10 @@ from rustok_mcp.protocol import (
 
 logger = logging.getLogger(__name__)
 
+# Gateway enforces a 10s request TimeoutLayer (core). Wait just past it so the
+# MCP receives the gateway's response/408 rather than tripping its own timeout.
+DEFAULT_GATEWAY_TIMEOUT_SECONDS = 11.0
+
 
 class GatewayClient:
     """Async HTTP client for the Rustok Gateway."""
@@ -27,11 +31,12 @@ class GatewayClient:
         base_url: str,
         api_key: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        timeout: float = DEFAULT_GATEWAY_TIMEOUT_SECONDS,
     ) -> None:
         self._client = httpx.AsyncClient(
             base_url=base_url,
             headers=self._auth_headers(api_key),
-            timeout=30.0,
+            timeout=timeout,
             transport=transport,
         )
 

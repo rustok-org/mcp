@@ -8,6 +8,7 @@ from rustok_mcp.capabilities import (
     CAPABILITY_MAP,
     Capability,
     Session,
+    extract_rustok_capabilities,
     has_capability,
     parse_capabilities,
     resolve_stdio_capabilities,
@@ -98,3 +99,26 @@ def test_session_with_queue() -> None:
     queue: asyncio.Queue[str] = asyncio.Queue()
     session = Session(session_id="test", queue=queue)
     assert session.queue is queue
+
+
+def test_extract_rustok_capabilities_parses_list() -> None:
+    """A rustok-specific capability list is parsed into a set."""
+    caps = extract_rustok_capabilities({"capabilities": ["read_wallet", "preview_tx"]})
+    assert caps == {Capability.READ_WALLET, Capability.PREVIEW_TX}
+
+
+def test_extract_rustok_capabilities_object_returns_empty() -> None:
+    """The standard MCP capabilities object yields an empty set."""
+    assert extract_rustok_capabilities({"capabilities": {"roots": {}, "sampling": {}}}) == set()
+
+
+def test_extract_rustok_capabilities_non_list_returns_empty() -> None:
+    """A non-list capability value yields an empty set."""
+    assert extract_rustok_capabilities({"capabilities": "x"}) == set()
+
+
+def test_extract_rustok_capabilities_missing_or_non_dict_returns_empty() -> None:
+    """Missing field or non-dict params yields an empty set."""
+    assert extract_rustok_capabilities({}) == set()
+    assert extract_rustok_capabilities(None) == set()
+    assert extract_rustok_capabilities("not-a-dict") == set()

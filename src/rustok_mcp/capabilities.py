@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -37,6 +38,7 @@ class Session:
     session_id: str
     capabilities: set[Capability] = field(default_factory=set)
     queue: asyncio.Queue[str] | None = field(default=None)
+    last_seen: float = field(default_factory=time.monotonic)
 
 
 def parse_capabilities(values: Iterable[str]) -> set[Capability]:
@@ -49,6 +51,21 @@ def parse_capabilities(values: Iterable[str]) -> set[Capability]:
             logger.warning("Unknown capability ignored: %s", val)
             continue
     return result
+
+
+def extract_rustok_capabilities(params: object) -> set[Capability]:
+    """Extract the rustok-specific capability *list* from initialize params.
+
+    Returns the empty set when params is not a dict, when ``capabilities`` is not
+    a list (e.g. the standard MCP capabilities *object*), or when nothing valid
+    parses — so a standard MCP client correctly ends up with no tools.
+    """
+    if not isinstance(params, dict):
+        return set()
+    raw = params.get("capabilities", [])
+    if not isinstance(raw, list):
+        return set()
+    return parse_capabilities(raw)
 
 
 def resolve_stdio_capabilities(raw: str | None) -> set[Capability]:

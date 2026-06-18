@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from rustok_mcp.gateway import GatewayClient
+from rustok_mcp.gateway import DEFAULT_GATEWAY_TIMEOUT_SECONDS, GatewayClient
 from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.protocol import (
     ERR_CORE_UNAVAILABLE,
@@ -404,3 +404,16 @@ async def test_sign_message_description_contains_phishing_warning() -> None:
     assert "arbitrary bytes" in schema["description"]
     assert "DRAIN" in schema["description"]
     assert "EIP-712" in schema["description"]
+
+
+def test_default_gateway_timeout() -> None:
+    """The default outbound timeout is just past the gateway's 10s layer."""
+    assert DEFAULT_GATEWAY_TIMEOUT_SECONDS == 11.0
+
+
+async def test_gateway_timeout_is_configurable() -> None:
+    """GatewayClient timeout is exposed and applied to the httpx client."""
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json={}))
+    client = GatewayClient("http://gateway", timeout=5.0, transport=transport)
+    assert client._client.timeout.read == 5.0
+    await client.close()

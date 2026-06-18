@@ -1,5 +1,7 @@
 """FastAPI application entrypoint."""
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -10,7 +12,7 @@ from rustok_mcp.config import get_settings
 from rustok_mcp.gateway import GatewayClient
 from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.health import router as health_router
-from rustok_mcp.sse import _sessions
+from rustok_mcp.sse import _sessions, session_reaper
 from rustok_mcp.sse import router as sse_router
 from rustok_mcp.telemetry import init_telemetry
 
@@ -33,9 +35,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     protocol, registry = create_protocol_and_registry(gateway_client)
     app.state.protocol = protocol
     app.state.registry = registry
+    reaper = asyncio.create_task(session_reaper())
     try:
         yield
     finally:
+        reaper.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await reaper
         await gateway_client.close()
         # Shutdown: clear all sessions to prevent memory leaks
         _sessions.clear()
