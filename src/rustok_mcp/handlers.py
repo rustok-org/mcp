@@ -4,8 +4,8 @@ import json
 from typing import Any
 
 from rustok_mcp.capabilities import (
+    extract_rustok_capabilities,
     has_capability,
-    parse_capabilities,
 )
 from rustok_mcp.gateway import GatewayClient
 from rustok_mcp.protocol import JsonRpcRequest, McpError, McpProtocol
@@ -40,10 +40,8 @@ async def handle_initialize(
     with all capabilities) stays usable by standard MCP clients. A non-empty list
     overrides the default, letting a client opt into a narrower set.
     """
-    params = request.params or {}
-    if isinstance(params, dict) and context is not None:
-        raw_caps = params.get("capabilities", [])
-        caps = parse_capabilities(raw_caps) if isinstance(raw_caps, list) else set()
+    if context is not None:
+        caps = extract_rustok_capabilities(request.params)
         if caps:
             context["capabilities"] = caps
         else:
