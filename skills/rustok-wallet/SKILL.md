@@ -49,6 +49,9 @@ This prints the wallet **address** and the **24 words**. Write the words down
 offline and fund the address. Recovery = these 24 words (importable into any
 standard wallet, e.g. MetaMask) or the `rustok-wallet` Docker volume + password.
 
+> **Headless/CI:** replace `-it` with `-i`. The password is already supplied via
+> `RUSTOK_KEYRING_PASSWORD`, so no TTY is required.
+
 ## How the agent runs the wallet
 
 The MCP client launches the image over stdio (keys stay local):
@@ -61,6 +64,11 @@ docker run -i --rm --init \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
   ghcr.io/rustok-org/rustok-wallet:latest
 ```
+
+> The container automatically mints an ephemeral `RUSTOK_MCP_API_KEY` for the
+> loopback gateway↔mcp hop, so no API key configuration is needed for stdio use.
+> Set `RUSTOK_MCP_API_KEY` yourself **only** when exposing the gateway over a
+> network (not the default stdio setup).
 
 For **Claude Desktop / Cursor** (stdio MCP), add to the MCP config:
 

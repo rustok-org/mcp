@@ -34,6 +34,13 @@ while ! python -c "import socket,sys; s=socket.socket(); s.settimeout(1); r=s.co
     sleep 1
 done
 
+# Authenticate the loopback gateway<->mcp hop without user config. Respect an
+# explicit user key or explicit dev mode; otherwise mint an ephemeral one.
+if [ -z "${RUSTOK_MCP_API_KEY:-}" ] && [ "${RUSTOK_GATEWAY_DEV:-}" != "1" ]; then
+    RUSTOK_MCP_API_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+fi
+export RUSTOK_MCP_API_KEY
+
 RUSTOK_GATEWAY_ADDR="127.0.0.1:3000" RUSTOK_CORE_ADDR="http://127.0.0.1:50051" gateway 1>&2 &
 
 # 3. Wait until the gateway reports the core serving.
