@@ -12,7 +12,7 @@ resp=$(printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":["read_wallet"]}}' \
   | docker run -i --rm --init \
       -v rustok-wallet:/data \
-      -e RUSTOK_KEYRING_PASSWORD="${RUSTOK_KEYRING_PASSWORD:-}" \
+      -e RUSTOK_KEYRING_PASSWORD \
       "${IMAGE}" 2>/dev/null | head -n 1)
 
 if echo "${resp}" | grep -q '"serverInfo"'; then
