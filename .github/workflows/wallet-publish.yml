@@ -1,14 +1,23 @@
 name: Wallet Image Publish
 
 # Builds the all-in-one self-custody wallet image (Core + Gateway + MCP, spoken
-# over stdio) and pushes it to GHCR on version tags. The Core/Gateway binaries
-# come from the published ghcr.io/<owner>/rustok-core image at the same tag, so
-# rustok-core:<tag> must be published (and pullable) first.
+# over stdio) and pushes it to GHCR. The Core/Gateway binaries come FROM the
+# private rustok-core image, which this PUBLIC repo's CI cannot pull without
+# being granted read access to the proprietary core package — and wallet/core
+# are versioned independently, so `rustok-core:<wallet-tag>` need not exist.
+#
+# Wallet images are therefore published MANUALLY by design:
+#   docker build -f Dockerfile.wallet \
+#     --build-arg CORE_IMAGE=ghcr.io/<owner>/rustok-core:<core-tag> -t ... .
+#   docker push ...
+#
+# This workflow is kept as a manual-trigger scaffold only (workflow_dispatch).
+# Do NOT re-enable it on tags without first wiring private-core CI read access
+# and aligning the core/wallet version tags — otherwise it fails at `FROM` with
+# a 403 on the (non-existent / inaccessible) rustok-core:<tag>.
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
