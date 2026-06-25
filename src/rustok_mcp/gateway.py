@@ -62,16 +62,10 @@ class GatewayClient:
         params = {"address": address} if address else None
         return await self._get("/api/v1/wallet/positions", params=params)
 
-    async def preview_send(self, to: str, amount: str, chain_id: int) -> Any:
+    async def preview_transaction(self, to: str, value: str, chain_id: int, data: str = "") -> Any:
         return await self._post(
-            "/api/v1/wallet/preview_send",
-            {"to": to, "amount": amount, "chain_id": chain_id},
-        )
-
-    async def execute_send(self, preview_id: str) -> Any:
-        return await self._post(
-            "/api/v1/wallet/execute_send",
-            {"preview_id": preview_id},
+            "/api/v1/wallet/preview_transaction",
+            {"to": to, "data": data, "value": value, "chain_id": chain_id},
         )
 
     async def sign_message(self, message: str, sign_type: str) -> Any:

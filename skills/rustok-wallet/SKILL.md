@@ -117,14 +117,13 @@ To run a restricted agent, set `RUSTOK_MCP_CAPABILITIES` to a subset
 | `get_wallet_context` | read_wallet | Active wallet address, per-chain balances, allowed chains |
 | `get_balances` | read_wallet | Token balances for the active wallet, or `{address, chain_id}` |
 | `get_positions` | read_wallet | DeFi positions — Aave v3 (collateral/debt/health factor/LTV) + ERC-4626 vaults; optional `{address}` |
-| `preview_send` | preview_tx | Preview an ETH send `{to, amount, chain_id}` → `preview_id`, gas, risk level |
-| `execute_send` | execute_tx | Broadcast a previewed send `{preview_id}` → `tx_hash` |
+| `preview_transaction` | preview_tx | Preview any transaction `{to, value, chain_id, data?}` → decoded call (who/what is authorized), pre-sign simulation (revert check), gas, risk level |
 | `sign_message` | execute_tx | Sign a message (EIP-191) |
 
 ## Behavioral guidelines
 
-1. **Always `preview_send` before `execute_send`** — never execute without a fresh preview.
-2. **Show the preview** (amount, destination, estimated cost, risk level) before executing.
+1. **Always `preview_transaction` first** and show its decoded call + simulation (revert check) + risk level so the user gives informed approval.
+2. **Surface what the preview decoded** (who/what is authorized, amount, revert check, estimated cost, risk level) before the user acts on it.
 3. **Use `get_wallet_context` first** so you don't hallucinate balances or chains.
 4. If a tool needs a capability the session lacks, it returns an authorization
    error — explain that to the user rather than retrying.

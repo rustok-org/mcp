@@ -27,8 +27,7 @@ def test_capability_map() -> None:
     assert CAPABILITY_MAP["get_wallet_context"] == Capability.READ_WALLET
     assert CAPABILITY_MAP["get_balances"] == Capability.READ_WALLET
     assert CAPABILITY_MAP["get_positions"] == Capability.READ_WALLET
-    assert CAPABILITY_MAP["preview_send"] == Capability.PREVIEW_TX
-    assert CAPABILITY_MAP["execute_send"] == Capability.EXECUTE_TX
+    assert CAPABILITY_MAP["preview_transaction"] == Capability.PREVIEW_TX
     assert CAPABILITY_MAP["sign_message"] == Capability.EXECUTE_TX
 
 
@@ -76,7 +75,7 @@ def test_has_capability_with_required() -> None:
     """has_capability returns True only when required capability is present."""
     caps = {Capability.READ_WALLET}
     assert has_capability("get_wallet_context", caps) is True
-    assert has_capability("execute_send", caps) is False
+    assert has_capability("preview_transaction", caps) is False
 
 
 def test_has_capability_unmapped_tool() -> None:

@@ -162,24 +162,22 @@ def _make_get_positions_handler(client: GatewayClient | None) -> Any:
     return handler
 
 
-def _make_preview_send_handler(client: GatewayClient | None) -> Any:
+def _make_preview_transaction_handler(client: GatewayClient | None) -> Any:
     async def handler(args: dict[str, Any]) -> Any:
         if client is None:
-            return {"preview_id": "stub-preview-id", "estimated_gas": "21000"}
-        return await client.preview_send(
+            return {
+                "preview_id": "stub-preview-id",
+                "estimated_gas": "21000",
+                "simulation": None,
+            }
+        # The gateway response is returned as-is, so the decoded_call + simulation
+        # (revert_check) fields surface to the caller via passthrough.
+        return await client.preview_transaction(
             to=_require(args, "to"),
-            amount=_require(args, "amount"),
+            value=_require(args, "value"),
             chain_id=_require(args, "chain_id"),
+            data=args.get("data", ""),
         )
-
-    return handler
-
-
-def _make_execute_send_handler(client: GatewayClient | None) -> Any:
-    async def handler(args: dict[str, Any]) -> Any:
-        if client is None:
-            return {"tx_hash": "0xstubtxhash"}
-        return await client.execute_send(preview_id=_require(args, "preview_id"))
 
     return handler
 
@@ -252,33 +250,27 @@ def create_protocol_and_registry(
     )
     registry.register(
         Tool(
-            name="preview_send",
-            description="Preview an ETH send transaction before executing.",
+            name="preview_transaction",
+            description=(
+                "Preview an arbitrary transaction (native value + optional calldata) "
+                "before executing. Returns the decoded call (who/what is authorized), "
+                "a pre-sign simulation (revert check), gas, and a risk level."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "to": {"type": "string", "description": "Recipient address"},
-                    "amount": {"type": "string", "description": "Amount in ETH"},
+                    "to": {"type": "string", "description": "Recipient / contract address"},
+                    "data": {
+                        "type": "string",
+                        "description": "Calldata as 0x-hex; empty for a native value transfer",
+                    },
+                    "value": {"type": "string", "description": "Native value in wei"},
                     "chain_id": {"type": "integer", "description": "Chain ID"},
                 },
-                "required": ["to", "amount", "chain_id"],
+                "required": ["to", "value", "chain_id"],
             },
         ),
-        _make_preview_send_handler(gateway_client),
-    )
-    registry.register(
-        Tool(
-            name="execute_send",
-            description="Execute a previously previewed send transaction.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "preview_id": {"type": "string", "description": "Preview ID from preview_send"},
-                },
-                "required": ["preview_id"],
-            },
-        ),
-        _make_execute_send_handler(gateway_client),
+        _make_preview_transaction_handler(gateway_client),
     )
     registry.register(
         Tool(

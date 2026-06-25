@@ -109,11 +109,11 @@ async def test_tools_list_handler() -> None:
     assert response is not None
     assert response.result is not None
     tools = response.result["tools"]
-    assert len(tools) == 6
+    assert len(tools) == 5
     names = {t["name"] for t in tools}
     assert "get_wallet_context" in names
     assert "get_positions" in names
-    assert "preview_send" in names
+    assert "preview_transaction" in names
 
 
 async def test_tools_list_filters_by_capability() -> None:
@@ -131,7 +131,7 @@ async def test_tools_list_filters_by_capability() -> None:
     assert "get_wallet_context" in names
     assert "get_balances" in names
     assert "get_positions" in names
-    assert "preview_send" not in names
+    assert "preview_transaction" not in names
 
 
 async def test_tools_list_denies_all_without_context() -> None:
@@ -203,7 +203,7 @@ async def test_tools_call_capability_denied() -> None:
         jsonrpc="2.0",
         id=3,
         method="tools/call",
-        params={"name": "execute_send", "arguments": {"preview_id": "abc"}},
+        params={"name": "sign_message", "arguments": {"message": "x", "sign_type": "eip191"}},
     )
     response = await protocol.handle(request, context)
 
@@ -471,10 +471,10 @@ async def test_get_positions_falls_back_to_stub() -> None:
     assert '"positions": []' in response.result["content"][0]["text"]
 
 
-async def test_preview_send_uses_gateway_client() -> None:
-    """preview_send tool delegates to GatewayClient when provided."""
+async def test_preview_transaction_uses_gateway_client() -> None:
+    """preview_transaction tool delegates to GatewayClient when provided."""
     mock_client = AsyncMock(spec=GatewayClient)
-    mock_client.preview_send = AsyncMock(return_value={"preview_id": "real-id"})
+    mock_client.preview_transaction = AsyncMock(return_value={"preview_id": "real-id"})
 
     protocol, _registry = create_protocol_and_registry(mock_client)
     context = {"capabilities": set(Capability)}
@@ -483,8 +483,8 @@ async def test_preview_send_uses_gateway_client() -> None:
         id=5,
         method="tools/call",
         params={
-            "name": "preview_send",
-            "arguments": {"to": "0xabc", "amount": "1.0", "chain_id": 1},
+            "name": "preview_transaction",
+            "arguments": {"to": "0xabc", "value": "1.0", "chain_id": 1},
         },
     )
     response = await protocol.handle(request, context)
@@ -492,11 +492,13 @@ async def test_preview_send_uses_gateway_client() -> None:
     assert response is not None
     assert response.result is not None
     assert "real-id" in response.result["content"][0]["text"]
-    mock_client.preview_send.assert_awaited_once_with(to="0xabc", amount="1.0", chain_id=1)
+    mock_client.preview_transaction.assert_awaited_once_with(
+        to="0xabc", value="1.0", chain_id=1, data=""
+    )
 
 
-async def test_preview_send_falls_back_to_stub() -> None:
-    """preview_send tool returns stub when no GatewayClient is provided."""
+async def test_preview_transaction_falls_back_to_stub() -> None:
+    """preview_transaction tool returns stub when no GatewayClient is provided."""
     protocol, _registry = create_protocol_and_registry()
     context = {"capabilities": set(Capability)}
     request = JsonRpcRequest(
@@ -504,8 +506,8 @@ async def test_preview_send_falls_back_to_stub() -> None:
         id=5,
         method="tools/call",
         params={
-            "name": "preview_send",
-            "arguments": {"to": "0xabc", "amount": "1.0", "chain_id": 1},
+            "name": "preview_transaction",
+            "arguments": {"to": "0xabc", "value": "1.0", "chain_id": 1},
         },
     )
     response = await protocol.handle(request, context)
@@ -513,27 +515,6 @@ async def test_preview_send_falls_back_to_stub() -> None:
     assert response is not None
     assert response.result is not None
     assert "stub-preview-id" in response.result["content"][0]["text"]
-
-
-async def test_execute_send_uses_gateway_client() -> None:
-    """execute_send tool delegates to GatewayClient when provided."""
-    mock_client = AsyncMock(spec=GatewayClient)
-    mock_client.execute_send = AsyncMock(return_value={"tx_hash": "0xreal"})
-
-    protocol, _registry = create_protocol_and_registry(mock_client)
-    context = {"capabilities": set(Capability)}
-    request = JsonRpcRequest(
-        jsonrpc="2.0",
-        id=6,
-        method="tools/call",
-        params={"name": "execute_send", "arguments": {"preview_id": "abc"}},
-    )
-    response = await protocol.handle(request, context)
-
-    assert response is not None
-    assert response.result is not None
-    assert "0xreal" in response.result["content"][0]["text"]
-    mock_client.execute_send.assert_awaited_once_with(preview_id="abc")
 
 
 async def test_sign_message_uses_gateway_client() -> None:
@@ -557,7 +538,7 @@ async def test_sign_message_uses_gateway_client() -> None:
     mock_client.sign_message.assert_awaited_once_with(message="hello", sign_type="eip191")
 
 
-async def test_preview_send_missing_arg_returns_invalid_params() -> None:
+async def test_preview_transaction_missing_arg_returns_invalid_params() -> None:
     """Missing required argument maps to -32602 (Invalid params), not -32603."""
     mock_client = AsyncMock(spec=GatewayClient)
     protocol, _registry = create_protocol_and_registry(mock_client)
@@ -567,8 +548,8 @@ async def test_preview_send_missing_arg_returns_invalid_params() -> None:
         id=8,
         method="tools/call",
         params={
-            "name": "preview_send",
-            "arguments": {"amount": "1.0", "chain_id": 1},  # missing "to"
+            "name": "preview_transaction",
+            "arguments": {"value": "1.0", "chain_id": 1},  # missing "to"
         },
     )
     response = await protocol.handle(request, context)
@@ -577,27 +558,7 @@ async def test_preview_send_missing_arg_returns_invalid_params() -> None:
     assert response.error is not None
     assert response.error.code == -32602
     assert "to" in response.error.message
-    mock_client.preview_send.assert_not_awaited()
-
-
-async def test_execute_send_missing_arg_returns_invalid_params() -> None:
-    """execute_send without preview_id maps to -32602, Gateway not called."""
-    mock_client = AsyncMock(spec=GatewayClient)
-    protocol, _registry = create_protocol_and_registry(mock_client)
-    context = {"capabilities": set(Capability)}
-    request = JsonRpcRequest(
-        jsonrpc="2.0",
-        id=9,
-        method="tools/call",
-        params={"name": "execute_send", "arguments": {}},  # missing "preview_id"
-    )
-    response = await protocol.handle(request, context)
-
-    assert response is not None
-    assert response.error is not None
-    assert response.error.code == -32602
-    assert "preview_id" in response.error.message
-    mock_client.execute_send.assert_not_awaited()
+    mock_client.preview_transaction.assert_not_awaited()
 
 
 async def test_sign_message_missing_arg_returns_invalid_params() -> None:

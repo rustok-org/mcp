@@ -19,33 +19,19 @@ from rustok_mcp.protocol import (
 )
 
 
-async def test_preview_send_success() -> None:
-    """preview_send returns Gateway response on 200."""
+async def test_preview_transaction_success() -> None:
+    """preview_transaction returns the Gateway response on 200."""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/wallet/preview_send"
+        assert request.url.path == "/api/v1/wallet/preview_transaction"
         body = json.loads(request.content)
-        assert body == {"to": "0x123", "amount": "1.0", "chain_id": 1}
+        assert body == {"to": "0x123", "data": "", "value": "1.0", "chain_id": 1}
         return httpx.Response(200, json={"preview_id": "abc", "estimated_gas": "21000"})
 
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
-    result = await client.preview_send("0x123", "1.0", 1)
+    result = await client.preview_transaction("0x123", "1.0", 1)
     assert result == {"preview_id": "abc", "estimated_gas": "21000"}
-    await client.close()
-
-
-async def test_execute_send_success() -> None:
-    """execute_send returns tx_hash on 200."""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/wallet/execute_send"
-        return httpx.Response(200, json={"tx_hash": "0xdeadbeef"})
-
-    transport = httpx.MockTransport(handler)
-    client = GatewayClient("http://gateway", transport=transport)
-    result = await client.execute_send("preview-123")
-    assert result == {"tx_hash": "0xdeadbeef"}
     await client.close()
 
 
@@ -160,7 +146,7 @@ async def test_4xx_bad_request_maps_to_invalid_params() -> None:
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
-        await client.preview_send("0x123", "1.0", 99)
+        await client.preview_transaction("0x123", "1.0", 99)
     assert exc_info.value.code == ERR_INVALID_PARAMS
     assert "unsupported chain id: 99" in str(exc_info.value)
     await client.close()
@@ -175,7 +161,7 @@ async def test_4xx_unrecognized_body_is_masked() -> None:
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
-        await client.preview_send("0x123", "1.0", 1)
+        await client.preview_transaction("0x123", "1.0", 1)
     assert exc_info.value.code == ERR_INTERNAL
     assert "secret" not in str(exc_info.value)
     assert "Traceback" not in str(exc_info.value)
@@ -197,7 +183,7 @@ async def test_409_tx_blocked_maps_to_actionable_error() -> None:
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
-        await client.preview_send("0x123", "1.0", 1)
+        await client.preview_transaction("0x123", "1.0", 1)
     assert exc_info.value.code == ERR_TX_BLOCKED
     assert "known scam recipient 0xdeadbeef" in str(exc_info.value)
     assert "Transaction blocked by policy" in str(exc_info.value)
@@ -216,7 +202,7 @@ async def test_409_precondition_failed_maps_to_actionable_error() -> None:
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
-        await client.execute_send("preview-123")
+        await client.preview_transaction("0x123", "1.0", 1)
     assert exc_info.value.code == ERR_PRECONDITION
     assert "wallet is locked" in str(exc_info.value)
     await client.close()
@@ -286,7 +272,7 @@ async def test_unauthorized_raises_mcperror() -> None:
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
-        await client.execute_send("preview-123")
+        await client.preview_transaction("0x123", "1.0", 1)
     assert exc_info.value.code == ERR_UNAUTHORIZED
     assert "Unauthorized" in str(exc_info.value)
     await client.close()
@@ -316,7 +302,7 @@ async def test_auth_header_set_when_api_key_provided() -> None:
 
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", api_key="secret", transport=transport)
-    await client.preview_send("0x123", "1.0", 1)
+    await client.preview_transaction("0x123", "1.0", 1)
     assert received_headers.get("authorization") == "Bearer secret"
     await client.close()
 
@@ -331,7 +317,7 @@ async def test_auth_header_not_set_without_api_key() -> None:
 
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", api_key=None, transport=transport)
-    await client.preview_send("0x123", "1.0", 1)
+    await client.preview_transaction("0x123", "1.0", 1)
     assert "authorization" not in {k.lower() for k in received_headers}
     await client.close()
 
@@ -345,7 +331,7 @@ async def test_connect_error_raises_gateway_unreachable() -> None:
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
-        await client.preview_send("0x123", "1.0", 1)
+        await client.preview_transaction("0x123", "1.0", 1)
     assert exc_info.value.code == -32603
     assert "unreachable" in str(exc_info.value).lower()
     await client.close()
@@ -360,7 +346,7 @@ async def test_timeout_raises_gateway_timeout() -> None:
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
-        await client.execute_send("preview-123")
+        await client.preview_transaction("0x123", "1.0", 1)
     assert exc_info.value.code == -32603
     assert "timeout" in str(exc_info.value).lower()
     await client.close()
@@ -375,7 +361,7 @@ async def test_generic_request_error_hits_fallback() -> None:
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
-        await client.preview_send("0x123", "1.0", 1)
+        await client.preview_transaction("0x123", "1.0", 1)
     assert exc_info.value.code == -32603
     assert str(exc_info.value) == "Gateway request failed"
     await client.close()
