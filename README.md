@@ -74,8 +74,9 @@ Core service (they stay in the local keystore volume).
 - **Chains are opt-in**: set `RUSTOK_ALLOWED_CHAINS` (default `1,8453` — Ethereum +
   Base); enable another chain by providing its RPC (`RUSTOK_RPC_URLS_<id>` or an
   Alchemy key).
-- **Preview before execute**: `preview_send` returns gas + a txguard risk level;
-  `execute_send` broadcasts a previewed transaction.
+- **Informed preview**: `preview_transaction` returns the decoded call (who/what is
+  authorized), a pre-sign simulation (revert check), gas, and a txguard risk level.
+  Execution is not exposed as an MCP tool.
 - **Audit logging**: every action is append-only logged to SQLite in Core.
 
 ## Documentation

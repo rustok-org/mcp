@@ -32,8 +32,8 @@ Each tool is gated by a capability:
 | Capability | Tools |
 |------------|-------|
 | `read_wallet` | `get_wallet_context`, `get_balances`, `get_positions` |
-| `preview_tx` | `preview_send` |
-| `execute_tx` | `execute_send`, `sign_message` |
+| `preview_tx` | `preview_transaction` |
+| `execute_tx` | `sign_message` |
 
 The **stdio** transport (the `docker run -i` wallet image) is process-trusted —
 whoever launches it owns the machine — so it grants **all** capabilities by

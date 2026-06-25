@@ -53,8 +53,7 @@ async def test_stdio_default_exposes_all_tools(monkeypatch: pytest.MonkeyPatch) 
         "get_wallet_context",
         "get_balances",
         "get_positions",
-        "preview_send",
-        "execute_send",
+        "preview_transaction",
         "sign_message",
     }
 
