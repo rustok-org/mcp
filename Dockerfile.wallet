@@ -6,11 +6,11 @@
 #
 # Build (local, against a locally-built core image):
 #   docker build -f Dockerfile.wallet --build-arg CORE_IMAGE=rustok-core:v0.1.0 \
-#     -t rustok-wallet:v0.1.0 .
+#     -t rustok-wallet:0.3.2 .
 # Onboard:  docker run -it --rm -v rustok-wallet:/data -e RUSTOK_KEYRING_PASSWORD=… \
-#     rustok-wallet:v0.1.0 create-wallet
+#     rustok-wallet:0.3.2 create-wallet
 # Run (MCP stdio): docker run -i --rm --init -v rustok-wallet:/data \
-#     -e RUSTOK_KEYRING_PASSWORD=… -e RUSTOK_RPC_URLS_1=… rustok-wallet:v0.1.0
+#     -e RUSTOK_KEYRING_PASSWORD=… -e RUSTOK_RPC_URLS_1=… rustok-wallet:0.3.2
 
 ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.1.0
 
@@ -55,6 +55,9 @@ RUN chmod +x /usr/local/bin/rustok-wallet-entrypoint /usr/local/bin/core-server 
 LABEL org.opencontainers.image.title="rustok-wallet" \
       org.opencontainers.image.description="Rustok self-custody Ethereum agent wallet — all-in-one MCP (stdio)" \
       org.opencontainers.image.licenses="LicenseRef-Proprietary"
+# Ownership annotation for the official MCP registry (validator reads the image
+# config label; value MUST equal server.json `name`).
+LABEL io.modelcontextprotocol.server.name="io.github.rustok-org/rustok-wallet"
 
 USER rustok
 ENV RUSTOK_DATA_DIR=/data

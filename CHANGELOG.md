@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RUSTOK_MCP_HOST` setting (default `127.0.0.1`; set `0.0.0.0` in Docker)
 
 ### Changed
+- Server/image version unified to **0.3.2** (was 0.1.0) to match the ClawHub
+  skill — `pyproject`, the FastAPI app, and the MCP `serverInfo` clients see at
+  `initialize` now all report 0.3.2. Added `server.json` for the official MCP
+  registry (OCI/stdio package) plus the required
+  `io.modelcontextprotocol.server.name` image label in `Dockerfile.wallet`.
 - Dockerfile rewritten for the Python server (uv multi-stage build,
   non-root runtime, SSE entrypoint); legacy Rust-binary image removed
 - `get_balances` accepts optional `address` (+ required `chain_id`) and then
