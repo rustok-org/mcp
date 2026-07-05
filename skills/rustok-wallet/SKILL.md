@@ -39,9 +39,12 @@ Create the wallet and **back up the 24-word recovery phrase** — it is shown on
 once, in the user's own terminal (never to the agent):
 
 ```bash
+# Choose a strong keyring password; read -s keeps it out of shell history and ps.
+read -r -s -p "Keyring password: " RUSTOK_KEYRING_PASSWORD && export RUSTOK_KEYRING_PASSWORD
+
 docker run -it --rm \
   -v rustok-wallet:/data \
-  -e RUSTOK_KEYRING_PASSWORD="choose-a-strong-password" \
+  -e RUSTOK_KEYRING_PASSWORD \
   ghcr.io/rustok-org/rustok-wallet:latest create-wallet
 ```
 
@@ -54,12 +57,20 @@ standard wallet, e.g. MetaMask) or the `rustok-wallet` Docker volume + password.
 
 ## How the agent runs the wallet
 
-The MCP client launches the image over stdio (keys stay local):
+The MCP client launches the image over stdio (keys stay local). **Never put the
+keyring password in the MCP config or shell history** — keep it in a private,
+`0600` env-file that only you can read:
 
 ```bash
+# One-time: write the keyring password into a private env-file (chmod 600).
+umask 077
+read -r -s -p "Keyring password: " pw \
+  && printf 'RUSTOK_KEYRING_PASSWORD=%s\n' "$pw" > ~/.rustok-wallet.env \
+  && unset pw
+
 docker run -i --rm --init \
   -v rustok-wallet:/data \
-  -e RUSTOK_KEYRING_PASSWORD="..." \
+  --env-file ~/.rustok-wallet.env \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
   ghcr.io/rustok-org/rustok-wallet:latest
@@ -70,7 +81,9 @@ docker run -i --rm --init \
 > Set `RUSTOK_MCP_API_KEY` yourself **only** when exposing the gateway over a
 > network (not the default stdio setup).
 
-For **Claude Desktop / Cursor** (stdio MCP), add to the MCP config:
+For **Claude Desktop / Cursor** (stdio MCP), add to the MCP config. The keyring
+password stays in the `0600` env-file above (`--env-file`), **never in this
+config file** — only the non-secret RPC URL lives here:
 
 ```json
 {
@@ -79,12 +92,11 @@ For **Claude Desktop / Cursor** (stdio MCP), add to the MCP config:
       "command": "docker",
       "args": ["run", "-i", "--rm", "--init",
                "-v", "rustok-wallet:/data",
-               "-e", "RUSTOK_KEYRING_PASSWORD",
+               "--env-file", "/home/you/.rustok-wallet.env",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
                "ghcr.io/rustok-org/rustok-wallet:latest"],
       "env": {
-        "RUSTOK_KEYRING_PASSWORD": "...",
         "RUSTOK_RPC_URLS_1": "https://your-rpc"
       }
     }
