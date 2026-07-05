@@ -1,5 +1,6 @@
 """MCP JSON-RPC handlers and protocol wiring."""
 
+import contextlib
 import json
 from typing import Any
 
@@ -43,6 +44,30 @@ def _require(args: dict[str, Any], key: str) -> Any:
         return args[key]
     except KeyError as exc:
         raise ValueError(f"Missing required argument: {key}") from exc
+
+
+_WEI_PER_ETH = 10**18
+
+
+def _wei_to_eth(wei: Any) -> str:
+    """Render a wei integer string as a plain decimal-ETH string."""
+    integral, frac = divmod(int(wei), _WEI_PER_ETH)
+    frac_str = f"{frac:018d}".rstrip("0")
+    return f"{integral}.{frac_str}" if frac_str else str(integral)
+
+
+def _with_balance_eth(balances: Any) -> Any:
+    """Add an explicit ``balance_eth`` next to each wei ``balance`` entry."""
+    if not isinstance(balances, list):
+        return balances
+    enriched: list[Any] = []
+    for entry in balances:
+        if isinstance(entry, dict) and "balance" in entry:
+            entry = dict(entry)
+            with contextlib.suppress(TypeError, ValueError):
+                entry["balance_eth"] = _wei_to_eth(entry["balance"])
+        enriched.append(entry)
+    return enriched
 
 
 async def handle_initialize(
@@ -123,7 +148,11 @@ def _make_get_wallet_context_handler(client: GatewayClient | None) -> Any:
                 "address": "0x0000000000000000000000000000000000000000",
                 "balances": [],
             }
-        return await client.wallet_context()
+        context = await client.wallet_context()
+        if isinstance(context, dict) and "balances" in context:
+            context = dict(context)
+            context["balances"] = _with_balance_eth(context["balances"])
+        return context
 
     return handler
 
@@ -140,14 +169,16 @@ def _make_get_balances_handler(client: GatewayClient | None) -> Any:
                 raise ValueError("Missing required argument: chain_id (required with address)")
             result = await client.get_balance(address, chain_id)
             return {
-                "balances": [{"chain_id": chain_id, "balance": result.get("balance")}],
+                "balances": _with_balance_eth(
+                    [{"chain_id": chain_id, "balance": result.get("balance")}]
+                ),
             }
         # Active wallet — balances come with the wallet context.
         context = await client.wallet_context()
         balances = context.get("balances", [])
         if chain_id is not None:
             balances = [b for b in balances if b.get("chain_id") == chain_id]
-        return {"balances": balances}
+        return {"balances": _with_balance_eth(balances)}
 
     return handler
 
@@ -215,7 +246,10 @@ def create_protocol_and_registry(
     registry.register(
         Tool(
             name="get_balances",
-            description="Get token balances for the active wallet, or for an explicit address.",
+            description=(
+                "Get token balances for the active wallet, or for an explicit "
+                "address. `balance` is in wei; `balance_eth` is the same value in ETH."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
