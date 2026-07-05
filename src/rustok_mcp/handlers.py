@@ -1,6 +1,8 @@
 """MCP JSON-RPC handlers and protocol wiring."""
 
+import contextlib
 import json
+import re
 from typing import Any
 
 from rustok_mcp.capabilities import (
@@ -45,6 +47,65 @@ def _require(args: dict[str, Any], key: str) -> Any:
         raise ValueError(f"Missing required argument: {key}") from exc
 
 
+# Strict decimal-ETH shape: no sign, no exponent, no whitespace. Core parses
+# amounts as U256 wei; 27 integral digits (10^27 ETH = 10^45 wei) stays far
+# inside U256 while allowing any realistic value. Max 18 decimal places (wei).
+_AMOUNT_ETH_RE = re.compile(r"[0-9]{1,27}(\.[0-9]{1,18})?")
+_WEI_PER_ETH = 10**18
+
+
+def _eth_to_wei(amount_eth: Any) -> str:
+    """Convert a decimal-ETH string to an exact wei integer string.
+
+    Pure integer arithmetic — no float and no Decimal context that could
+    silently round large values. Raises ValueError on anything but a positive
+    plain decimal with at most 18 decimal places (``"1"``, ``"0.05"``).
+    """
+    if not isinstance(amount_eth, str) or not _AMOUNT_ETH_RE.fullmatch(amount_eth):
+        raise ValueError(
+            "amount_eth must be a positive decimal-ETH string with at most "
+            '18 decimal places, e.g. "0.05" (no signs, exponents or whitespace)'
+        )
+    integral, _, frac = amount_eth.partition(".")
+    wei = int(integral) * _WEI_PER_ETH + int(frac.ljust(18, "0") or "0")
+    if wei <= 0:
+        raise ValueError("amount_eth must be greater than zero")
+    return str(wei)
+
+
+def _wei_to_eth(wei: Any) -> str:
+    """Render a wei integer string as a plain decimal-ETH string."""
+    integral, frac = divmod(int(wei), _WEI_PER_ETH)
+    frac_str = f"{frac:018d}".rstrip("0")
+    return f"{integral}.{frac_str}" if frac_str else str(integral)
+
+
+def _with_explicit_amount_units(preview: Any) -> Any:
+    """Replace the gateway's wei ``amount`` with explicit ``amount_wei``/``amount_eth``."""
+    if not isinstance(preview, dict) or "amount" not in preview:
+        return preview
+    result = dict(preview)
+    wei = result.pop("amount")
+    result["amount_wei"] = wei
+    with contextlib.suppress(TypeError, ValueError):
+        result["amount_eth"] = _wei_to_eth(wei)
+    return result
+
+
+def _with_balance_eth(balances: Any) -> Any:
+    """Add an explicit ``balance_eth`` next to each wei ``balance`` entry."""
+    if not isinstance(balances, list):
+        return balances
+    enriched: list[Any] = []
+    for entry in balances:
+        if isinstance(entry, dict) and "balance" in entry:
+            entry = dict(entry)
+            with contextlib.suppress(TypeError, ValueError):
+                entry["balance_eth"] = _wei_to_eth(entry["balance"])
+        enriched.append(entry)
+    return enriched
+
+
 async def handle_initialize(
     request: JsonRpcRequest,
     context: dict[str, Any] | None = None,
@@ -66,7 +127,7 @@ async def handle_initialize(
     return {
         "protocolVersion": "2024-11-05",
         "capabilities": {"tools": {}},
-        "serverInfo": {"name": "rustok-mcp", "version": "0.3.2"},
+        "serverInfo": {"name": "rustok-mcp", "version": "0.4.0"},
         "instructions": SERVER_INSTRUCTIONS,
     }
 
@@ -123,7 +184,11 @@ def _make_get_wallet_context_handler(client: GatewayClient | None) -> Any:
                 "address": "0x0000000000000000000000000000000000000000",
                 "balances": [],
             }
-        return await client.wallet_context()
+        context = await client.wallet_context()
+        if isinstance(context, dict) and "balances" in context:
+            context = dict(context)
+            context["balances"] = _with_balance_eth(context["balances"])
+        return context
 
     return handler
 
@@ -140,14 +205,16 @@ def _make_get_balances_handler(client: GatewayClient | None) -> Any:
                 raise ValueError("Missing required argument: chain_id (required with address)")
             result = await client.get_balance(address, chain_id)
             return {
-                "balances": [{"chain_id": chain_id, "balance": result.get("balance")}],
+                "balances": _with_balance_eth(
+                    [{"chain_id": chain_id, "balance": result.get("balance")}]
+                ),
             }
         # Active wallet — balances come with the wallet context.
         context = await client.wallet_context()
         balances = context.get("balances", [])
         if chain_id is not None:
             balances = [b for b in balances if b.get("chain_id") == chain_id]
-        return {"balances": balances}
+        return {"balances": _with_balance_eth(balances)}
 
     return handler
 
@@ -164,13 +231,23 @@ def _make_get_positions_handler(client: GatewayClient | None) -> Any:
 
 def _make_preview_send_handler(client: GatewayClient | None) -> Any:
     async def handler(args: dict[str, Any]) -> Any:
+        if "amount" in args:
+            # Never silently re-scale: in <=0.3.2 `amount` was interpreted as
+            # wei despite being documented as ETH. A silent unit change would
+            # move 10^18x the intended value.
+            raise ValueError(
+                "'amount' was renamed to 'amount_eth' (the former 'amount' was "
+                'interpreted as wei); pass a decimal-ETH string, e.g. "0.05"'
+            )
+        amount_wei = _eth_to_wei(_require(args, "amount_eth"))
         if client is None:
             return {"preview_id": "stub-preview-id", "estimated_gas": "21000"}
-        return await client.preview_send(
+        result = await client.preview_send(
             to=_require(args, "to"),
-            amount=_require(args, "amount"),
+            amount=amount_wei,
             chain_id=_require(args, "chain_id"),
         )
+        return _with_explicit_amount_units(result)
 
     return handler
 
@@ -217,7 +294,10 @@ def create_protocol_and_registry(
     registry.register(
         Tool(
             name="get_balances",
-            description="Get token balances for the active wallet, or for an explicit address.",
+            description=(
+                "Get token balances for the active wallet, or for an explicit "
+                "address. `balance` is in wei; `balance_eth` is the same value in ETH."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -253,15 +333,24 @@ def create_protocol_and_registry(
     registry.register(
         Tool(
             name="preview_send",
-            description="Preview an ETH send transaction before executing.",
+            description=(
+                "Preview an ETH send transaction before executing. The response "
+                "spells units out: amount_wei + amount_eth."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "to": {"type": "string", "description": "Recipient address"},
-                    "amount": {"type": "string", "description": "Amount in ETH"},
+                    "amount_eth": {
+                        "type": "string",
+                        "description": (
+                            'Amount in ETH as a plain decimal string, e.g. "0.05" '
+                            "(max 18 decimal places; no exponents or signs)"
+                        ),
+                    },
                     "chain_id": {"type": "integer", "description": "Chain ID"},
                 },
-                "required": ["to", "amount", "chain_id"],
+                "required": ["to", "amount_eth", "chain_id"],
             },
         ),
         _make_preview_send_handler(gateway_client),

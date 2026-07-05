@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-05
+
+Maintenance release of the all-in-one wallet image + skill, fixing the defects
+found by the 2026-07-05 deep smoke test. Image base: core `v0.1.2`
+(= `v0.1.1` + `SignTypedData` gRPC/route + honest preview errors + sign guard).
+
+### Changed
+- **BREAKING — `preview_send` amount contract.** The old `amount` field was
+  documented as "Amount in ETH" but interpreted by core as a **wei integer**
+  (fractional amounts were impossible; `"1"` meant 1 wei). The field is renamed
+  to **`amount_eth`** (plain decimal string, max 18 decimal places) and is
+  converted to an exact wei integer in the MCP layer. Requests still using
+  `amount` fail loudly with a rename hint — never silently re-scaled.
+- `preview_send` responses now carry explicit units: `amount_wei` + `amount_eth`
+  (the ambiguous `amount` is gone).
+- `get_wallet_context` / `get_balances` responses: `balance` stays wei and an
+  explicit `balance_eth` is added alongside.
+- Insufficient balance during preview now surfaces as a clear precondition
+  error (was: misleading `Core unavailable`) — core `v0.1.2` fix.
+
+### Added
+- The wallet image now exposes `POST /api/v1/wallet/sign_typed_data`
+  (EIP-712 over a pre-computed `domain_separator`/`struct_hash`) on the
+  loopback gateway — unblocks glue-layer integrations (UniswapX order signing).
+
+### Security
+- `sign_message` is now guarded **server-side** (core `v0.1.2`): empty,
+  oversized (>4 KiB), non-UTF-8, control-character and raw-hex-blob payloads
+  are rejected before the signer is touched. Previously only the tool
+  description asked agents to refuse hex blobs.
+
 ## [Unreleased]
 
 > **Package reset:** the MCP server was rewritten from the v1 Rust binary

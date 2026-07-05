@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet
 description: Self-custody Ethereum agent wallet. Runs entirely on the user's machine as one Docker image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview, execute and sign. The user assumes all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.3.2
+version: 0.4.0
 metadata:
   openclaw:
     emoji: "🦀"
@@ -117,9 +117,22 @@ To run a restricted agent, set `RUSTOK_MCP_CAPABILITIES` to a subset
 | `get_wallet_context` | read_wallet | Active wallet address, per-chain balances, allowed chains |
 | `get_balances` | read_wallet | Token balances for the active wallet, or `{address, chain_id}` |
 | `get_positions` | read_wallet | DeFi positions — Aave v3 (collateral/debt/health factor/LTV) + ERC-4626 vaults; optional `{address}` |
-| `preview_send` | preview_tx | Preview an ETH send `{to, amount, chain_id}` → `preview_id`, gas, risk level |
+| `preview_send` | preview_tx | Preview an ETH send `{to, amount_eth, chain_id}` → `preview_id`, gas, risk level |
 | `execute_send` | execute_tx | Broadcast a previewed send `{preview_id}` → `tx_hash` |
-| `sign_message` | execute_tx | Sign a message (EIP-191) |
+| `sign_message` | execute_tx | Sign a short human-readable message (EIP-191) |
+
+**Units.** `preview_send` takes **`amount_eth`** — a plain decimal-ETH string
+(`"0.05"`, max 18 decimal places; no exponents). Responses spell units out:
+`amount_wei` + `amount_eth` in previews, and `balance` (wei) + `balance_eth`
+in balances. In ≤0.3.2 the old `amount` field was silently interpreted as
+**wei**; it is now rejected with a rename hint — never re-scaled.
+
+**Signing guard.** `sign_message` rejects hex blobs (≥16 hex chars, with or
+without `0x`), empty, oversized (>4 KiB) and control-character payloads
+server-side — a hex-blob signature could authorize an approval/permit drain.
+For integrations: the image's loopback gateway also exposes
+`POST /api/v1/wallet/sign_typed_data` (EIP-712 over a pre-computed
+`domain_separator`/`struct_hash`) for glue layers such as UniswapX signing.
 
 ## Behavioral guidelines
 

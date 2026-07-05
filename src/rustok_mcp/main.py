@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 app = FastAPI(
     title="Rustok MCP Server",
-    version="0.3.2",
+    version="0.4.0",
     lifespan=lifespan,
 )
 app.include_router(health_router)

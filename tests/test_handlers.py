@@ -484,7 +484,7 @@ async def test_preview_send_uses_gateway_client() -> None:
         method="tools/call",
         params={
             "name": "preview_send",
-            "arguments": {"to": "0xabc", "amount": "1.0", "chain_id": 1},
+            "arguments": {"to": "0xabc", "amount_eth": "1.0", "chain_id": 1},
         },
     )
     response = await protocol.handle(request, context)
@@ -492,7 +492,9 @@ async def test_preview_send_uses_gateway_client() -> None:
     assert response is not None
     assert response.result is not None
     assert "real-id" in response.result["content"][0]["text"]
-    mock_client.preview_send.assert_awaited_once_with(to="0xabc", amount="1.0", chain_id=1)
+    mock_client.preview_send.assert_awaited_once_with(
+        to="0xabc", amount="1000000000000000000", chain_id=1
+    )
 
 
 async def test_preview_send_falls_back_to_stub() -> None:
@@ -505,7 +507,7 @@ async def test_preview_send_falls_back_to_stub() -> None:
         method="tools/call",
         params={
             "name": "preview_send",
-            "arguments": {"to": "0xabc", "amount": "1.0", "chain_id": 1},
+            "arguments": {"to": "0xabc", "amount_eth": "1.0", "chain_id": 1},
         },
     )
     response = await protocol.handle(request, context)
