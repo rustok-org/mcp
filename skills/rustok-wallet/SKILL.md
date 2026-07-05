@@ -11,7 +11,7 @@ metadata:
     homepage: https://github.com/rustok-org/mcp
 ---
 
-# rustok-wallet
+# Rustok Ethereum Wallet
 
 > **License note:** this OpenClaw skill package (`skills/rustok-wallet/`) is MIT-0
 > per ClawHub requirements. The Rustok wallet core itself is proprietary; only the
