@@ -162,6 +162,49 @@ async def test_preview_response_carries_explicit_units() -> None:
     assert '"amount"' not in text.replace('"amount_wei"', "").replace('"amount_eth"', "")
 
 
+async def test_preview_send_stub_mode_still_validates() -> None:
+    """Without a gateway client, bad/missing amount_eth must still be rejected."""
+    protocol, _registry = create_protocol_and_registry()
+    context = {"capabilities": set(Capability)}
+
+    bad = await protocol.handle(
+        _preview_request({"to": "0xabc", "amount_eth": "1e5", "chain_id": 1}), context
+    )
+    assert bad is not None
+    assert bad.error is not None
+    assert bad.error.code == -32602
+
+    missing = await protocol.handle(_preview_request({"to": "0xabc", "chain_id": 1}), context)
+    assert missing is not None
+    assert missing.error is not None
+    assert missing.error.code == -32602
+
+
+async def test_get_balances_explicit_address_adds_balance_eth() -> None:
+    """The explicit-address branch enriches its single entry with balance_eth."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.get_balance = AsyncMock(return_value={"balance": "5000000000000000"})
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=4,
+        method="tools/call",
+        params={
+            "name": "get_balances",
+            "arguments": {"address": "0xA713e7145F0060A35E92a928e997B42481c0FfEE", "chain_id": 1},
+        },
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.result is not None
+    text = response.result["content"][0]["text"]
+    assert '"balance": "5000000000000000"' in text
+    assert '"balance_eth": "0.005"' in text
+
+
 async def test_get_balances_adds_balance_eth() -> None:
     mock_client = AsyncMock(spec=GatewayClient)
     mock_client.wallet_context = AsyncMock(
