@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-07-05
+
+Skill-package docs patch (image unchanged, stays 0.4.0).
+
+### Fixed
+- Onboarding guidance no longer embeds the keyring password in the persistent
+  MCP config (`claude_desktop_config.json`) — the SkillSpector audit flagged
+  `"RUSTOK_KEYRING_PASSWORD": "..."` in the `env` block as a credential-access
+  risk (a wallet-unlock password living in a synced/backed-up config file). The
+  password now lives in a private `0600` env-file passed via `--env-file`; the
+  MCP config references it by path and holds only the non-secret RPC URL. Matches
+  the audit's own advice (secret manager / runtime prompt, restricted permissions).
+
 ## [0.4.1] - 2026-07-05
 
 Skill-package docs patch (image unchanged, stays 0.4.0).
