@@ -29,6 +29,15 @@ hermes skills install rustok-org/mcp/rustok-wallet
 For OpenClaw it is published on
 [ClawHub](https://clawhub.ai/temrjan/skills/rustok-wallet).
 
+## Registries
+
+- **Official MCP Registry** — the wallet server is published as
+  [`io.github.rustok-org/rustok-wallet`](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.rustok-org/rustok-wallet)
+  (OCI package `ghcr.io/rustok-org/rustok-wallet`, stdio), for MCP clients that
+  resolve servers from the registry.
+- **ClawHub** — the agent skill for OpenClaw:
+  [clawhub.ai/temrjan/skills/rustok-wallet](https://clawhub.ai/temrjan/skills/rustok-wallet).
+
 ## Quick Start (Development)
 
 ```bash
