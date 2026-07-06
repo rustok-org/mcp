@@ -12,6 +12,23 @@ The wallet ships as one self-contained Docker image (Core + Gateway + MCP over
 Follow the [Installation Guide](docs/INSTALL.md): run `create-wallet` once, then
 add it as a stdio MCP server in Claude Desktop / Cursor.
 
+## Install as an agent skill
+
+The wallet skill ([`skills/rustok-wallet/`](skills/rustok-wallet/SKILL.md))
+installs straight from this repo:
+
+```bash
+# skills CLI (Claude Code, Cursor, and other agents) — https://skills.sh
+npx skills add rustok-org/mcp
+
+# Hermes Agent
+hermes skills tap add rustok-org/mcp
+hermes skills install rustok-org/mcp/rustok-wallet
+```
+
+For OpenClaw it is published on
+[ClawHub](https://clawhub.ai/temrjan/skills/rustok-wallet).
+
 ## Quick Start (Development)
 
 ```bash
