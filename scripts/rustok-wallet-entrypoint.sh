@@ -32,7 +32,7 @@ i=0
 while ! python -c "import socket,sys; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',50051)); s.close(); sys.exit(0 if r==0 else 1)" 2>/dev/null; do
     i=$((i + 1))
     if [ "$i" -gt 60 ]; then
-        echo "rustok-wallet: core (gRPC) not ready after 60s — is RUSTOK_KEYRING_PASSWORD set and a wallet created (run 'create-wallet' first)?" 1>&2
+        echo "rustok-wallet-tui: core (gRPC) not ready after 60s — is RUSTOK_KEYRING_PASSWORD set and a wallet created (run 'create-wallet' first)?" 1>&2
         exit 1
     fi
     sleep 1
@@ -52,7 +52,7 @@ i=0
 while ! python -c "import urllib.request,sys; sys.exit(0 if b'\"core\":\"serving\"' in urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=2).read() else 1)" 2>/dev/null; do
     i=$((i + 1))
     if [ "$i" -gt 30 ]; then
-        echo "rustok-wallet: gateway not ready after 30s" 1>&2
+        echo "rustok-wallet-tui: gateway not ready after 30s" 1>&2
         exit 1
     fi
     sleep 1

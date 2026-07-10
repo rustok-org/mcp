@@ -22,7 +22,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/rustok-wallet
+  IMAGE_NAME: ${{ github.repository_owner }}/rustok-wallet-tui
 
 concurrency:
   group: wallet-publish-${{ github.ref }}
@@ -71,7 +71,7 @@ jobs:
             type=semver,pattern=v{{major}}.{{minor}},value=v${{ inputs.version }}
             type=semver,pattern=v{{major}},value=v${{ inputs.version }}
           labels: |
-            org.opencontainers.image.title=rustok-wallet
+            org.opencontainers.image.title=rustok-wallet-tui
             org.opencontainers.image.description=Rustok self-custody Ethereum agent wallet (all-in-one MCP, stdio)
             org.opencontainers.image.licenses=LicenseRef-Proprietary
 

@@ -5,9 +5,9 @@
 The wallet hasn't been created in this volume yet. Run onboarding once:
 
 ```bash
-docker run -it --rm --name rustok-wallet -v rustok-wallet:/data \
+docker run -it --rm --name rustok-wallet-tui -v rustok-wallet-tui:/data \
   -e RUSTOK_KEYRING_PASSWORD="your-password" \
-  ghcr.io/rustok-org/rustok-wallet:v0.5.0 create-wallet
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.5.0 create-wallet
 ```
 
 Back up the printed 12 words and approval PIN, then start the agent again.
@@ -17,7 +17,7 @@ Back up the printed 12 words and approval PIN, then start the agent again.
 - Confirm Docker is running and the image is pulled.
 - Confirm `RUSTOK_KEYRING_PASSWORD` is set and matches the password used at
   `create-wallet` (a wrong password fails the unlock).
-- Confirm the same `-v rustok-wallet:/data` volume is mounted as at onboarding.
+- Confirm the same `-v rustok-wallet-tui:/data` volume is mounted as at onboarding.
 
 ## Wrong password
 
@@ -29,15 +29,15 @@ or recover from the 12-word phrase into a fresh wallet.
 The PIN is printed only during `create-wallet`. If you lost it, run:
 
 ```bash
-docker exec -it rustok-wallet core-server set-pin
+docker exec -it rustok-wallet-tui core-server set-pin
 ```
 
 This requires the keyring password and an interactive TTY.
 
 ## "container name already in use" / cannot create container
 
-The wallet runs as a singleton named `--name rustok-wallet`. Stop the old
-container first (`docker rm -f rustok-wallet`) if a previous run is still alive.
+The wallet runs as a singleton named `--name rustok-wallet-tui`. Stop the old
+container first (`docker rm -f rustok-wallet-tui`) if a previous run is still alive.
 
 ## Empty balances / positions for a chain
 
@@ -58,7 +58,7 @@ Example: `-e RUSTOK_ALLOWED_CHAINS=1 -e RUSTOK_RPC_URLS_1=https://…`.
 
 ## "permission denied" on the volume
 
-The container runs as uid/gid 1000. A **named** volume (`rustok-wallet`) is
+The container runs as uid/gid 1000. A **named** volume (`rustok-wallet-tui`) is
 created with the right ownership automatically; prefer it over a host-path mount.
 
 ## Getting help

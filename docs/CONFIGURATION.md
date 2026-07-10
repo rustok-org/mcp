@@ -19,7 +19,7 @@ otherwise that chain is skipped (no balances/positions for it).
 
 ## Data & keys
 
-- Mount a named volume at `/data`: `-v rustok-wallet:/data`. It holds the
+- Mount a named volume at `/data`: `-v rustok-wallet-tui:/data`. It holds the
   encrypted `keystore.json`. Back it up (or the 12-word phrase + approval PIN) —
   losing all three loses the wallet.
 - Keys are encrypted at rest (Argon2id + AES-256-GCM) and only ever decrypted
@@ -33,7 +33,7 @@ image — it is not a volume and not a user setting. To review and approve or de
 a pending transaction, open the console in a separate terminal:
 
 ```bash
-docker exec -it rustok-wallet rustok-console
+docker exec -it rustok-wallet-tui rustok-console
 ```
 
 ## Capabilities (security)
