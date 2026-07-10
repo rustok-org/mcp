@@ -1,73 +1,12 @@
 {
-    "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-    "name": "io.github.rustok-org/rustok-wallet",
-    "description": "Self-custody Ethereum agent wallet (MCP/stdio). Keys stay in a local Docker volume.",
-    "version": "0.5.0",
-    "websiteUrl": "https://github.com/rustok-org/mcp",
-    "repository": {
-        "url": "https://github.com/rustok-org/mcp",
-        "source": "github"
-    },
-    "packages": [
-        {
-            "registryType": "oci",
-            "identifier": "ghcr.io/rustok-org/rustok-wallet:v0.5.0",
-            "transport": {
-                "type": "stdio"
-            },
-            "runtimeHint": "docker",
-            "runtimeArguments": [
-                {
-                    "type": "named",
-                    "name": "-i",
-                    "description": "Keep stdin open \u2014 required for the stdio MCP transport."
-                },
-                {
-                    "type": "named",
-                    "name": "--rm",
-                    "description": "Remove the ephemeral container on exit (keys persist in the volume)."
-                },
-                {
-                    "type": "named",
-                    "name": "--init",
-                    "description": "PID-1 init: signal forwarding and zombie reaping."
-                },
-                {
-                    "type": "named",
-                    "name": "-v",
-                    "description": "Mount the local keystore volume (self-custody: keys never leave this volume).",
-                    "value": "rustok-wallet:/data"
-                },
-                {
-                    "type": "named",
-                    "name": "-e",
-                    "description": "Keystore password.",
-                    "value": "RUSTOK_KEYRING_PASSWORD={password}",
-                    "isRequired": true,
-                    "variables": {
-                        "password": {
-                            "description": "Password that unlocks your local keystore (the one set at create-wallet).",
-                            "isRequired": true,
-                            "isSecret": true,
-                            "format": "string"
-                        }
-                    }
-                },
-                {
-                    "type": "named",
-                    "name": "-e",
-                    "description": "Ethereum mainnet RPC URL.",
-                    "value": "RUSTOK_RPC_URLS_1={rpc_url}",
-                    "isRequired": true,
-                    "variables": {
-                        "rpc_url": {
-                            "description": "Ethereum mainnet RPC URL (an Alchemy key URL, or a public RPC).",
-                            "isRequired": true,
-                            "format": "string"
-                        }
-                    }
-                }
-            ]
-        }
-    ]
+  "name": "rustok-wallet",
+  "version": "0.5.0",
+  "description": "Self-custody Ethereum agent wallet. Runs entirely on your machine (one Docker image, MCP over stdio); private keys never leave it. Read wallet context and balances, track DeFi positions (Aave v3, ERC-4626), preview transactions, and sign messages. Transactions that move funds require your approval in a separate terminal console, never inside the agent chat. You assume all risk for funds held by the agent wallet.",
+  "author": "rustok-org",
+  "license": "MIT-0",
+  "permissions": ["network"],
+  "entry": "SKILL.md",
+  "tags": ["crypto", "ethereum", "wallet", "defi", "agent-wallet", "mcp", "self-custody"],
+  "minOpenClawVersion": "0.8.0",
+  "homepage": "https://github.com/rustok-org/mcp"
 }
