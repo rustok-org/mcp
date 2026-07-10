@@ -1,13 +1,13 @@
-# Smithery.ai configuration for the rustok-wallet self-custody MCP server.
+# Smithery.ai configuration for the rustok-wallet-tui self-custody MCP server.
 # https://smithery.ai/docs/build/project-config/smithery-yaml
 #
 # The wallet is a single self-contained image run over stdio. Keys live in YOUR
 # local Docker volume (self-custody) — they never leave your machine.
 #
 # One-time onboarding BEFORE first use (run in a terminal, back up the 12 words + PIN):
-#   docker run -it --rm --name rustok-wallet -v rustok-wallet:/data \
+#   docker run -it --rm --name rustok-wallet-tui -v rustok-wallet-tui:/data \
 #     -e RUSTOK_KEYRING_PASSWORD=your-strong-password \
-#     ghcr.io/rustok-org/rustok-wallet:v0.5.0 create-wallet
+#     ghcr.io/rustok-org/rustok-wallet-tui:v0.5.0 create-wallet
 startCommand:
   type: stdio
   configSchema:
@@ -26,12 +26,12 @@ startCommand:
     (config) => ({
       command: 'docker',
       args: [
-        'run', '-i', '--rm', '--init', '--name', 'rustok-wallet',
-        '-v', 'rustok-wallet:/data',
+        'run', '-i', '--rm', '--init', '--name', 'rustok-wallet-tui',
+        '-v', 'rustok-wallet-tui:/data',
         '-e', 'RUSTOK_KEYRING_PASSWORD',
         '-e', 'RUSTOK_ALLOWED_CHAINS=1,8453',
         '-e', 'RUSTOK_RPC_URLS_1',
-        'ghcr.io/rustok-org/rustok-wallet:v0.5.0'
+        'ghcr.io/rustok-org/rustok-wallet-tui:v0.5.0'
       ],
       env: {
         RUSTOK_KEYRING_PASSWORD: config.RUSTOK_KEYRING_PASSWORD || '',

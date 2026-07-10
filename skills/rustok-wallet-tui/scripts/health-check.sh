@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Smoke-check the rustok-wallet image: an MCP `initialize` round-trip over stdio.
+# Smoke-check the rustok-wallet-tui image: an MCP `initialize` round-trip over stdio.
 # Requires Docker, the image present, a created wallet volume, and the password.
 #
 #   RUSTOK_KEYRING_PASSWORD=... ./health-check.sh
 set -euo pipefail
 
-IMAGE="${RUSTOK_WALLET_IMAGE:-ghcr.io/rustok-org/rustok-wallet:v0.5.0}"
+IMAGE="${RUSTOK_WALLET_IMAGE:-ghcr.io/rustok-org/rustok-wallet-tui:v0.5.0}"
 
 echo "Checking ${IMAGE} responds to MCP initialize over stdio..."
 resp=$(printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":["read_wallet"]}}' \
   | docker run -i --rm --init \
-      -v rustok-wallet:/data \
+      -v rustok-wallet-tui:/data \
       -e RUSTOK_KEYRING_PASSWORD \
       -e RUSTOK_MCP_API_KEY \
       "${IMAGE}" 2>/dev/null | head -n 1)

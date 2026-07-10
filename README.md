@@ -5,16 +5,28 @@
 
 > MCP Server for Rustok — connects Claude Desktop, Cursor, and cloud agents to the Rustok wallet via Gateway.
 
-## Install (self-custody wallet)
+## Two editions
+
+Rustok ships **two wallet products** — pick the trust model you want:
+
+| | `rustok-wallet` (agent edition) | `rustok-wallet-tui` (this repo) |
+|---|---|---|
+| Who signs | the agent, unrestricted | **you**, in a separate terminal (`rustok-console`, y/N + PIN) |
+| Where | [rustokwallet.com](https://rustokwallet.com) · [ClawHub](https://clawhub.ai/temrjan/skills/rustok-wallet) · image `ghcr.io/rustok-org/rustok-wallet` | this repo (`main`) · image `ghcr.io/rustok-org/rustok-wallet-tui` |
+| Line | 0.4.x (maintained from the `wallet-v0.4.0` tag) | 0.5.x+ |
+
+## Install (rustok-wallet-tui, self-custody)
 
 The wallet ships as one self-contained Docker image (Core + Gateway + MCP over
-**stdio**); keys live only in a local Docker volume and never leave your machine.
-Follow the [Installation Guide](docs/INSTALL.md): run `create-wallet` once, then
-add it as a stdio MCP server in Claude Desktop / Cursor.
+**stdio** + the human-approval console); keys live only in a local Docker volume
+and never leave your machine. Follow the [Installation Guide](docs/INSTALL.md):
+run `create-wallet` once, then add it as a stdio MCP server in Claude Desktop /
+Cursor. Transactions that move funds are approved by a human in a second
+terminal: `docker exec -it rustok-wallet-tui rustok-console`.
 
 ## Install as an agent skill
 
-The wallet skill ([`skills/rustok-wallet/`](skills/rustok-wallet/SKILL.md))
+The wallet skill ([`skills/rustok-wallet-tui/`](skills/rustok-wallet-tui/SKILL.md))
 installs straight from this repo:
 
 ```bash
@@ -23,19 +35,20 @@ npx skills add rustok-org/mcp
 
 # Hermes Agent
 hermes skills tap add rustok-org/mcp
-hermes skills install rustok-org/mcp/rustok-wallet
+hermes skills install rustok-org/mcp/rustok-wallet-tui
 ```
 
-For OpenClaw it is published on
-[ClawHub](https://clawhub.ai/temrjan/skills/rustok-wallet).
+The **agent edition** skill for OpenClaw is published on
+[ClawHub](https://clawhub.ai/temrjan/skills/rustok-wallet); a ClawHub listing for
+the TUI edition ships separately.
 
 ## Registries
 
-- **Official MCP Registry** — the wallet server is published as
+- **Official MCP Registry** — the **agent edition** is published as
   [`io.github.rustok-org/rustok-wallet`](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.rustok-org/rustok-wallet)
-  (OCI package `ghcr.io/rustok-org/rustok-wallet`, stdio), for MCP clients that
-  resolve servers from the registry.
-- **ClawHub** — the agent skill for OpenClaw:
+  (OCI package `ghcr.io/rustok-org/rustok-wallet`, stdio). A TUI-edition
+  registry entry ships separately as `io.github.rustok-org/rustok-wallet-tui`.
+- **ClawHub** — the **agent edition** skill for OpenClaw:
   [clawhub.ai/temrjan/skills/rustok-wallet](https://clawhub.ai/temrjan/skills/rustok-wallet).
 
 ## Quick Start (Development)

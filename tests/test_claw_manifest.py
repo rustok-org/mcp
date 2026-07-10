@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).parent.parent
-CLAW_PATH = REPO_ROOT / "skills" / "rustok-wallet" / "claw.json"
+CLAW_PATH = REPO_ROOT / "skills" / "rustok-wallet-tui" / "claw.json"
 
 CLAWHUB_REQUIRED_KEYS = {
     "name",
@@ -44,7 +44,7 @@ def test_claw_manifest_is_not_a_server_json_clone() -> None:
     claw = _load_claw()
     assert not (SERVER_JSON_ONLY_KEYS & claw.keys())
     # The ClawHub listing slug, not the MCP-registry reverse-DNS name.
-    assert claw["name"] == "rustok-wallet"
+    assert claw["name"] == "rustok-wallet-tui"
 
 
 def test_claw_manifest_entry_file_exists() -> None:
