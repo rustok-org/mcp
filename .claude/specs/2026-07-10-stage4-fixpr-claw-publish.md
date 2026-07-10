@@ -58,6 +58,14 @@ ClawHub-поля. Спека Этапа 4 §4 требовала только б
 `scripts/*.sh` для подтверждения (ожидание: clean, 0 правок). Правки файла — только если
 ожидание неверно.
 
+### Ф5 (доп. скоуп, ратифицирован Капитаном 2026-07-10): регрессионный гард claw.json
+Единственная выжившая находка fleet-ревью (suggestion): CI никак не валидирует claw.json —
+дыра, пропустившая исходный дефект. **Фикс:** `tests/test_claw_manifest.py` — парсится как
+JSON; ClawHub-ключи присутствуют (name/version/entry/permissions/minOpenClawVersion + author/
+license/tags/homepage); server.json-ключей нет ($schema/packages/websiteUrl/repository);
+`name == "rustok-wallet"`; `entry` указывает на существующий файл; версия == pyproject.
+Red-доказательство: прогон против server.json-содержимого (артефакт исходного дефекта).
+
 ## 3. Что ЯВНО не входит
 
 - Релизный поезд (теги core/console, публикация образов, переключение видимости
