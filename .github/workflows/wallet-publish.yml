@@ -1,23 +1,24 @@
 name: Wallet Image Publish
 
-# Builds the all-in-one self-custody wallet image (Core + Gateway + MCP, spoken
-# over stdio) and pushes it to GHCR. The Core/Gateway binaries come FROM the
-# private rustok-core image, which this PUBLIC repo's CI cannot pull without
-# being granted read access to the proprietary core package — and wallet/core
-# are versioned independently, so `rustok-core:<wallet-tag>` need not exist.
+# Builds the all-in-one self-custody wallet image (Core + Gateway + MCP + the
+# human-approval console, spoken over stdio) and pushes it to GHCR. The base-image
+# pins (rustok-core / rustok-console versions) live ONLY in Dockerfile.wallet —
+# this workflow does not override them.
 #
-# Wallet images are therefore published MANUALLY by design:
-#   docker build -f Dockerfile.wallet \
-#     --build-arg CORE_IMAGE=ghcr.io/<owner>/rustok-core:<core-tag> -t ... .
-#   docker push ...
-#
-# This workflow is kept as a manual-trigger scaffold only (workflow_dispatch).
-# Do NOT re-enable it on tags without first wiring private-core CI read access
-# and aligning the core/wallet version tags — otherwise it fails at `FROM` with
-# a 403 on the (non-existent / inaccessible) rustok-core:<tag>.
+# Manual-trigger by design (workflow_dispatch). Preconditions for a green run:
+#   - the ghcr.io/rustok-org/rustok-core package is PUBLIC — this public repo's
+#     GITHUB_TOKEN cannot pull a private package, so the build fails at `FROM`
+#     (flipping visibility is a Captain op; core PR #90 names it a precondition);
+#   - the pinned ghcr.io/rustok-org/rustok-console image is published and public.
+# Fallback: build + push manually from an authorized machine (how v0.4.0 shipped).
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Wallet image version — digits only, no leading v (e.g. 0.5.0); must match pyproject.toml"
+        required: true
+        type: string
 
 env:
   REGISTRY: ghcr.io
@@ -38,6 +39,18 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
+      # The published tag must be the version the manifests actually carry —
+      # this repo has already shipped a manifest/tag drift once (0.3.2 vs 0.4.x).
+      - name: Verify version matches pyproject.toml
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          MANIFEST_VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)
+          if [ "$INPUT_VERSION" != "$MANIFEST_VERSION" ]; then
+            echo "::error::input version '$INPUT_VERSION' does not match pyproject.toml version '$MANIFEST_VERSION'"
+            exit 1
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
@@ -54,9 +67,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern=v{{major}}
+            type=semver,pattern=v{{version}},value=v${{ inputs.version }}
+            type=semver,pattern=v{{major}}.{{minor}},value=v${{ inputs.version }}
+            type=semver,pattern=v{{major}},value=v${{ inputs.version }}
           labels: |
             org.opencontainers.image.title=rustok-wallet
             org.opencontainers.image.description=Rustok self-custody Ethereum agent wallet (all-in-one MCP, stdio)
@@ -67,8 +80,6 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.wallet
-          build-args: |
-            CORE_IMAGE=${{ env.REGISTRY }}/${{ github.repository_owner }}/rustok-core:${{ github.ref_name }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

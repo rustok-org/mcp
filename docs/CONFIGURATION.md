@@ -25,6 +25,17 @@ otherwise that chain is skipped (no balances/positions for it).
 - Keys are encrypted at rest (Argon2id + AES-256-GCM) and only ever decrypted
   inside the container on your machine.
 
+## Approval console
+
+The wallet core listens for human approvals on a UNIX socket at
+`/run/wallet/approve.sock` inside the container. The directory is created by the
+image — it is not a volume and not a user setting. To review and approve or deny
+a pending transaction, open the console in a separate terminal:
+
+```bash
+docker exec -it rustok-wallet rustok-console
+```
+
 ## Capabilities (security)
 
 Each tool is gated by a capability:
