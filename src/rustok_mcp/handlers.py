@@ -91,7 +91,7 @@ async def handle_initialize(
     return {
         "protocolVersion": "2024-11-05",
         "capabilities": {"tools": {}},
-        "serverInfo": {"name": "rustok-mcp", "version": "0.3.2"},
+        "serverInfo": {"name": "rustok-mcp", "version": "0.5.0"},
         "instructions": SERVER_INSTRUCTIONS,
     }
 

@@ -5,12 +5,16 @@
 # for them to be ready, then hand the container's stdin/stdout to the MCP stdio
 # server. The MCP JSON-RPC channel is stdout — so ALL backend logs go to stderr.
 #
-# `create-wallet`: one-shot onboarding — create the keystore and print the 24-word
-# recovery phrase on the TTY (`docker run -it ... create-wallet`), then exit.
+# `create-wallet`: one-shot onboarding — create the keystore and print the 12-word
+# recovery phrase + approval PIN on the TTY (`docker run -it ... create-wallet`),
+# then exit.
 set -e
 
 : "${RUSTOK_DATA_DIR:=/data}"
 export RUSTOK_DATA_DIR
+
+# The approver socket lives here. Recreate in case /run is a tmpfs (podman).
+mkdir -p /run/wallet
 
 if [ "$1" = "create-wallet" ]; then
     exec core-server create-wallet

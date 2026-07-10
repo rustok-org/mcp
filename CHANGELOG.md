@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-07-10
+
+### Added
+- Wallet image now ships the human-approval console (`rustok-console:v0.1.0`) as
+  `/usr/local/bin/rustok-console`.
+- Onboarding prints both the 12-word recovery phrase and the 6-digit approval PIN.
+- Two-window rule documented: human approvals happen in `docker exec -it
+  rustok-wallet rustok-console`, never inside the agent chat.
+
+### Changed
+- Wallet image version unified to **0.5.0** (`pyproject.toml`, `server.json`,
+  `claw.json`, `SKILL.md`, `smithery.yaml`, docs).
+- Core base image updated to `rustok-core:v0.2.0` (first core release with the
+  approver socket + PIN + core-executes-on-approve).
+- All `docker run` examples use the fixed container name `--name rustok-wallet`
+  (singleton) and explicit `v0.5.0` tag instead of `latest`.
+- Mnemonic references across docs updated from 24 words to 12 words (org
+  standard).
+- `Dockerfile.wallet` pre-creates `/run/wallet` and `entrypoint.sh` recreates it
+  on startup for podman tmpfs compatibility.
+
 ## [Unreleased]
 
 > **Package reset:** the MCP server was rewritten from the v1 Rust binary

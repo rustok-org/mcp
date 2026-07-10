@@ -13,24 +13,27 @@ Docker volume and never leave your machine.
 ## 1. Pull the image
 
 ```bash
-docker pull ghcr.io/rustok-org/rustok-wallet:latest
+docker pull ghcr.io/rustok-org/rustok-wallet:v0.5.0
 ```
 
 ## 2. Create your wallet (one time)
 
-Run this in a terminal and **write down the 24-word recovery phrase** — it is
-shown only once:
+Run this in a **terminal the agent cannot see** (`docker run -it` attaches a real
+TTY). It prints two things only once:
+
+- the **12-word recovery phrase**;
+- the **6-digit approval PIN** — keep it with the phrase; it unlocks the console
+  session and is required for high-risk approvals.
 
 ```bash
-docker run -it --rm \
+docker run -it --rm --name rustok-wallet \
   -v rustok-wallet:/data \
   -e RUSTOK_KEYRING_PASSWORD="choose-a-strong-password" \
-  ghcr.io/rustok-org/rustok-wallet:latest create-wallet
+  ghcr.io/rustok-org/rustok-wallet:v0.5.0 create-wallet
 ```
 
-It prints your wallet **address** and the **24 words**. Back them up offline,
-then fund the address. (Recovery = the 24 words, importable into any standard
-wallet, or the `rustok-wallet` volume + your password.)
+Back up the **12 words** and the **PIN** offline, then fund the address. If the
+PIN is lost, run `docker exec -it rustok-wallet core-server set-pin`.
 
 ## 3. Connect an agent (stdio)
 
@@ -42,12 +45,12 @@ to the MCP config (`claude_desktop_config.json`):
   "mcpServers": {
     "rustok-wallet": {
       "command": "docker",
-      "args": ["run", "-i", "--rm", "--init",
+      "args": ["run", "-i", "--rm", "--init", "--name", "rustok-wallet",
                "-v", "rustok-wallet:/data",
                "-e", "RUSTOK_KEYRING_PASSWORD",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet:latest"],
+               "ghcr.io/rustok-org/rustok-wallet:v0.5.0"],
       "env": {
         "RUSTOK_KEYRING_PASSWORD": "your-strong-password",
         "RUSTOK_RPC_URLS_1": "https://ethereum-rpc.publicnode.com"

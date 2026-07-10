@@ -20,8 +20,8 @@ otherwise that chain is skipped (no balances/positions for it).
 ## Data & keys
 
 - Mount a named volume at `/data`: `-v rustok-wallet:/data`. It holds the
-  encrypted `keystore.json`. Back it up (or the 24-word phrase) — losing both
-  loses the wallet.
+  encrypted `keystore.json`. Back it up (or the 12-word phrase + approval PIN) —
+  losing all three loses the wallet.
 - Keys are encrypted at rest (Argon2id + AES-256-GCM) and only ever decrypted
   inside the container on your machine.
 
