@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet
-description: Self-custody Ethereum agent wallet. Runs entirely on the user's machine as one Docker image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. The user assumes all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.4.4
+description: Self-custody Ethereum agent wallet. Runs entirely on the user's machine as one Docker image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Transactions that move funds require user approval in a separate terminal console, not inside the agent chat. The user assumes all risk for funds on the agent wallet — there are no hard-coded spending limits.
+version: 0.5.0
 metadata:
   openclaw:
     emoji: "🦀"
@@ -35,25 +35,30 @@ private keys live only in the user's local Docker volume and never leave it.
 
 ## One-time onboarding (the user does this in a terminal, once)
 
-Create the wallet and **back up the 24-word recovery phrase** — it is shown only
-once, in the user's own terminal (never to the agent):
+Create the wallet in a **terminal the agent cannot see** (`-it` attaches a real
+TTY). The image prints two things exactly once:
+
+- the **12-word recovery phrase**;
+- the **6-digit approval PIN** — required for every high-risk approval and for
+  unlocking the console session.
 
 ```bash
 # Choose a strong keyring password; read -s keeps it out of shell history and ps.
 read -r -s -p "Keyring password: " RUSTOK_KEYRING_PASSWORD && export RUSTOK_KEYRING_PASSWORD
 
-docker run -it --rm \
+docker run -it --rm --name rustok-wallet \
   -v rustok-wallet:/data \
   -e RUSTOK_KEYRING_PASSWORD \
-  ghcr.io/rustok-org/rustok-wallet:latest create-wallet
+  ghcr.io/rustok-org/rustok-wallet:v0.5.0 create-wallet
 ```
 
-This prints the wallet **address** and the **24 words**. Write the words down
-offline and fund the address. Recovery = these 24 words (importable into any
-standard wallet, e.g. MetaMask) or the `rustok-wallet` Docker volume + password.
+Write both the **12 words** and the **PIN** down offline. Recovery = the 12 words
+(importable into any standard wallet) or the `rustok-wallet` volume + password.
+If the PIN is lost, use `docker exec -it rustok-wallet core-server set-pin`.
 
-> **Headless/CI:** replace `-it` with `-i`. The password is already supplied via
-> `RUSTOK_KEYRING_PASSWORD`, so no TTY is required.
+> **Rule of two windows:** never run `create-wallet` or `rustok-console` through an
+> agent shell/command — the seed and PIN would leak into the agent's context.
+> These commands belong only in the user's own terminal (window 2).
 
 ## How the agent runs the wallet
 
@@ -68,18 +73,28 @@ read -r -s -p "Keyring password: " pw \
   && printf 'RUSTOK_KEYRING_PASSWORD=%s\n' "$pw" > ~/.rustok-wallet.env \
   && unset pw
 
-docker run -i --rm --init \
+docker run -i --rm --init --name rustok-wallet \
   -v rustok-wallet:/data \
   --env-file ~/.rustok-wallet.env \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet:latest
+  ghcr.io/rustok-org/rustok-wallet:v0.5.0
 ```
 
 > The container automatically mints an ephemeral `RUSTOK_MCP_API_KEY` for the
 > loopback gateway↔mcp hop, so no API key configuration is needed for stdio use.
 > Set `RUSTOK_MCP_API_KEY` yourself **only** when exposing the gateway over a
 > network (not the default stdio setup).
+
+When the agent asks the user to approve a transaction, the user opens the
+console in a **second terminal** (window 2), never through the agent session:
+
+```bash
+docker exec -it rustok-wallet rustok-console
+```
+
+The console shows the decoded transaction from the wallet core and waits for
+`y/N` (high-risk items also ask for the per-transaction PIN).
 
 For **Claude Desktop / Cursor** (stdio MCP), add to the MCP config. The keyring
 password stays in the `0600` env-file above (`--env-file`), **never in this
@@ -90,12 +105,12 @@ config file** — only the non-secret RPC URL lives here:
   "mcpServers": {
     "rustok-wallet": {
       "command": "docker",
-      "args": ["run", "-i", "--rm", "--init",
+      "args": ["run", "-i", "--rm", "--init", "--name", "rustok-wallet",
                "-v", "rustok-wallet:/data",
                "--env-file", "/home/you/.rustok-wallet.env",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet:latest"],
+               "ghcr.io/rustok-org/rustok-wallet:v0.5.0"],
       "env": {
         "RUSTOK_RPC_URLS_1": "https://your-rpc"
       }
@@ -135,9 +150,10 @@ To run a restricted agent, set `RUSTOK_MCP_CAPABILITIES` to a subset
 ## Behavioral guidelines
 
 1. **Always `preview_transaction` first** and show its decoded call + simulation (revert check) + risk level so the user gives informed approval.
-2. **Surface what the preview decoded** (who/what is authorized, amount, revert check, estimated cost, risk level) before the user acts on it.
-3. **Use `get_wallet_context` first** so you don't hallucinate balances or chains.
-4. If a tool needs a capability the session lacks, it returns an authorization
+2. **For transactions that move funds**, the user approves in a separate terminal window with `docker exec -it rustok-wallet rustok-console`. Never offer to run the console command yourself and never ask the user to paste the approval PIN into this chat.
+3. **Surface what the preview decoded** (who/what is authorized, amount, revert check, estimated cost, risk level) before the user acts on it.
+4. **Use `get_wallet_context` first** so you don't hallucinate balances or chains.
+5. If a tool needs a capability the session lacks, it returns an authorization
    error — explain that to the user rather than retrying.
-5. If the wallet is unreachable, tell the user the wallet container/onboarding may
+6. If the wallet is unreachable, tell the user the wallet container/onboarding may
    not be set up (see onboarding above).

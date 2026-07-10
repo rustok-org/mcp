@@ -4,10 +4,10 @@
 # The wallet is a single self-contained image run over stdio. Keys live in YOUR
 # local Docker volume (self-custody) — they never leave your machine.
 #
-# One-time onboarding BEFORE first use (run in a terminal, back up the 24 words):
-#   docker run -it --rm -v rustok-wallet:/data \
+# One-time onboarding BEFORE first use (run in a terminal, back up the 12 words + PIN):
+#   docker run -it --rm --name rustok-wallet -v rustok-wallet:/data \
 #     -e RUSTOK_KEYRING_PASSWORD=your-strong-password \
-#     ghcr.io/rustok-org/rustok-wallet:latest create-wallet
+#     ghcr.io/rustok-org/rustok-wallet:v0.5.0 create-wallet
 startCommand:
   type: stdio
   configSchema:
@@ -26,12 +26,12 @@ startCommand:
     (config) => ({
       command: 'docker',
       args: [
-        'run', '-i', '--rm', '--init',
+        'run', '-i', '--rm', '--init', '--name', 'rustok-wallet',
         '-v', 'rustok-wallet:/data',
         '-e', 'RUSTOK_KEYRING_PASSWORD',
         '-e', 'RUSTOK_ALLOWED_CHAINS=1,8453',
         '-e', 'RUSTOK_RPC_URLS_1',
-        'ghcr.io/rustok-org/rustok-wallet:latest'
+        'ghcr.io/rustok-org/rustok-wallet:v0.5.0'
       ],
       env: {
         RUSTOK_KEYRING_PASSWORD: config.RUSTOK_KEYRING_PASSWORD || '',

@@ -4,18 +4,25 @@
 # in the user's mounted volume. Source stays private: the Core/Gateway binaries
 # come from the published binary image, not from source.
 #
-# Build (local, against a locally-built core image):
-#   docker build -f Dockerfile.wallet --build-arg CORE_IMAGE=rustok-core:v0.1.0 \
-#     -t rustok-wallet:0.3.2 .
-# Onboard:  docker run -it --rm -v rustok-wallet:/data -e RUSTOK_KEYRING_PASSWORD=… \
-#     rustok-wallet:0.3.2 create-wallet
-# Run (MCP stdio): docker run -i --rm --init -v rustok-wallet:/data \
-#     -e RUSTOK_KEYRING_PASSWORD=… -e RUSTOK_RPC_URLS_1=… rustok-wallet:0.3.2
+# Build (local, against locally-built core/console images):
+#   docker build -f Dockerfile.wallet \
+#     --build-arg CORE_IMAGE=rustok-core:v0.2.0 \
+#     --build-arg CONSOLE_IMAGE=rustok-console:v0.1.0 \
+#     -t rustok-wallet:0.5.0 .
+# Onboard:  docker run -it --rm --name rustok-wallet -v rustok-wallet:/data \
+#     -e RUSTOK_KEYRING_PASSWORD=… rustok-wallet:0.5.0 create-wallet
+# Run (MCP stdio): docker run -i --rm --init --name rustok-wallet \
+#     -v rustok-wallet:/data -e RUSTOK_KEYRING_PASSWORD=… \
+#     -e RUSTOK_RPC_URLS_1=… rustok-wallet:0.5.0
 
-ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.1.0
+ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.2.0
+ARG CONSOLE_IMAGE=ghcr.io/rustok-org/rustok-console:v0.1.0
 
 # --- Core/Gateway binaries (private source; public binary image) ---
 FROM ${CORE_IMAGE} AS core
+
+# --- Console binary (public source; public binary image) ---
+FROM ${CONSOLE_IMAGE} AS console
 
 # --- MCP Python environment (uv, locked) ---
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
@@ -49,8 +56,16 @@ ENV PATH="/app/.venv/bin:$PATH"
 COPY --from=core /usr/local/bin/core-server /usr/local/bin/core-server
 COPY --from=core /usr/local/bin/gateway /usr/local/bin/gateway
 
+# Console binary from the public console image.
+COPY --from=console /usr/local/bin/rustok-console /usr/local/bin/rustok-console
+
 COPY scripts/rustok-wallet-entrypoint.sh /usr/local/bin/rustok-wallet-entrypoint
-RUN chmod +x /usr/local/bin/rustok-wallet-entrypoint /usr/local/bin/core-server /usr/local/bin/gateway
+RUN chmod +x /usr/local/bin/rustok-wallet-entrypoint \
+    /usr/local/bin/core-server /usr/local/bin/gateway /usr/local/bin/rustok-console
+
+# Directory for the approver UNIX socket. Pre-created here with the runtime user
+# so the entrypoint can recreate it on tmpfs (podman) without needing root.
+RUN mkdir -p /run/wallet && chown rustok:rustok /run/wallet
 
 LABEL org.opencontainers.image.title="rustok-wallet" \
       org.opencontainers.image.description="Rustok self-custody Ethereum agent wallet — all-in-one MCP (stdio)" \

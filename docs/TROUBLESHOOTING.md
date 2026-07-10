@@ -5,12 +5,12 @@
 The wallet hasn't been created in this volume yet. Run onboarding once:
 
 ```bash
-docker run -it --rm -v rustok-wallet:/data \
+docker run -it --rm --name rustok-wallet -v rustok-wallet:/data \
   -e RUSTOK_KEYRING_PASSWORD="your-password" \
-  ghcr.io/rustok-org/rustok-wallet:latest create-wallet
+  ghcr.io/rustok-org/rustok-wallet:v0.5.0 create-wallet
 ```
 
-Back up the printed 24 words, then start the agent again.
+Back up the printed 12 words and approval PIN, then start the agent again.
 
 ## "backend not ready" / the agent can't reach the wallet
 
@@ -22,7 +22,22 @@ Back up the printed 24 words, then start the agent again.
 ## Wrong password
 
 Unlock fails with a wrong password. There is no reset — use the correct password,
-or recover from the 24-word phrase into a fresh wallet.
+or recover from the 12-word phrase into a fresh wallet.
+
+## Forgot the approval PIN
+
+The PIN is printed only during `create-wallet`. If you lost it, run:
+
+```bash
+docker exec -it rustok-wallet core-server set-pin
+```
+
+This requires the keyring password and an interactive TTY.
+
+## "container name already in use" / cannot create container
+
+The wallet runs as a singleton named `--name rustok-wallet`. Stop the old
+container first (`docker rm -f rustok-wallet`) if a previous run is still alive.
 
 ## Empty balances / positions for a chain
 
