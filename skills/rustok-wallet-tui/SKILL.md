@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet-tui
 description: Self-custody Ethereum agent wallet. Runs entirely on the user's machine as one Docker image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Transactions that move funds require user approval in a separate terminal console, not inside the agent chat. The user assumes all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.5.0
+version: 0.6.0
 metadata:
   openclaw:
     emoji: "🦀"
@@ -49,7 +49,7 @@ read -r -s -p "Keyring password: " RUSTOK_KEYRING_PASSWORD && export RUSTOK_KEYR
 docker run -it --rm --name rustok-wallet-tui \
   -v rustok-wallet-tui:/data \
   -e RUSTOK_KEYRING_PASSWORD \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.5.0 create-wallet
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0 create-wallet
 ```
 
 Write both the **12 words** and the **PIN** down offline. Recovery = the 12 words
@@ -78,7 +78,7 @@ docker run -i --rm --init --name rustok-wallet-tui \
   --env-file ~/.rustok-wallet-tui.env \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.5.0
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0
 ```
 
 > The container automatically mints an ephemeral `RUSTOK_MCP_API_KEY` for the
@@ -110,7 +110,7 @@ config file** — only the non-secret RPC URL lives here:
                "--env-file", "/home/you/.rustok-wallet-tui.env",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.5.0"],
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0"],
       "env": {
         "RUSTOK_RPC_URLS_1": "https://your-rpc"
       }
@@ -145,15 +145,26 @@ To run a restricted agent, set `RUSTOK_MCP_CAPABILITIES` to a subset
 | `get_balances` | read_wallet | Token balances for the active wallet, or `{address, chain_id}` |
 | `get_positions` | read_wallet | DeFi positions — Aave v3 (collateral/debt/health factor/LTV) + ERC-4626 vaults; optional `{address}` |
 | `preview_transaction` | preview_tx | Preview any transaction `{to, value, chain_id, data?}` → decoded call (who/what is authorized), pre-sign simulation (revert check), gas, risk level |
+| `execute_transaction` | execute_tx | Park a previewed transaction `{preview_id}` for human approval — the wallet never sends it on its own; a `pending` result carries `next_step` for the human |
+| `get_execution_status` | execute_tx | Poll a parked execution `{preview_id}` → `pending` / `executed` (+`tx_hash`) / `denied` / `expired` / `failed` (+`error_reason`), with the `not_after_unix` deadline |
 | `sign_message` | execute_tx | Sign a message (EIP-191) |
 
 ## Behavioral guidelines
 
 1. **Always `preview_transaction` first** and show its decoded call + simulation (revert check) + risk level so the user gives informed approval.
-2. **For transactions that move funds**, the user approves in a separate terminal window with `docker exec -it rustok-wallet-tui rustok-console`. Never offer to run the console command yourself and never ask the user to paste the approval PIN into this chat.
-3. **Surface what the preview decoded** (who/what is authorized, amount, revert check, estimated cost, risk level) before the user acts on it.
-4. **Use `get_wallet_context` first** so you don't hallucinate balances or chains.
-5. If a tool needs a capability the session lacks, it returns an authorization
+2. **The money path is preview → summary card → `execute_transaction` → human.**
+   `execute_transaction` only parks the transaction (`state: "pending"`) — the user
+   releases it in a separate terminal window with
+   `docker exec -it rustok-wallet-tui rustok-console`. Never offer to run the console
+   command yourself and never ask the user to paste the approval PIN into this chat.
+3. **Poll `get_execution_status` reasonably**: when the user asks, or every ~15–30
+   seconds until the `not_after_unix` deadline (if it is `null` — only on request).
+   Stop on any terminal state: `executed`, `denied`, `expired`, `failed`. A
+   `denied` outcome is the human's answer — do not re-submit the same transaction;
+   a not-found error means the id is no longer retained — stop polling.
+4. **Surface what the preview decoded** (who/what is authorized, amount, revert check, estimated cost, risk level) before the user acts on it.
+5. **Use `get_wallet_context` first** so you don't hallucinate balances or chains.
+6. If a tool needs a capability the session lacks, it returns an authorization
    error — explain that to the user rather than retrying.
-6. If the wallet is unreachable, tell the user the wallet container/onboarding may
+7. If the wallet is unreachable, tell the user the wallet container/onboarding may
    not be set up (see onboarding above).
