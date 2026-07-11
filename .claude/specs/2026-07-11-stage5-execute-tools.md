@@ -77,7 +77,10 @@ MCP-слой к сокету одобрения не прикасается.
    - 8 image-тегов `…rustok-wallet-tui:v0.5.0 → v0.6.0`: `server.json:14` (OCI identifier),
      `SKILL.md:52,81,113`, `docs/INSTALL.md:16,32,53`, `docs/TROUBLESHOOTING.md:10`;
    - 3 коммент-примера в `Dockerfile.wallet:11,13,16` — локальный тег `rustok-wallet-tui:0.5.0`
-     (без `v`) → `0.6.0` (МИНОР-1 ревью Гейта-1).
+     (без `v`) → `0.6.0` (МИНОР-1 ревью Гейта-1);
+   - 4 пина в yaml/sh (найдены fleet-ревью: греп реестра не покрывал эти расширения):
+     `smithery.yaml:10,34`, `scripts/install.sh:7`,
+     `skills/rustok-wallet-tui/scripts/health-check.sh:8`.
    Гард `test_claw_manifest_version_matches_pyproject` держит синк claw↔pyproject;
    `wallet-publish.yml` версию не хардкодит (dispatch-input сверяется с pyproject).
    ⚠️ Следствие для ops: доки/манифесты после мержа указывают на ещё не собранный образ
@@ -174,9 +177,9 @@ MCP-слой к сокету одобрения не прикасается.
 - SKILL.md/CONFIGURATION.md описывают полный flow; нигде не осталось старого имени контейнера;
   CHANGELOG несёт запись `[0.6.0]`.
 - Версия 0.6.0 согласована во всех точках реестра §6 (7 version-полей + 8 image-тегов +
-  3 Dockerfile-примера); контрольный греп `grep -rn "0\.5\.0\|v0\.5" --include="*.md"
-  --include="*.json" --include="*.toml" .` (вне `.claude/`/CHANGELOG-истории) — ноль хитов;
-  LABEL source в Dockerfile.wallet.
+  3 Dockerfile-примера + 4 yaml/sh-пина); контрольный греп БЕЗ фильтра расширений:
+  `grep -rn "v0\.5\.0\|:0\.5\.0" --exclude-dir=.git --exclude-dir=.venv --exclude-dir=.claude .`
+  (вне CHANGELOG-истории) — ноль хитов; LABEL source в Dockerfile.wallet.
 - `uv run ruff check` / `uv run mypy` / `uv run pytest` зелёные, вывод приложен; новые тесты
   показаны red→green.
 

@@ -4,7 +4,7 @@
 # with your keys in a local Docker volume. This script just prints the commands.
 set -euo pipefail
 
-IMAGE="${RUSTOK_WALLET_IMAGE:-ghcr.io/rustok-org/rustok-wallet-tui:v0.5.0}"
+IMAGE="${RUSTOK_WALLET_IMAGE:-ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0}"
 
 cat <<EOF
 Rustok self-custody wallet — quick start (Docker)

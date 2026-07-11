@@ -5,7 +5,7 @@
 #   RUSTOK_KEYRING_PASSWORD=... ./health-check.sh
 set -euo pipefail
 
-IMAGE="${RUSTOK_WALLET_IMAGE:-ghcr.io/rustok-org/rustok-wallet-tui:v0.5.0}"
+IMAGE="${RUSTOK_WALLET_IMAGE:-ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0}"
 
 echo "Checking ${IMAGE} responds to MCP initialize over stdio..."
 resp=$(printf '%s\n' \

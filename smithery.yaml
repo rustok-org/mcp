@@ -7,7 +7,7 @@
 # One-time onboarding BEFORE first use (run in a terminal, back up the 12 words + PIN):
 #   docker run -it --rm --name rustok-wallet-tui -v rustok-wallet-tui:/data \
 #     -e RUSTOK_KEYRING_PASSWORD=your-strong-password \
-#     ghcr.io/rustok-org/rustok-wallet-tui:v0.5.0 create-wallet
+#     ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0 create-wallet
 startCommand:
   type: stdio
   configSchema:
@@ -31,7 +31,7 @@ startCommand:
         '-e', 'RUSTOK_KEYRING_PASSWORD',
         '-e', 'RUSTOK_ALLOWED_CHAINS=1,8453',
         '-e', 'RUSTOK_RPC_URLS_1',
-        'ghcr.io/rustok-org/rustok-wallet-tui:v0.5.0'
+        'ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0'
       ],
       env: {
         RUSTOK_KEYRING_PASSWORD: config.RUSTOK_KEYRING_PASSWORD || '',

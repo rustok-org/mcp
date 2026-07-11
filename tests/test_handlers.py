@@ -760,6 +760,25 @@ async def test_get_execution_status_missing_arg_returns_invalid_params() -> None
     mock_client.get_execution_status.assert_not_awaited()
 
 
+async def test_execution_result_non_dict_passes_through_unchanged() -> None:
+    """A malformed (non-dict) gateway payload is forwarded as-is, not crashed on."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.get_execution_status = AsyncMock(return_value=["unexpected", "payload"])
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=21,
+        method="tools/call",
+        params={"name": "get_execution_status", "arguments": {"preview_id": "abc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    result = _tool_result(response)
+    assert result == ["unexpected", "payload"]
+
+
 async def test_get_execution_status_falls_back_to_stub() -> None:
     """get_execution_status without a GatewayClient returns a pending stub, no next_step."""
     protocol, _registry = create_protocol_and_registry()
