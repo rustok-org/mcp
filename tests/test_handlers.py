@@ -760,6 +760,52 @@ async def test_get_execution_status_missing_arg_returns_invalid_params() -> None
     mock_client.get_execution_status.assert_not_awaited()
 
 
+async def test_execution_status_unknown_state_is_not_terminal_no_next_step() -> None:
+    """An 'unknown' state (proto drift) passes through without the pending hint."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.get_execution_status = AsyncMock(
+        return_value={
+            "state": "unknown",
+            "tx_hash": None,
+            "error_reason": None,
+            "not_after_unix": 1780000000,
+        }
+    )
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=22,
+        method="tools/call",
+        params={"name": "get_execution_status", "arguments": {"preview_id": "abc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    result = _tool_result(response)
+    assert result["state"] == "unknown"
+    assert "next_step" not in result
+
+
+async def test_execution_result_without_state_key_passes_through() -> None:
+    """A dict payload lacking 'state' is forwarded as-is — no crash, no hint."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.get_execution_status = AsyncMock(return_value={"tx_hash": "0xhash"})
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=23,
+        method="tools/call",
+        params={"name": "get_execution_status", "arguments": {"preview_id": "abc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    result = _tool_result(response)
+    assert result == {"tx_hash": "0xhash"}
+
+
 async def test_execution_result_non_dict_passes_through_unchanged() -> None:
     """A malformed (non-dict) gateway payload is forwarded as-is, not crashed on."""
     mock_client = AsyncMock(spec=GatewayClient)
