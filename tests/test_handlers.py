@@ -1,5 +1,6 @@
 """MCP handler tests."""
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -109,11 +110,13 @@ async def test_tools_list_handler() -> None:
     assert response is not None
     assert response.result is not None
     tools = response.result["tools"]
-    assert len(tools) == 5
+    assert len(tools) == 7
     names = {t["name"] for t in tools}
     assert "get_wallet_context" in names
     assert "get_positions" in names
     assert "preview_transaction" in names
+    assert "execute_transaction" in names
+    assert "get_execution_status" in names
 
 
 async def test_tools_list_filters_by_capability() -> None:
@@ -579,3 +582,221 @@ async def test_sign_message_missing_arg_returns_invalid_params() -> None:
     assert response.error.code == -32602
     assert "message" in response.error.message
     mock_client.sign_message.assert_not_awaited()
+
+
+def _tool_result(response: Any) -> Any:
+    """Parse the JSON payload out of a tools/call text response."""
+    assert response is not None
+    assert response.result is not None
+    return json.loads(response.result["content"][0]["text"])
+
+
+async def test_execute_transaction_uses_gateway_client() -> None:
+    """execute_transaction tool delegates to GatewayClient and forwards the response."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.execute_transaction = AsyncMock(
+        return_value={
+            "state": "pending",
+            "tx_hash": None,
+            "error_reason": None,
+            "not_after_unix": 1780000000,
+        }
+    )
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=11,
+        method="tools/call",
+        params={"name": "execute_transaction", "arguments": {"preview_id": "abc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    result = _tool_result(response)
+    assert result["state"] == "pending"
+    assert result["not_after_unix"] == 1780000000
+    mock_client.execute_transaction.assert_awaited_once_with(preview_id="abc")
+
+
+async def test_execute_transaction_pending_carries_next_step() -> None:
+    """A parked execution tells the human where to approve — console command included."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.execute_transaction = AsyncMock(
+        return_value={
+            "state": "pending",
+            "tx_hash": None,
+            "error_reason": None,
+            "not_after_unix": 1780000000,
+        }
+    )
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=12,
+        method="tools/call",
+        params={"name": "execute_transaction", "arguments": {"preview_id": "abc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    result = _tool_result(response)
+    assert "docker exec -it rustok-wallet-tui rustok-console" in result["next_step"]
+
+
+async def test_execute_transaction_missing_arg_returns_invalid_params() -> None:
+    """execute_transaction without preview_id maps to -32602, Gateway not called."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=13,
+        method="tools/call",
+        params={"name": "execute_transaction", "arguments": {}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.error is not None
+    assert response.error.code == -32602
+    assert "preview_id" in response.error.message
+    mock_client.execute_transaction.assert_not_awaited()
+
+
+async def test_execute_transaction_falls_back_to_stub() -> None:
+    """execute_transaction without a GatewayClient returns a pending stub, no next_step."""
+    protocol, _registry = create_protocol_and_registry()
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=14,
+        method="tools/call",
+        params={"name": "execute_transaction", "arguments": {"preview_id": "abc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    result = _tool_result(response)
+    assert result["state"] == "pending"
+    assert "next_step" not in result
+
+
+async def test_get_execution_status_uses_gateway_client() -> None:
+    """get_execution_status forwards a terminal response untouched — no next_step."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.get_execution_status = AsyncMock(
+        return_value={
+            "state": "executed",
+            "tx_hash": "0xhash",
+            "error_reason": None,
+            "not_after_unix": None,
+        }
+    )
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=15,
+        method="tools/call",
+        params={"name": "get_execution_status", "arguments": {"preview_id": "abc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    result = _tool_result(response)
+    assert result == {
+        "state": "executed",
+        "tx_hash": "0xhash",
+        "error_reason": None,
+        "not_after_unix": None,
+    }
+    mock_client.get_execution_status.assert_awaited_once_with(preview_id="abc")
+
+
+async def test_get_execution_status_pending_carries_next_step() -> None:
+    """A still-pending status reminds the human where the approval console is."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.get_execution_status = AsyncMock(
+        return_value={
+            "state": "pending",
+            "tx_hash": None,
+            "error_reason": None,
+            "not_after_unix": 1780000000,
+        }
+    )
+
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=16,
+        method="tools/call",
+        params={"name": "get_execution_status", "arguments": {"preview_id": "abc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    result = _tool_result(response)
+    assert "docker exec -it rustok-wallet-tui rustok-console" in result["next_step"]
+
+
+async def test_get_execution_status_missing_arg_returns_invalid_params() -> None:
+    """get_execution_status without preview_id maps to -32602, Gateway not called."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=17,
+        method="tools/call",
+        params={"name": "get_execution_status", "arguments": {}},
+    )
+    response = await protocol.handle(request, context)
+
+    assert response is not None
+    assert response.error is not None
+    assert response.error.code == -32602
+    assert "preview_id" in response.error.message
+    mock_client.get_execution_status.assert_not_awaited()
+
+
+async def test_get_execution_status_falls_back_to_stub() -> None:
+    """get_execution_status without a GatewayClient returns a pending stub, no next_step."""
+    protocol, _registry = create_protocol_and_registry()
+    context = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=18,
+        method="tools/call",
+        params={"name": "get_execution_status", "arguments": {"preview_id": "abc"}},
+    )
+    response = await protocol.handle(request, context)
+
+    result = _tool_result(response)
+    assert result["state"] == "pending"
+    assert "next_step" not in result
+
+
+async def test_execute_tools_hidden_without_execute_tx_capability() -> None:
+    """Without execute_tx the new tools are neither listed nor callable."""
+    protocol, _registry = create_protocol_and_registry()
+    context = {"capabilities": {Capability.READ_WALLET, Capability.PREVIEW_TX}}
+
+    list_request = JsonRpcRequest(jsonrpc="2.0", id=19, method="tools/list")
+    list_response = await protocol.handle(list_request, context)
+    assert list_response is not None
+    assert list_response.result is not None
+    names = {t["name"] for t in list_response.result["tools"]}
+    assert "execute_transaction" not in names
+    assert "get_execution_status" not in names
+
+    call_request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=20,
+        method="tools/call",
+        params={"name": "execute_transaction", "arguments": {"preview_id": "abc"}},
+    )
+    call_response = await protocol.handle(call_request, context)
+    assert call_response is not None
+    assert call_response.error is not None
+    assert call_response.error.code == -32001

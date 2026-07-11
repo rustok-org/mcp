@@ -29,7 +29,7 @@ async def test_stdio_initialize_roundtrip() -> None:
 
 
 async def test_stdio_default_exposes_all_tools(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A standard MCP client (caps object, no rustok list) sees all 6 tools over stdio."""
+    """A standard MCP client (caps object, no rustok list) sees all 7 tools over stdio."""
     monkeypatch.delenv("RUSTOK_MCP_CAPABILITIES", raising=False)
     requests = (
         json.dumps(
@@ -55,6 +55,8 @@ async def test_stdio_default_exposes_all_tools(monkeypatch: pytest.MonkeyPatch) 
         "get_positions",
         "preview_transaction",
         "sign_message",
+        "execute_transaction",
+        "get_execution_status",
     }
 
 

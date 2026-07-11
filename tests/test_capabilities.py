@@ -29,6 +29,8 @@ def test_capability_map() -> None:
     assert CAPABILITY_MAP["get_positions"] == Capability.READ_WALLET
     assert CAPABILITY_MAP["preview_transaction"] == Capability.PREVIEW_TX
     assert CAPABILITY_MAP["sign_message"] == Capability.EXECUTE_TX
+    assert CAPABILITY_MAP["execute_transaction"] == Capability.EXECUTE_TX
+    assert CAPABILITY_MAP["get_execution_status"] == Capability.EXECUTE_TX
 
 
 def test_parse_capabilities_valid() -> None:

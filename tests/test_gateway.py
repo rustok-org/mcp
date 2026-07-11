@@ -11,6 +11,7 @@ from rustok_mcp.protocol import (
     ERR_CORE_UNAVAILABLE,
     ERR_INTERNAL,
     ERR_INVALID_PARAMS,
+    ERR_NOT_FOUND,
     ERR_NOT_SUPPORTED,
     ERR_PRECONDITION,
     ERR_TX_BLOCKED,
@@ -46,6 +47,61 @@ async def test_sign_message_success() -> None:
     client = GatewayClient("http://gateway", transport=transport)
     result = await client.sign_message("hello", "eip191")
     assert result == {"signature": "0xsig"}
+    await client.close()
+
+
+async def test_execute_transaction_posts_preview_id_only() -> None:
+    """execute_transaction sends exactly {preview_id} — no deprecated approval key."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/api/v1/wallet/execute_transaction"
+        body = json.loads(request.content)
+        assert body == {"preview_id": "abc"}
+        return httpx.Response(
+            200,
+            json={
+                "state": "pending",
+                "tx_hash": None,
+                "error_reason": None,
+                "not_after_unix": 1780000000,
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    result = await client.execute_transaction("abc")
+    assert result["state"] == "pending"
+    assert result["not_after_unix"] == 1780000000
+    await client.close()
+
+
+async def test_get_execution_status_passes_preview_id_param() -> None:
+    """get_execution_status sends GET with the preview_id query param."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/v1/wallet/execution_status"
+        assert request.url.params["preview_id"] == "abc"
+        return httpx.Response(
+            200,
+            json={
+                "state": "executed",
+                "tx_hash": "0xhash",
+                "error_reason": None,
+                "not_after_unix": None,
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    result = await client.get_execution_status("abc")
+    assert result == {
+        "state": "executed",
+        "tx_hash": "0xhash",
+        "error_reason": None,
+        "not_after_unix": None,
+    }
     await client.close()
 
 
@@ -149,6 +205,24 @@ async def test_4xx_bad_request_maps_to_invalid_params() -> None:
         await client.preview_transaction("0x123", "1.0", 99)
     assert exc_info.value.code == ERR_INVALID_PARAMS
     assert "unsupported chain id: 99" in str(exc_info.value)
+    await client.close()
+
+
+async def test_404_not_found_maps_to_err_not_found() -> None:
+    """404 not_found (unknown/expired preview_id) reaches the agent machine-readable."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404,
+            json={"error": "not_found", "message": "unknown preview_id"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = GatewayClient("http://gateway", transport=transport)
+    with pytest.raises(McpError) as exc_info:
+        await client.get_execution_status("00000000-0000-0000-0000-000000000000")
+    assert exc_info.value.code == ERR_NOT_FOUND
+    assert "unknown preview_id" in str(exc_info.value)
     await client.close()
 
 
