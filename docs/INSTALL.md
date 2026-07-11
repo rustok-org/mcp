@@ -64,6 +64,32 @@ For **ClawHub / Smithery**, install the `rustok-wallet-tui` skill and provide
 `RUSTOK_KEYRING_PASSWORD` (and an RPC URL) when prompted; the registry runs the
 same `docker run -i` command.
 
+## Upgrading the wallet image
+
+Your wallet lives in the **volume**, not in the image — so upgrading is: pull the new
+tag, recreate the container, keep the volume.
+
+```bash
+docker pull ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0
+docker rm -f rustok-wallet-tui            # the old container; the volume is untouched
+# then start the new image with the SAME -v rustok-wallet-tui:/data as before
+```
+
+- **Your keys, address and PIN survive.** They are in the volume
+  (`rustok-wallet-tui:/data`). Do **not** run `create-wallet` again — the wallet is
+  already there, and the command refuses to overwrite an existing keystore anyway.
+- **Point the new container at the same volume.** A different `-v` name is a different
+  (empty) wallet, not an upgraded one.
+- **Update the image tag in your agent's MCP config too** — the agent spawns the
+  container itself, so a stale tag there keeps running the old wallet.
+- **Anything waiting for approval is lost.** The pending queue lives in the running
+  container's memory, so a transaction the agent parked but you never approved does not
+  survive the restart. Nothing is signed or sent — the agent simply has to propose it
+  again. Approve or deny what is open **before** you upgrade.
+- Coming from the **agent edition** (`rustok-wallet`)? That is a different product with
+  its own volume and its own keys — there is no in-place migration: create a wallet in
+  the console edition and move the funds on-chain.
+
 ## Next steps
 
 - [Configuration](CONFIGURATION.md) — chains, RPC, vaults, capabilities.

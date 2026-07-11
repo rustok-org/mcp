@@ -30,6 +30,11 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.9",
     "mypy>=1.10",
+    # Acceptance suite (tests/e2e): a pty for the console TUI, and a terminal
+    # emulator to assert on the RENDERED screen — the raw pty stream interleaves
+    # ANSI escapes with text and cannot be matched reliably.
+    "pexpect>=4.9",
+    "pyte>=0.8",
 ]
 
 [tool.ruff]
@@ -52,6 +57,11 @@ ignore = ["E501"]  # line length handled by formatter
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]  # assert in tests is fine
+# The acceptance suite drives the shipped wallet image through podman. Every call
+# is a fixed argv, without `shell=True` and without user input, so the bandit
+# preconditions for S603 (untrusted input) and S607 (partial path) do not hold —
+# the podman binary is resolved via shutil.which in tests/e2e/podman.py.
+"tests/e2e/*" = ["S101", "S603", "S607"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -63,3 +73,14 @@ warn_unused_ignores = true
 asyncio_mode = "auto"
 asyncio_default_test_loop_scope = "function"
 testpaths = ["tests"]
+# The acceptance suite needs podman and the shipped wallet image, so it is NOT part
+# of the default run (CI has neither). A marker alone would not do that — pytest
+# collects marked tests unless they are deselected here. Run it explicitly:
+#   uv run pytest -m e2e        (7 scenarios, ~2 min)
+#   uv run pytest -m e2e_slow   (expiry: waits out the 15-minute pending TTL)
+# A -m on the command line overrides this default.
+addopts = ["-m", "not e2e and not e2e_slow"]
+markers = [
+    "e2e: acceptance against the shipped wallet image (needs podman)",
+    "e2e_slow: acceptance that waits out the real 15-minute pending TTL",
+]

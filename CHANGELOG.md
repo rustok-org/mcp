@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **End-to-end acceptance suite** (`tests/e2e`, marker `e2e`): drives the shipped
+  `rustok-wallet-tui` image through the real approval channel — the agent proposes over
+  MCP stdio, a human decides in a pty-driven console, the core signs and broadcasts to a
+  local anvil. Covers approve/deny/expiry/PIN-lockout/unlimited-approve/no-tty/no-auth.
+  Not part of the default run (it needs podman): `uv run pytest -m e2e`.
+
+### Documentation
+- **Upgrading the wallet image** (INSTALL, TROUBLESHOOTING): the wallet lives in the
+  volume, not the image; the pending approval queue does not survive a restart.
+
 ## [0.6.0] — 2026-07-11
 
 ### Added
