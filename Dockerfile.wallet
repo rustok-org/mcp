@@ -8,12 +8,12 @@
 #   docker build -f Dockerfile.wallet \
 #     --build-arg CORE_IMAGE=rustok-core:v0.2.0 \
 #     --build-arg CONSOLE_IMAGE=rustok-console:v0.1.0 \
-#     -t rustok-wallet-tui:0.5.0 .
+#     -t rustok-wallet-tui:0.6.0 .
 # Onboard:  docker run -it --rm --name rustok-wallet-tui -v rustok-wallet-tui:/data \
-#     -e RUSTOK_KEYRING_PASSWORD=… rustok-wallet-tui:0.5.0 create-wallet
+#     -e RUSTOK_KEYRING_PASSWORD=… rustok-wallet-tui:0.6.0 create-wallet
 # Run (MCP stdio): docker run -i --rm --init --name rustok-wallet-tui \
 #     -v rustok-wallet-tui:/data -e RUSTOK_KEYRING_PASSWORD=… \
-#     -e RUSTOK_RPC_URLS_1=… rustok-wallet-tui:0.5.0
+#     -e RUSTOK_RPC_URLS_1=… rustok-wallet-tui:0.6.0
 
 ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.2.0
 ARG CONSOLE_IMAGE=ghcr.io/rustok-org/rustok-console:v0.1.0
@@ -69,7 +69,8 @@ RUN mkdir -p /run/wallet && chown rustok:rustok /run/wallet
 
 LABEL org.opencontainers.image.title="rustok-wallet-tui" \
       org.opencontainers.image.description="Rustok self-custody Ethereum agent wallet — all-in-one MCP (stdio)" \
-      org.opencontainers.image.licenses="LicenseRef-Proprietary"
+      org.opencontainers.image.licenses="LicenseRef-Proprietary" \
+      org.opencontainers.image.source="https://github.com/rustok-org/mcp"
 # Ownership annotation for the official MCP registry (validator reads the image
 # config label; value MUST equal server.json `name`).
 LABEL io.modelcontextprotocol.server.name="io.github.rustok-org/rustok-wallet-tui"

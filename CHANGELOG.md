@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-07-11
+
+### Added
+- **`execute_transaction` tool** (capability `execute_tx`): parks a previewed
+  transaction for human approval — the wallet never sends it on its own. A
+  `pending` result carries a `next_step` hint pointing the human at the approval
+  console (`docker exec -it rustok-wallet-tui rustok-console`).
+- **`get_execution_status` tool** (capability `execute_tx`): polls a parked
+  execution — `pending` / `executed` (+`tx_hash`) / `denied` / `expired` /
+  `failed` (+`error_reason`), with the `not_after_unix` approval deadline.
+- Gateway 404 `not_found` (unknown or expired `preview_id`) now reaches the
+  agent as machine-readable `ERR_NOT_FOUND` (-32014) instead of a masked
+  internal error, so status polling knows when to stop.
+- `Dockerfile.wallet` carries `org.opencontainers.image.source` so GHCR links
+  the package to this repository.
+
+### Changed
+- Version unified to **0.6.0** across manifests, docs, and image tags.
+
 ## [0.5.0] — 2026-07-10
 
 ### Renamed

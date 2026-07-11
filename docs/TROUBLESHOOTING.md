@@ -7,7 +7,7 @@ The wallet hasn't been created in this volume yet. Run onboarding once:
 ```bash
 docker run -it --rm --name rustok-wallet-tui -v rustok-wallet-tui:/data \
   -e RUSTOK_KEYRING_PASSWORD="your-password" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.5.0 create-wallet
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0 create-wallet
 ```
 
 Back up the printed 12 words and approval PIN, then start the agent again.

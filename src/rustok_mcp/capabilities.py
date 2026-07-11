@@ -27,6 +27,8 @@ CAPABILITY_MAP: dict[str, Capability] = {
     "get_positions": Capability.READ_WALLET,
     "preview_transaction": Capability.PREVIEW_TX,
     "sign_message": Capability.EXECUTE_TX,
+    "execute_transaction": Capability.EXECUTE_TX,
+    "get_execution_status": Capability.EXECUTE_TX,
 }
 
 

@@ -9,6 +9,7 @@ from rustok_mcp.protocol import (
     ERR_CORE_UNAVAILABLE,
     ERR_INTERNAL,
     ERR_INVALID_PARAMS,
+    ERR_NOT_FOUND,
     ERR_NOT_SUPPORTED,
     ERR_PRECONDITION,
     ERR_TX_BLOCKED,
@@ -74,6 +75,21 @@ class GatewayClient:
             {"message": message, "sign_type": sign_type},
         )
 
+    async def execute_transaction(self, preview_id: str) -> Any:
+        # The deprecated `approval` field is intentionally not sent: no valid
+        # token is issuable in production — Core parks the request as PENDING
+        # for the out-of-band approver regardless.
+        return await self._post(
+            "/api/v1/wallet/execute_transaction",
+            {"preview_id": preview_id},
+        )
+
+    async def get_execution_status(self, preview_id: str) -> Any:
+        return await self._get(
+            "/api/v1/wallet/execution_status",
+            params={"preview_id": preview_id},
+        )
+
     async def _post(self, path: str, payload: dict[str, Any]) -> Any:
         """Send a POST request, mapping transport failures to McpError.
 
@@ -135,6 +151,10 @@ class GatewayClient:
                     return McpError(ERR_PRECONDITION, message)
                 case "not_supported":
                     return McpError(ERR_NOT_SUPPORTED, message)
+                case "not_found":
+                    # Unknown or expired preview_id — a machine-readable stop
+                    # signal for execution-status polling.
+                    return McpError(ERR_NOT_FOUND, message)
                 case "bad_request":
                     return McpError(ERR_INVALID_PARAMS, message)
                 case "core_unavailable":
