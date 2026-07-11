@@ -1,6 +1,6 @@
 ---
 name: rustok-wallet-tui
-description: Self-custody Ethereum agent wallet. Runs entirely on the user's machine as one Docker image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Transactions that move funds require user approval in a separate terminal console, not inside the agent chat. The user assumes all risk for funds on the agent wallet — there are no hard-coded spending limits.
+description: Self-custody Ethereum agent wallet. Runs entirely on your machine as one Docker image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain requires your approval in a separate terminal console, never inside the agent chat; message signing is not console-gated. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
 version: 0.6.0
 metadata:
   openclaw:
@@ -27,6 +27,19 @@ private keys live only in the user's local Docker volume and never leave it.
 > the agent wallet are at risk. txguard still flags risky transactions, but it
 > does not block them. All supported chains the user enables are live (incl.
 > Ethereum mainnet). Always preview before executing and show the user the details.
+
+## What's protected — and what isn't (be honest with the user)
+
+The wallet's guarantee is narrow and specific. State it plainly; do not oversell it.
+
+| | |
+|---|---|
+| **Protected** | Private keys stay in the user's **local Docker volume** and never leave the machine. **Sending funds on-chain** (`execute_transaction`) is parked and requires the user's approval in a **separate console window** (`docker exec -it rustok-wallet-tui rustok-console`), with a PIN for high-risk items. |
+| **Not gated by the console** | `sign_message` (EIP-191) returns a signature **without** console approval. The wallet refuses to sign a **raw hex blob** (which could hide a transaction, an approval, or typed data), but it **will** sign an ordinary plaintext message (e.g. a sign-in or an off-chain order). Treat message signing as unprotected: don't connect this wallet to an agent you wouldn't trust to sign a message. |
+| **Outside the model** | An agent with **shell / `docker exec` access to the container** can read the gateway key and reach the full signing surface (including EIP-712 permits — a classic drain). That is why the console is a **separate window, not an agent command**. Trusting your own agent is the user's call, the same as never pasting a seed phrase into an untrusted tool. |
+
+**Never claim** the agent (or a prompt-injected agent) "cannot move funds." What is
+true: keys stay local, and **on-chain sends** are human-gated in the console.
 
 ## Prerequisites
 
@@ -147,7 +160,7 @@ To run a restricted agent, set `RUSTOK_MCP_CAPABILITIES` to a subset
 | `preview_transaction` | preview_tx | Preview any transaction `{to, value, chain_id, data?}` → decoded call (who/what is authorized), pre-sign simulation (revert check), gas, risk level |
 | `execute_transaction` | execute_tx | Park a previewed transaction `{preview_id}` for human approval — the wallet never sends it on its own; a `pending` result carries `next_step` for the human |
 | `get_execution_status` | execute_tx | Poll a parked execution `{preview_id}` → `pending` / `executed` (+`tx_hash`) / `denied` / `expired` / `failed` (+`error_reason`), with the `not_after_unix` deadline |
-| `sign_message` | execute_tx | Sign a message (EIP-191) |
+| `sign_message` | execute_tx | Sign a plaintext message (EIP-191). **Not console-gated** — returns a signature without the approval window; refuses raw hex blobs but signs ordinary messages (see "What's protected"). |
 
 ## Behavioral guidelines
 
