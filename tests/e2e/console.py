@@ -38,13 +38,13 @@ class ConsoleTimeout(AssertionError):
 class Console:
     """A `podman exec -it <wallet> rustok-console` session on a pty."""
 
-    def __init__(self, container: str) -> None:
-        self._screen = pyte.Screen(COLS, ROWS)
+    def __init__(self, container: str, rows: int = ROWS, cols: int = COLS) -> None:
+        self._screen = pyte.Screen(cols, rows)
         self._stream = pyte.ByteStream(self._screen)
         self._child = pexpect.spawn(
             PODMAN,
             ["exec", "-it", container, "rustok-console"],
-            dimensions=(ROWS, COLS),
+            dimensions=(rows, cols),
             timeout=1,
         )
 

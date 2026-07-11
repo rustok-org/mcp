@@ -127,21 +127,36 @@ def create_wallet(image: str, network: str, volume: str) -> tuple[str, str]:
     shared helper's "echo stderr so a human can debug it" behaviour: a container that
     dies AFTER printing the banner would publish a real, spendable seed phrase.
     """
-    done = podman(
-        "run",
-        "--rm",
-        "-i",
-        "--network",
-        network,
-        "-v",
-        f"{volume}:/data",
-        "-e",
-        f"RUSTOK_KEYRING_PASSWORD={KEYRING_PASSWORD}",
-        image,
-        "create-wallet",
-        timeout=120,
-        check=False,  # a non-zero exit must NOT raise with the raw stderr attached
-    )
+    timed_out_after: float | None = None
+    try:
+        done = podman(
+            "run",
+            "--rm",
+            "-i",
+            "--network",
+            network,
+            "-v",
+            f"{volume}:/data",
+            "-e",
+            f"RUSTOK_KEYRING_PASSWORD={KEYRING_PASSWORD}",
+            image,
+            "create-wallet",
+            timeout=120,
+            check=False,  # a non-zero exit must NOT raise with the raw stderr attached
+        )
+    except subprocess.TimeoutExpired as timed_out:
+        # `TimeoutExpired` carries the captured stderr as an attribute: a container that
+        # printed the banner and then hung hands the recovery phrase to anything that
+        # walks this exception. Keep the number, drop the object — and raise BELOW, out of
+        # the handler: `raise ... from None` would still leave it hanging on `__context__`.
+        timed_out_after = timed_out.timeout
+
+    if timed_out_after is not None:
+        raise AssertionError(
+            f"create-wallet timed out after {timed_out_after}s "
+            "(output redacted — it contains the recovery phrase)"
+        )
+
     output = done.stderr
     address = _ADDRESS_RE.search(output)
     pin = _PIN_RE.search(output)
