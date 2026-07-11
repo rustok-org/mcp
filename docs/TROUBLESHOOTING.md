@@ -39,6 +39,18 @@ This requires the keyring password and an interactive TTY.
 The wallet runs as a singleton named `--name rustok-wallet-tui`. Stop the old
 container first (`docker rm -f rustok-wallet-tui`) if a previous run is still alive.
 
+## After an upgrade the wallet looks empty / the agent still runs the old version
+
+The wallet lives in the volume, not in the image: start the new image with the **same**
+`-v rustok-wallet-tui:/data` and your address, keys and PIN come back. A different
+volume name is a different (empty) wallet. If the agent still behaves like the old
+build, the image tag in its MCP config is stale — the agent spawns the container itself.
+See [Upgrading the wallet image](INSTALL.md#upgrading-the-wallet-image).
+
+A transaction the agent parked but nobody approved does **not** survive a restart (the
+pending queue is in the container's memory). Nothing was signed or sent — ask the agent
+to propose it again.
+
 ## Empty balances / positions for a chain
 
 That chain has no RPC configured. Set `RUSTOK_RPC_URLS_<chain>` (or
