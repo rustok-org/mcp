@@ -30,7 +30,11 @@ ERC20_CONTRACT = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 SPENDER = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
 SEND_WEI = 1_000_000_000_000_000  # 0.001 ETH
 
-_EXECUTED_HASH_RE = re.compile(r"executed\s+—\s+(0x[0-9a-fA-F]{64})")
+# v0.2 outcome notice (console `ui.rs::notice_line`): "APPROVED — 0x<tx hash>".
+_EXECUTED_HASH_RE = re.compile(r"APPROVED\s+—\s+(0x[0-9a-fA-F]{64})")
+# The resident session's normal end (console `main.rs::EXIT_ABORTED`): decisions
+# are notices on a living console, `q` is the only everyday way out (ADR #7).
+EXIT_ABORTED = 6
 
 
 def wait_status(
@@ -47,15 +51,36 @@ def wait_status(
     raise AssertionError(f"status never became {expected!r}; last answer: {last}")
 
 
-def unlock_and_open_card(console: Console, wallet: Wallet, pending: int = 1) -> None:
-    """Walk the console to an open card: PIN -> queue -> the parked item."""
+def unlock_to_queue(console: Console, wallet: Wallet, pending: int = 1) -> None:
+    """Walk the console to the queue with the parked item(s) on screen.
+
+    v0.2 home is the Dashboard; the tab bar rides every view and carries the
+    live queue count, so it doubles as the "item arrived" signal. The row
+    itself (`… wei`) must be on screen before Enter can open a card.
+    """
     console.wait_for_text("PIN")
     console.submit_pin(wallet.pin)
-    # The console polls the queue every 2.5 s: wait for the item to be ON SCREEN
-    # before pressing enter, or the keystroke lands on an empty queue.
-    console.wait_for_text(f"Pending approvals: {pending}")
+    console.wait_for_text(f"Queue·{pending} [a]")
+    console.send("a")
+    console.wait_for_text(" wei")
+
+
+def unlock_and_open_card(console: Console, wallet: Wallet, pending: int = 1) -> None:
+    """Walk the console to an open clear-signing card."""
+    unlock_to_queue(console, wallet, pending)
     console.send("\r")
-    console.wait_for_text("amount_wei")
+    console.wait_for_text("Approve ]")
+
+
+def assert_resident(console: Console, remaining: int) -> None:
+    """The v0.2 heart: a decision is a notice on a LIVING console, not an exit.
+
+    The card closed, the queue count dropped to `remaining`, and the process is
+    still there — a console that dies on a decision is the v0.1 regression this
+    suite exists to catch now.
+    """
+    assert console.is_alive(), "the resident console must survive a decision (ADR #7)"
+    console.wait_for_text(f"Queue·{remaining} [a]")
 
 
 def test_s0_socket_lives_on_podman_tmpfs_and_the_console_connects(wallet: Wallet) -> None:
@@ -78,14 +103,15 @@ def test_s1_approve_broadcasts_and_both_sides_see_the_same_tx_hash(
     with Console(wallet.name) as console:
         unlock_and_open_card(console, wallet)
         console.send("y")
-        console.wait_for_text("APPROVED")
+        console.wait_for_text("APPROVED — 0x")
         screen = console.screen
-        exit_code = console.wait_exit()
+        assert_resident(console, remaining=0)
+        exit_code = console.quit()
 
     match = _EXECUTED_HASH_RE.search(screen)
     assert match, f"the console never showed the executed tx hash:\n{screen}"
     console_hash = match.group(1).lower()
-    assert exit_code == 0, "an approved transaction must exit 0 (EXIT_APPROVED)"
+    assert exit_code == EXIT_ABORTED, "quitting the resident session must exit 6 (EXIT_ABORTED)"
 
     status = wait_status(wallet, preview_id, "executed")
     assert status["tx_hash"].lower() == console_hash, (
@@ -110,9 +136,10 @@ def test_s2_deny_resolves_as_denied_and_nothing_is_broadcast(wallet: Wallet) -> 
         unlock_and_open_card(console, wallet)
         console.send("n")
         console.wait_for_text("REJECTED")
-        exit_code = console.wait_exit()
+        assert_resident(console, remaining=0)
+        exit_code = console.quit()
 
-    assert exit_code == 4, "a rejected transaction must exit 4 (EXIT_REJECTED)"
+    assert exit_code == EXIT_ABORTED, "quitting the resident session must exit 6 (EXIT_ABORTED)"
     status = wait_status(wallet, preview_id, "denied")
     assert status["tx_hash"] is None, "a denied transaction must carry no tx hash"
 
@@ -149,8 +176,11 @@ def test_s5_unlimited_approve_card_shows_the_danger_and_gates_on_the_pin(wallet:
     with Console(wallet.name) as console:
         unlock_and_open_card(console, wallet)
         card = console.screen
-        assert "HIGH RISK: unlimited_approval" in card, f"the risk was not shouted:\n{card}"
-        assert "amount: UNLIMITED" in card, f"the card hid the unlimited allowance:\n{card}"
+        # Phase-1 card language: "⚠ HIGH RISK  <reasons>" and "amount  UNLIMITED".
+        assert "HIGH RISK" in card and "unlimited_approval" in card, (
+            f"the risk was not shouted:\n{card}"
+        )
+        assert "amount  UNLIMITED" in card, f"the card hid the unlimited allowance:\n{card}"
         assert "decoded_call.method: approve" in card
         assert SPENDER.lower() in card.lower(), "the human must see WHO is being authorized"
 
@@ -162,9 +192,10 @@ def test_s5_unlimited_approve_card_shows_the_danger_and_gates_on_the_pin(wallet:
 
         console.submit_pin(wallet.pin)
         console.wait_for_text("APPROVED")
-        exit_code = console.wait_exit()
+        assert_resident(console, remaining=0)
+        exit_code = console.quit()
 
-    assert exit_code == 0
+    assert exit_code == EXIT_ABORTED
     status = wait_status(wallet, preview_id, "executed")
     assert status["tx_hash"] is not None
 
@@ -236,17 +267,23 @@ def test_s8_a_rejected_broadcast_surfaces_as_failed_on_both_sides(wallet: Wallet
         unlock_and_open_card(console, wallet, pending=2)
         console.send("y")
         console.wait_for_text("APPROVED")
-        assert console.wait_exit() == 0
+        assert_resident(console, remaining=1)
+        assert console.quit() == EXIT_ABORTED
 
     # The queue order is not deterministic (the core stores pending items in a map), so
     # the second console approves whichever item is left — the outcome is what matters.
     with Console(wallet.name) as console:
         unlock_and_open_card(console, wallet, pending=1)
         console.send("y")
-        console.wait_for_text("FAILED")
-        exit_code = console.wait_exit()
+        console.wait_for_text("FAILED — ")
+        # v0.2: a failed broadcast is an OUTCOME (a notice), not a fatal — the
+        # console lives on and the human keeps working the queue (ADR #7).
+        assert_resident(console, remaining=0)
+        exit_code = console.quit()
 
-    assert exit_code == 1, f"a failed broadcast must exit 1 (EXIT_FATAL), got {exit_code}"
+    assert exit_code == EXIT_ABORTED, (
+        f"a failed broadcast is a notice, not a fatal — quitting must exit 6, got {exit_code}"
+    )
 
     outcomes = {wallet.status(first_id)["state"], wallet.status(second_id)["state"]}
     assert outcomes == {"executed", "failed"}, (
@@ -274,7 +311,11 @@ def test_s9_a_card_the_human_cannot_read_cannot_be_approved(wallet: Wallet) -> N
     with Console(wallet.name, rows=10, cols=40) as console:
         console.wait_for_text("PIN")
         console.submit_pin(wallet.pin)
-        console.wait_for_text("Pending approvals: 1")
+        # 40 columns clip the row's "… wei" tail; the tab count and the kind
+        # word are the anchors that survive a small terminal.
+        console.wait_for_text("Queue·1 [a]")
+        console.send("a")
+        console.wait_for_text("send")
         console.send("\r")
         console.wait_for_text("TOO SMALL")
 
@@ -287,9 +328,17 @@ def test_s9_a_card_the_human_cannot_read_cannot_be_approved(wallet: Wallet) -> N
         )
 
         # Saying NO stays available even on a screen too small to read the card.
+        # At 40x10 the notice line itself does not fit the layout (the queue and
+        # card panels take every row), so the REJECTED banner cannot be the
+        # anchor here — the machine truth (agent-side status) and the emptied
+        # queue are. The notice IS asserted on full-size screens in s2.
         console.send("n")
-        console.wait_for_text("REJECTED")
-        exit_code = console.wait_exit()
+        wait_status(wallet, preview_id, "denied")
+        console.wait_for_text("Queue·0 [a]")
+        assert console.is_alive(), "the resident console must survive a decision (ADR #7)"
+        exit_code = console.quit()
 
-    assert exit_code == 4, f"a rejected transaction must exit 4 (EXIT_REJECTED), got {exit_code}"
+    assert exit_code == EXIT_ABORTED, (
+        f"quitting the resident session must exit 6 (EXIT_ABORTED), got {exit_code}"
+    )
     assert wait_status(wallet, preview_id, "denied")["tx_hash"] is None

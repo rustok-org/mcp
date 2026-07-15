@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Wallet image ships the resident console** (`rustok-console:v0.2.0`) on the
+  first proto-2 core (`rustok-core:v0.3.0`): PIN-unlock opens a dashboard
+  (balances, DeFi positions, "waiting for you"), decisions raise notices on a
+  LIVING console instead of ending the process, Receive shows the address with
+  a QR, Activity keeps a decision journal that outlives the core's retention
+  window. Machine callers read one JSON line per decision from a non-TTY
+  stdout; exit codes now report only how the session ended.
+- **The e2e acceptance asserts the resident model**: outcome notices + the
+  agent-side status (two layers of the same truth), the console surviving every
+  decision, and `q` -> exit 6 as the only everyday way out. The v0.1
+  per-decision exit codes (0/4, failed=1) and the "Pending approvals" screen
+  no longer exist and are gone from the suite.
+
 ### Added
 - **End-to-end acceptance suite** (`tests/e2e`, marker `e2e`): drives the shipped
   `rustok-wallet-tui` image through the real approval channel — the agent proposes over
