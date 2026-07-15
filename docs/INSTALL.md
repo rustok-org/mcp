@@ -13,7 +13,7 @@ Docker volume and never leave your machine.
 ## 1. Pull the image
 
 ```bash
-docker pull ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0
+docker pull ghcr.io/rustok-org/rustok-wallet-tui:v0.7.0
 ```
 
 ## 2. Create your wallet (one time)
@@ -29,7 +29,7 @@ TTY). It prints two things only once:
 docker run -it --rm --name rustok-wallet-tui \
   -v rustok-wallet-tui:/data \
   -e RUSTOK_KEYRING_PASSWORD="choose-a-strong-password" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0 create-wallet
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.7.0 create-wallet
 ```
 
 Back up the **12 words** and the **PIN** offline, then fund the address. If the
@@ -50,7 +50,7 @@ to the MCP config (`claude_desktop_config.json`):
                "-e", "RUSTOK_KEYRING_PASSWORD",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0"],
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.7.0"],
       "env": {
         "RUSTOK_KEYRING_PASSWORD": "your-strong-password",
         "RUSTOK_RPC_URLS_1": "https://ethereum-rpc.publicnode.com"
@@ -70,7 +70,7 @@ Your wallet lives in the **volume**, not in the image — so upgrading is: pull 
 tag, recreate the container, keep the volume.
 
 ```bash
-docker pull ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0
+docker pull ghcr.io/rustok-org/rustok-wallet-tui:v0.7.0
 docker rm -f rustok-wallet-tui            # the old container; the volume is untouched
 # then start the new image with the SAME -v rustok-wallet-tui:/data as before
 ```
