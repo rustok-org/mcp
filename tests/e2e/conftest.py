@@ -16,7 +16,7 @@ from tests.e2e.podman import free_port, network_rm, podman, rm_force, volume_rm
 from tests.e2e.wallet import CHAIN_ID, Wallet, create_wallet, start_wallet
 
 # The suite aims at the SHIPPED artifact — override to accept a different tag.
-DEFAULT_IMAGE = "ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0"
+DEFAULT_IMAGE = "ghcr.io/rustok-org/rustok-wallet-tui:v0.7.0"
 DEFAULT_ANVIL_IMAGE = "ghcr.io/foundry-rs/foundry:latest"
 STARTING_BALANCE = 10 * WEI_PER_ETH
 

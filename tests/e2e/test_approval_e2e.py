@@ -75,12 +75,17 @@ def unlock_and_open_card(console: Console, wallet: Wallet, pending: int = 1) -> 
 def assert_resident(console: Console, remaining: int) -> None:
     """The v0.2 heart: a decision is a notice on a LIVING console, not an exit.
 
-    The card closed, the queue count dropped to `remaining`, and the process is
-    still there — a console that dies on a decision is the v0.1 regression this
-    suite exists to catch now.
+    Three claims, each actually checked (Gate-2 fix-1): the process survived,
+    the card CLOSED (the actions row is gone — the tab bar alone proves
+    nothing, it rides every view including an open card), and the queue count
+    dropped to `remaining`. One combined predicate, so a screen mid-transition
+    cannot satisfy the checks one at a time.
     """
     assert console.is_alive(), "the resident console must survive a decision (ADR #7)"
-    console.wait_for_text(f"Queue·{remaining} [a]")
+    console.wait_for(
+        lambda screen: f"Queue·{remaining} [a]" in screen and "Approve ]" not in screen,
+        f"the queue at {remaining} with the decision card closed",
+    )
 
 
 def test_s0_socket_lives_on_podman_tmpfs_and_the_console_connects(wallet: Wallet) -> None:
@@ -176,10 +181,10 @@ def test_s5_unlimited_approve_card_shows_the_danger_and_gates_on_the_pin(wallet:
     with Console(wallet.name) as console:
         unlock_and_open_card(console, wallet)
         card = console.screen
-        # Phase-1 card language: "⚠ HIGH RISK  <reasons>" and "amount  UNLIMITED".
-        assert "HIGH RISK" in card and "unlimited_approval" in card, (
-            f"the risk was not shouted:\n{card}"
-        )
+        # Phase-1 banner, BOUND as one string (Gate-2 МИНОР-3: two independent
+        # substrings could pass with "unlimited_approval" coming from somewhere
+        # else on screen): "⚠ HIGH RISK  <reasons>", reasons joined ", ".
+        assert "HIGH RISK  unlimited_approval" in card, f"the risk was not shouted:\n{card}"
         assert "amount  UNLIMITED" in card, f"the card hid the unlimited allowance:\n{card}"
         assert "decoded_call.method: approve" in card
         assert SPENDER.lower() in card.lower(), "the human must see WHO is being authorized"
@@ -330,12 +335,11 @@ def test_s9_a_card_the_human_cannot_read_cannot_be_approved(wallet: Wallet) -> N
         # Saying NO stays available even on a screen too small to read the card.
         # At 40x10 the notice line itself does not fit the layout (the queue and
         # card panels take every row), so the REJECTED banner cannot be the
-        # anchor here — the machine truth (agent-side status) and the emptied
-        # queue are. The notice IS asserted on full-size screens in s2.
+        # anchor here — the machine truth (agent-side status) and the shared
+        # resident check are. The notice IS asserted on full-size screens in s2.
         console.send("n")
         wait_status(wallet, preview_id, "denied")
-        console.wait_for_text("Queue·0 [a]")
-        assert console.is_alive(), "the resident console must survive a decision (ADR #7)"
+        assert_resident(console, remaining=0)
         exit_code = console.quit()
 
     assert exit_code == EXIT_ABORTED, (
