@@ -8,12 +8,12 @@
 #   docker build -f Dockerfile.wallet \
 #     --build-arg CORE_IMAGE=rustok-core:v0.3.0 \
 #     --build-arg CONSOLE_IMAGE=rustok-console:v0.2.0 \
-#     -t rustok-wallet-tui:0.7.0 .
+#     -t rustok-wallet-tui:0.7.1 .
 # Onboard:  docker run -it --rm --name rustok-wallet-tui -v rustok-wallet-tui:/data \
-#     -e RUSTOK_KEYRING_PASSWORD=… rustok-wallet-tui:0.7.0 create-wallet
+#     -e RUSTOK_KEYRING_PASSWORD=… rustok-wallet-tui:0.7.1 create-wallet
 # Run (MCP stdio): docker run -i --rm --init --name rustok-wallet-tui \
 #     -v rustok-wallet-tui:/data -e RUSTOK_KEYRING_PASSWORD=… \
-#     -e RUSTOK_RPC_URLS_1=… rustok-wallet-tui:0.7.0
+#     -e RUSTOK_RPC_URLS_1=… rustok-wallet-tui:0.7.1
 
 ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.3.0
 ARG CONSOLE_IMAGE=ghcr.io/rustok-org/rustok-console:v0.2.0

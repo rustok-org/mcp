@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from rustok_mcp import __version__
 from rustok_mcp.config import get_settings
 from rustok_mcp.gateway import GatewayClient
 from rustok_mcp.handlers import create_protocol_and_registry
@@ -49,7 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 app = FastAPI(
     title="Rustok MCP Server",
-    version="0.6.0",
+    version=__version__,
     lifespan=lifespan,
 )
 app.include_router(health_router)

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] — 2026-07-15
+
+### Fixed
+- **MCP protocol version negotiation** — `initialize` now mirrors a supported
+  client revision (2024-11-05 … 2025-11-25) instead of a hard-pinned
+  2024-11-05, which current Claude Code silently rejects (30 s timeout, no
+  wallet). Found by the first real user on day one.
+- **JSON-RPC responses carry `result` XOR `error`** — every response used to
+  ship `"error": null` next to its result (and vice versa), which a strict
+  client parser (Claude Code 2.1) rejects as malformed; one serialization
+  seam (`JsonRpcResponse.to_wire`) now emits exactly one of the two keys on
+  both transports (stdio, SSE). This was the second, decisive half of the
+  same connect failure.
+- **serverInfo/OpenAPI/__version__ read the package metadata** — three
+  hardcoded version strings could drift from the shipped version (the v0.7.0
+  image reported 0.6.0).
+
 ## [0.7.0] — 2026-07-15
 
 ### Changed
