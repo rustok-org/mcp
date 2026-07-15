@@ -25,7 +25,7 @@ async def test_stdio_initialize_roundtrip() -> None:
     response = json.loads(lines[0])
     assert response["jsonrpc"] == "2.0"
     assert response["id"] == 1
-    assert response["result"]["protocolVersion"] == "2024-11-05"
+    assert response["result"]["protocolVersion"] == "2025-11-25"
 
 
 async def test_stdio_default_exposes_all_tools(monkeypatch: pytest.MonkeyPatch) -> None:

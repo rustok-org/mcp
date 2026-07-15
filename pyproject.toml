@@ -1,6 +1,6 @@
 [project]
 name = "rustok-mcp"
-version = "0.7.0"
+version = "0.7.1"
 description = "Rustok MCP Server — FastAPI with SSE and stdio transports"
 readme = "README.md"
 requires-python = ">=3.12"

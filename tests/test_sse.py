@@ -137,7 +137,7 @@ async def test_sse_message_roundtrip() -> None:
     data = json.loads(message)
     assert data["jsonrpc"] == "2.0"
     assert data["id"] == 1
-    assert data["result"]["protocolVersion"] == "2024-11-05"
+    assert data["result"]["protocolVersion"] == "2025-11-25"
 
 
 async def test_sse_message_missing_session_id() -> None:

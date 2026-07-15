@@ -97,7 +97,7 @@ async def mcp_message(request: Request, body: JsonRpcRequest) -> _MessageRespons
 
     if response is not None:
         assert session.queue is not None  # noqa: S101
-        await session.queue.put(response.model_dump_json())
+        await session.queue.put(response.to_wire())
 
     return _MessageResponse(status="ok")
 
