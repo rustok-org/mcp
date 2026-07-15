@@ -104,14 +104,24 @@ class Console:
         """Type a PIN and press Enter."""
         self._child.send(pin + "\r")
 
-    def wait_exit(self, timeout: float = DEFAULT_TIMEOUT) -> int:
-        """Dismiss the outcome screen, then return the console's exit code (invariant #7).
+    def is_alive(self) -> bool:
+        """Whether the console process is still running.
 
-        On a terminal outcome the console shows the answer and blocks in `wait_for_key`
-        (console `main.rs`) — the human is meant to read what happened to their money
-        before the window disappears. A harness that does not press a key waits forever.
+        The v0.2 console is RESIDENT (ADR `2026-07-12-invariant-7-decision-stream`):
+        a decision raises a notice and returns to the queue — it never ends the
+        process. Tests assert this explicitly; a console that dies on a decision
+        is a regression, not a convenience.
         """
-        self.send("\r")
+        return bool(self._child.isalive())
+
+    def quit(self, timeout: float = DEFAULT_TIMEOUT) -> int:
+        """End the resident session (`q`) and return the SESSION exit code.
+
+        Exit codes stopped being per-decision in v0.2: outcomes stream as JSON
+        lines to a non-TTY stdout, and the exit code only reports how the session
+        ended — a human quitting from a display view is 6 (EXIT_ABORTED).
+        """
+        self.send("q")
         deadline = time.monotonic() + timeout
         while self._child.isalive():
             if time.monotonic() > deadline:

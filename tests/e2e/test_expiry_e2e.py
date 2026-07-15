@@ -51,7 +51,8 @@ def test_s3_a_parked_transaction_expires_when_nobody_decides(wallet: Wallet) -> 
     assert deadline_unix < time.time(), "the deadline the item was parked with must have passed"
 
     # The card is gone from the human's side too: an expired item is no longer live.
+    # v0.2 home is the Dashboard — the "waiting for you" count says it directly.
     with Console(wallet.name) as console:
         console.wait_for_text("PIN")
         console.submit_pin(wallet.pin)
-        console.wait_for_text("Pending approvals: 0")
+        console.wait_for_text("Waiting for you: nothing pending")
