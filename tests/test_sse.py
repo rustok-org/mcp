@@ -138,6 +138,9 @@ async def test_sse_message_roundtrip() -> None:
     assert data["jsonrpc"] == "2.0"
     assert data["id"] == 1
     assert data["result"]["protocolVersion"] == "2025-11-25"
+    # The REAL SSE path shares the XOR guard: "error": null next to a result
+    # is what a strict client rejects (the 2026-07-15 outage).
+    assert "error" not in data
 
 
 async def test_sse_message_missing_session_id() -> None:
