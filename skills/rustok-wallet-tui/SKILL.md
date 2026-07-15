@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet-tui
 description: Self-custody Ethereum agent wallet. Runs entirely on your machine as one Docker image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain requires your approval in a separate terminal console, never inside the agent chat; message signing is not console-gated. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.6.0
+version: 0.7.0
 metadata:
   openclaw:
     emoji: "🦀"
@@ -62,7 +62,7 @@ read -r -s -p "Keyring password: " RUSTOK_KEYRING_PASSWORD && export RUSTOK_KEYR
 docker run -it --rm --name rustok-wallet-tui \
   -v rustok-wallet-tui:/data \
   -e RUSTOK_KEYRING_PASSWORD \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0 create-wallet
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.7.0 create-wallet
 ```
 
 Write both the **12 words** and the **PIN** down offline. Recovery = the 12 words
@@ -91,7 +91,7 @@ docker run -i --rm --init --name rustok-wallet-tui \
   --env-file ~/.rustok-wallet-tui.env \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.7.0
 ```
 
 > The container automatically mints an ephemeral `RUSTOK_MCP_API_KEY` for the
@@ -123,7 +123,7 @@ config file** — only the non-secret RPC URL lives here:
                "--env-file", "/home/you/.rustok-wallet-tui.env",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0"],
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.7.0"],
       "env": {
         "RUSTOK_RPC_URLS_1": "https://your-rpc"
       }
