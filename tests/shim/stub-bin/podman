@@ -31,6 +31,10 @@ shift || true
 
 case "$cmd" in
     ps)
+        if [ "${STUB_PS_FAIL:-0}" = "1" ]; then
+            echo "cannot connect to the engine service" 1>&2
+            exit 125
+        fi
         name_filter=""
         filters=""
         all=0

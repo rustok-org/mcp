@@ -74,11 +74,15 @@ resolve_engine() {
 # agent's wallet; `rustok.agent` alone would match a non-wallet container.
 
 discover_ids() {
-    # $1: agent name or "" for any agent
+    # $1: agent name or "" for any agent. An installed-but-dead engine must be
+    # a named error here too, not a raw `ps` stderr (doctor already says it
+    # nicely — console/status deserve the same).
     if [ -n "$1" ]; then
-        "$engine" ps -q --filter label=rustok=wallet --filter "label=rustok.agent=$1"
+        "$engine" ps -q --filter label=rustok=wallet --filter "label=rustok.agent=$1" \
+            || die "'$engine' failed listing containers — is the service running? (try: rustok doctor)"
     else
-        "$engine" ps -q --filter label=rustok=wallet
+        "$engine" ps -q --filter label=rustok=wallet \
+            || die "'$engine' failed listing containers — is the service running? (try: rustok doctor)"
     fi
 }
 
@@ -151,12 +155,8 @@ cmd_status() {
 
 cmd_doctor() {
     failed=0
-    # Engine present and pinned.
-    if [ -f "$CONFIG_FILE" ]; then
-        echo "ok: engine '$engine' (pinned in $CONFIG_FILE)"
-    else
-        echo "ok: engine '$engine' (auto-detected; will be pinned on first use)"
-    fi
+    # resolve_engine has already pinned the choice by the time we are here.
+    echo "ok: engine '$engine' (pinned in $CONFIG_FILE)"
     if ! "$engine" info >/dev/null 2>&1; then
         echo "fail: '$engine' is installed but not usable — is the service/machine running?"
         failed=1

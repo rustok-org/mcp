@@ -21,23 +21,33 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 fresh() {
-    # Reset the world: config dir, stub log, stub table, PATH with the stub
-    # engine first and NO real engines reachable.
-    rm -rf "${WORK:?}/home" "${WORK:?}/log"
-    mkdir -p "$WORK/home"
+    # Reset the world HERMETICALLY: the shim sees ONLY $WORK/bin — the stub
+    # engine(s) this test plants plus symlinks to the coreutils the shim needs.
+    # No /usr/bin: whether "docker exists" is decided by the TEST, never by the
+    # machine (ubuntu-latest ships a real docker; a dev box may not).
+    rm -rf "${WORK:?}/home" "${WORK:?}/log" "${WORK:?}/bin"
+    mkdir -p "$WORK/home" "$WORK/bin"
     : >"$WORK/log"
+    for tool in sh cat sed head sort awk mkdir basename cut tr; do
+        ln -s "$(command -v "$tool")" "$WORK/bin/$tool"
+    done
+    ln -s "$TESTS_DIR/stub-bin/podman" "$WORK/bin/podman"
     STUB_CONTAINERS=""
     STUB_LEGACY=""
     STUB_INFO_FAIL=0
-    TEST_PATH="$TESTS_DIR/stub-bin:/usr/bin:/bin"
+    STUB_PS_FAIL=0
+    TEST_PATH="$WORK/bin"
 }
+
+plant_docker_stub() { ln -s "$TESTS_DIR/stub-bin/podman" "$WORK/bin/docker"; }
+remove_podman_stub() { rm "$WORK/bin/podman"; }
 
 run_shim() {
     # run_shim <args…> — capture stdout+stderr and exit code, stub-injected.
     OUT="$(HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config" \
         PATH="$TEST_PATH" STUB_LOG="$WORK/log" \
         STUB_CONTAINERS="$STUB_CONTAINERS" STUB_LEGACY="$STUB_LEGACY" \
-        STUB_INFO_FAIL="$STUB_INFO_FAIL" \
+        STUB_INFO_FAIL="$STUB_INFO_FAIL" STUB_PS_FAIL="$STUB_PS_FAIL" \
         sh "$SHIM" "$@" 2>&1)" && RC=0 || RC=$?
 }
 
@@ -87,11 +97,25 @@ else not_ok "first run pins engine=podman in the config"; fi
 fresh
 mkdir -p "$WORK/home/.config/rustok"
 echo "engine=docker" >"$WORK/home/.config/rustok/config"
+# docker deliberately NOT planted: its absence is the test's decision, hermetic
+# from whatever the host machine has installed.
 run_shim status
 if assert_exit 1 && assert_has "configured engine 'docker'" && assert_has "not installed" \
     && assert_not_has "engine: podman"; then
     ok "pinned-but-missing engine fails loudly, never silently re-picks"
 else not_ok "pinned-but-missing engine fails loudly, never silently re-picks"; fi
+
+fresh
+plant_docker_stub
+remove_podman_stub
+mkdir -p "$WORK/home/.config/rustok"
+echo "engine=docker" >"$WORK/home/.config/rustok/config"
+STUB_CONTAINERS="abc1;rustok=wallet;rustok.agent=claude;image=img"
+run_shim status
+if assert_exit 0 && assert_has "engine: docker" && assert_has "claude" \
+    && grep -q '^docker ps' "$WORK/log"; then
+    ok "pinned docker engine dispatches to docker (hermetic stub)"
+else not_ok "pinned docker engine dispatches to docker (hermetic stub)"; fi
 
 # --- console: discovery by BOTH labels -----------------------------------------
 
@@ -202,6 +226,16 @@ run_shim doctor
 if assert_exit 0 && assert_has "1 wallet(s) running: hermes"; then
     ok "doctor: reports running wallets by agent"
 else not_ok "doctor: reports running wallets by agent"; fi
+
+# --- installed-but-dead engine: named error, not raw ps stderr -----------------
+
+fresh
+STUB_PS_FAIL=1
+run_shim console
+if assert_exit 1 && assert_has "'podman' failed listing containers" \
+    && assert_has "try: rustok doctor"; then
+    ok "console with a dead engine: named error, not raw ps output"
+else not_ok "console with a dead engine: named error, not raw ps output"; fi
 
 # --- transition: pre-label wallets (no rustok.agent at all) --------------------
 # Real production state: wallets launched before the label model carry only
