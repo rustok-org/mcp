@@ -10,7 +10,15 @@ name: Wallet Image Publish
 #     GITHUB_TOKEN cannot pull a private package, so the build fails at `FROM`
 #     (flipping visibility is a Captain op; core PR #90 names it a precondition);
 #   - the pinned ghcr.io/rustok-org/rustok-console image is published and public.
-# Fallback: build + push manually from an authorized machine (how v0.4.0 shipped).
+# Fallback (break-glass): if CI cannot build (e.g. a base image is briefly
+# unreachable), build + push manually from an authorized machine — but the image
+# MUST still be signed by THIS workflow's identity, or install.sh's `cosign verify`
+# (which pins that one identity) rejects it for every user. Do NOT sign from the
+# laptop: a local run cannot reproduce the workflow's keyless OIDC identity, and a
+# second signer (a personal Sigstore account) would force verify to trust two
+# identities. Instead, sign in CI — re-run this workflow so its cosign step signs
+# the pushed digest (the build step no-ops on an already-present image). One
+# identity end to end.
 
 on:
   workflow_dispatch:
@@ -31,6 +39,7 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  id-token: write # keyless cosign signing via the GitHub OIDC token
 
 jobs:
   build-and-push:
@@ -76,6 +85,7 @@ jobs:
             org.opencontainers.image.licenses=LicenseRef-Proprietary
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
@@ -86,3 +96,31 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+
+      # Sign the image by DIGEST (the immutable identity every tag points at), so
+      # one signature covers all pushed tags. Keyless: the signer's identity is
+      # this workflow's OIDC token — no key material to store or rotate. Anyone
+      # can later `cosign verify` that the wallet image came from this repo's CI.
+      - name: Sign the image (keyless, GitHub OIDC)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # Anti-vacuous: verify the signature we just made, pinned to THIS workflow's
+      # identity. A misconfigured signing step (wrong permissions, wrong identity)
+      # fails here instead of shipping an image that only looks signed.
+      - name: Verify the signature
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/wallet-publish.yml@${{ github.ref }}
+        run: |
+          cosign verify "${IMAGE}@${DIGEST}" \
+            --certificate-identity "${IDENTITY}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            > /dev/null
+          echo "signed & verified: ${IMAGE}@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
