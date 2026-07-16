@@ -98,6 +98,12 @@ run_shim help
 if assert_exit 0 && assert_has "Usage: rustok"; then ok "help shows usage"; else not_ok "help shows usage"; fi
 
 fresh
+run_shim help
+if assert_exit 0 && assert_has "podman inspect" && assert_has "RUSTOK_RPC_URLS"; then
+    ok "help documents the keyed-RPC inspect-visibility interim (escalation #2)"
+else not_ok "help documents the keyed-RPC inspect-visibility interim (escalation #2)"; fi
+
+fresh
 run_shim frobnicate
 if assert_exit 2 && assert_has "unknown command 'frobnicate'"; then
     ok "unknown command exits 2"

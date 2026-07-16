@@ -53,7 +53,10 @@ Options:
 
 Environment:
   RUSTOK_IMAGE       wallet image override
-  RUSTOK_RPC_URLS_*  forwarded to `start` (never the keyring password)
+  RUSTOK_RPC_URLS_*  forwarded to `start` (never the keyring password). NOTE:
+                     until `rustok connect` lands, a keyed RPC URL is passed by
+                     name and is visible in `podman inspect` — move provider
+                     keys to a secret when connect is available.
 EOF
 }
 
