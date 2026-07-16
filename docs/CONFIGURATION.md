@@ -34,7 +34,7 @@ a pending transaction, open the console in a separate terminal. The container
 runs under an auto-generated name (labels, not `--name`), so find it by label:
 
 ```bash
-docker exec -it "$(docker ps -q --filter label=rustok.agent=claude)" rustok-console
+docker exec -it "$(docker ps -q --filter label=rustok=wallet --filter label=rustok.agent=claude)" rustok-console
 ```
 
 ## Capabilities (security)

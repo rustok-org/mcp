@@ -80,7 +80,7 @@ The console is a **separate window** the agent cannot drive. The container has n
 fixed name (see above), so find it by label:
 
 ```bash
-docker exec -it "$(docker ps -q --filter label=rustok.agent=claude)" rustok-console
+docker exec -it "$(docker ps -q --filter label=rustok=wallet --filter label=rustok.agent=claude)" rustok-console
 ```
 
 This works while the agent session is live (the MCP client keeps the container
