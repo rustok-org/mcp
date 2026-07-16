@@ -13,6 +13,28 @@ set -e
 : "${RUSTOK_DATA_DIR:=/data}"
 export RUSTOK_DATA_DIR
 
+# The keyring password may arrive as a FILE (`podman secret …,type=mount`, or a
+# docker bind-mount) via the standard _FILE convention. An explicit
+# RUSTOK_KEYRING_PASSWORD always wins — then the file is not even looked at.
+# $(cat …) strips trailing newlines, same as the official-image `_FILE` readers.
+if [ -z "${RUSTOK_KEYRING_PASSWORD:-}" ] && [ -n "${RUSTOK_KEYRING_PASSWORD_FILE:-}" ]; then
+    # Two guards, one named error. `[ -f ]` is a stat(2) check that rejects
+    # what would hang `cat` forever (a FIFO, a device, a directory) — and it is
+    # NOT `test -r`: under SELinux (podman on Fedora, a bind-mount without
+    # `:z`) access(2) says yes while open(2) is denied, so the read itself
+    # stays guarded too and fails as the same named error, never a raw `cat`.
+    if [ ! -f "$RUSTOK_KEYRING_PASSWORD_FILE" ] \
+        || ! RUSTOK_KEYRING_PASSWORD="$(cat "$RUSTOK_KEYRING_PASSWORD_FILE" 2>/dev/null)"; then
+        echo "rustok-wallet-tui: RUSTOK_KEYRING_PASSWORD_FILE does not point to a readable regular file: $RUSTOK_KEYRING_PASSWORD_FILE" 1>&2
+        exit 1
+    fi
+    if [ -z "$RUSTOK_KEYRING_PASSWORD" ]; then
+        echo "rustok-wallet-tui: RUSTOK_KEYRING_PASSWORD_FILE is empty: $RUSTOK_KEYRING_PASSWORD_FILE" 1>&2
+        exit 1
+    fi
+    export RUSTOK_KEYRING_PASSWORD
+fi
+
 # The approver socket lives here. Recreate in case /run is a tmpfs (podman).
 mkdir -p /run/wallet
 
