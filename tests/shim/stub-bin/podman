@@ -29,7 +29,75 @@ entry_field() {
 cmd="${1:-}"
 shift || true
 
+# Containers started by `run -d` within a test persist in $STUB_STATE and are
+# merged into `ps` answers — the exec-or-start flow re-discovers after starting.
+state_containers() {
+    [ -n "${STUB_STATE:-}" ] && [ -f "$STUB_STATE/containers" ] && cat "$STUB_STATE/containers" || true
+}
+
 case "$cmd" in
+    secret)
+        sub="$1"
+        shift
+        case "$sub" in
+            exists) [ -f "${STUB_STATE:?}/secret-$1" ] ;;
+            create)
+                name="$1"
+                # value arrives on STDIN ('-'), exactly like real podman
+                cat >"${STUB_STATE:?}/secret-$name"
+                echo "stubsecret-$name"
+                ;;
+            rm) rm -f "${STUB_STATE:?}/secret-$1" ;;
+            *) echo "stub: unexpected secret sub: $sub" 1>&2 && exit 64 ;;
+        esac
+        exit $?
+        ;;
+    volume)
+        [ "$1" = "exists" ] || { echo "stub: unexpected volume sub: $1" 1>&2; exit 64; }
+        [ -f "${STUB_STATE:?}/volume-$2" ]
+        exit $?
+        ;;
+    stop)
+        if [ -n "${STUB_STATE:-}" ] && [ -f "$STUB_STATE/containers" ]; then
+            grep -v "^$1;" "$STUB_STATE/containers" >"$STUB_STATE/containers.new" || true
+            mv "$STUB_STATE/containers.new" "$STUB_STATE/containers"
+        fi
+        echo "$1"
+        exit 0
+        ;;
+    run)
+        detached=0
+        volume=""
+        labels=""
+        for a in "$@"; do
+            case "$a" in
+                -d) detached=1 ;;
+                *:/data) volume="${a%%:*}" ;;
+                rustok=* | rustok.agent=*) labels="$labels;$a" ;;
+            esac
+        done
+        # one-shot onboarding: register the volume, print the banner the human
+        # must back up (the REAL one prints on the tty; the marker proves the
+        # shim let it through untouched)
+        case "$*" in
+            *create-wallet)
+                [ -n "$volume" ] && : >"${STUB_STATE:?}/volume-$volume"
+                echo "STUB-SEED-BANNER twelve words here"
+                echo "STUB-PIN-BANNER 123456"
+                exit 0
+                ;;
+        esac
+        if [ "$detached" -eq 1 ]; then
+            id="detached$(tr -dc 'a-f0-9' </dev/urandom 2>/dev/null | head -c 8 || echo cafe0001)"
+            [ -n "$volume" ] && : >"${STUB_STATE:?}/volume-$volume"
+            echo "$id;${labels#;};image=stub-img" >>"${STUB_STATE:?}/containers"
+            : >"${STUB_STATE:?}/socket-$id"
+            echo "$id"
+            exit 0
+        fi
+        echo "stub: unexpected run form: $*" 1>&2
+        exit 64
+        ;;
     ps)
         if [ "${STUB_PS_FAIL:-0}" = "1" ]; then
             echo "cannot connect to the engine service" 1>&2
@@ -59,7 +127,7 @@ case "$cmd" in
             [ -n "${STUB_LEGACY:-}" ] && echo
             exit 0
         fi
-        for entry in ${STUB_CONTAINERS:-}; do
+        for entry in ${STUB_CONTAINERS:-} $(state_containers); do
             keep=1
             for f in $filters; do
                 entry_has "$entry" "$f" || keep=0
@@ -72,7 +140,7 @@ case "$cmd" in
         # inspect --format '<tpl>' <id>
         tpl="$2"
         id="$3"
-        for entry in ${STUB_CONTAINERS:-}; do
+        for entry in ${STUB_CONTAINERS:-} $(state_containers); do
             if [ "$(entry_id "$entry")" = "$id" ]; then
                 case "$tpl" in
                     *rustok.agent*)
@@ -90,9 +158,16 @@ case "$cmd" in
         exit 1
         ;;
     exec)
-        # exec -it <id> rustok-console — prove WHICH container was targeted.
-        shift # -it
-        echo "EXEC:$1:$2"
+        # exec [-it|-i] <id> <cmd…> — prove WHICH container was targeted.
+        case "$1" in -it | -i) shift ;; esac
+        id="$1"
+        shift
+        # the console's socket-readiness probe (exec <id> test -S <path>)
+        if [ "$1" = "test" ]; then
+            [ -f "${STUB_STATE:?}/socket-$id" ]
+            exit $?
+        fi
+        echo "EXEC:$id:$1"
         exit 0
         ;;
     info)

@@ -25,10 +25,12 @@ fresh() {
     # engine(s) this test plants plus symlinks to the coreutils the shim needs.
     # No /usr/bin: whether "docker exists" is decided by the TEST, never by the
     # machine (ubuntu-latest ships a real docker; a dev box may not).
-    rm -rf "${WORK:?}/home" "${WORK:?}/log" "${WORK:?}/bin"
-    mkdir -p "$WORK/home" "$WORK/bin"
+    rm -rf "${WORK:?}/home" "${WORK:?}/log" "${WORK:?}/bin" "${WORK:?}/state"
+    mkdir -p "$WORK/home" "$WORK/bin" "$WORK/state"
     : >"$WORK/log"
-    for tool in sh cat sed head sort awk mkdir basename cut tr; do
+    # env hygiene: a previous test's exported wallet config must not leak in
+    unset RUSTOK_RPC_URLS_1 RUSTOK_KEYRING_PASSWORD RUSTOK_IMAGE 2>/dev/null || true
+    for tool in sh cat sed head sort awk mkdir basename cut tr rm mv grep env sleep stty; do
         ln -s "$(command -v "$tool")" "$WORK/bin/$tool"
     done
     ln -s "$TESTS_DIR/stub-bin/podman" "$WORK/bin/podman"
@@ -45,10 +47,26 @@ remove_podman_stub() { rm "$WORK/bin/podman"; }
 run_shim() {
     # run_shim <args…> — capture stdout+stderr and exit code, stub-injected.
     OUT="$(HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config" \
-        PATH="$TEST_PATH" STUB_LOG="$WORK/log" \
+        PATH="$TEST_PATH" STUB_LOG="$WORK/log" STUB_STATE="$WORK/state" \
         STUB_CONTAINERS="$STUB_CONTAINERS" STUB_LEGACY="$STUB_LEGACY" \
         STUB_INFO_FAIL="$STUB_INFO_FAIL" STUB_PS_FAIL="$STUB_PS_FAIL" \
         sh "$SHIM" "$@" 2>&1)" && RC=0 || RC=$?
+}
+
+PY3="$(command -v python3)"
+
+run_init_pty() {
+    # run_init_pty <pw1> <pw2> [shim args…] — drives init on a real pty (the
+    # /dev/tty gate) feeding the two password lines like a human would.
+    pw1="$1"
+    pw2="$2"
+    shift 2
+    OUT="$(printf '%s\n%s\n' "$pw1" "$pw2" | \
+        HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config" \
+        PATH="$TEST_PATH" STUB_LOG="$WORK/log" STUB_STATE="$WORK/state" \
+        STUB_CONTAINERS="$STUB_CONTAINERS" STUB_LEGACY="$STUB_LEGACY" \
+        STUB_INFO_FAIL="$STUB_INFO_FAIL" STUB_PS_FAIL="$STUB_PS_FAIL" \
+        "$PY3" "$TESTS_DIR/pty-init.py" sh "$SHIM" init "$@" 2>&1)" && RC=0 || RC=$?
 }
 
 ok() {
@@ -263,6 +281,158 @@ run_shim doctor
 if assert_exit 0 && assert_has "warn: 1 wallet(s) without a rustok.agent label"; then
     ok "doctor warns about pre-label wallets"
 else not_ok "doctor warns about pre-label wallets"; fi
+
+# --- init: the trust boundary ---------------------------------------------------
+
+# shellcheck disable=SC2016  # literal $x is the point: the password must NOT expand
+PW_QUOTED='pa"ss$x'
+
+fresh
+run_shim init
+if assert_exit 1 && assert_has "needs your own terminal" \
+    && assert_has "never run it through an agent"; then
+    ok "init without a tty: named refusal (Rule of two windows)"
+else not_ok "init without a tty: named refusal (Rule of two windows)"; fi
+
+fresh
+run_init_pty "$PW_QUOTED" "$PW_QUOTED"
+if assert_exit 0 && assert_has "keyring password stored" \
+    && assert_has "STUB-SEED-BANNER" && assert_has "wallet created" \
+    && [ "$(cat "$WORK/state/secret-rustok-keyring-claude")" = "$PW_QUOTED" ] \
+    && ! grep -qF "$PW_QUOTED" "$WORK/log"; then
+    ok "init: quote-safe password stored byte-exact, never in engine argv; seed banner passes through"
+else not_ok "init: quote-safe password stored byte-exact, never in engine argv; seed banner passes through"; fi
+
+fresh
+run_init_pty "one-password" "different-password"
+if assert_exit 1 && assert_has "passwords do not match — nothing stored" \
+    && [ ! -f "$WORK/state/secret-rustok-keyring-claude" ]; then
+    ok "init: password mismatch refuses and stores nothing"
+else not_ok "init: password mismatch refuses and stores nothing"; fi
+
+fresh
+: >"$WORK/state/volume-rustok-wallet-tui"
+run_shim init
+if assert_exit 1 && assert_has "wallet volume 'rustok-wallet-tui' already exists" \
+    && assert_has "never touches keystores"; then
+    ok "init refuses when the keystore volume exists (no password even asked)"
+else not_ok "init refuses when the keystore volume exists (no password even asked)"; fi
+
+fresh
+printf 'old-password' >"$WORK/state/secret-rustok-keyring-claude"
+run_shim init
+if assert_exit 1 && assert_has "stored keyring password for agent 'claude' already exists" \
+    && assert_has "--force"; then
+    ok "init refuses when the secret exists without --force"
+else not_ok "init refuses when the secret exists without --force"; fi
+
+fresh
+: >"$WORK/state/volume-rustok-wallet-tui"
+printf 'old-password' >"$WORK/state/secret-rustok-keyring-claude"
+run_init_pty "new-password" "new-password" --force
+if assert_exit 0 && assert_has "password re-stored, wallet untouched" \
+    && [ "$(cat "$WORK/state/secret-rustok-keyring-claude")" = "new-password" ] \
+    && ! grep -qE '(run .*create-wallet|volume rm)' "$WORK/log"; then
+    ok "init --force re-stores the secret ONLY: no create-wallet, no volume rm"
+else not_ok "init --force re-stores the secret ONLY: no create-wallet, no volume rm"; fi
+
+fresh
+run_shim status --force
+if assert_exit 1 && assert_has "force is an init-only flag"; then
+    ok "--force outside init is refused"
+else not_ok "--force outside init is refused"; fi
+
+# --- start / stop ---------------------------------------------------------------
+
+fresh
+run_shim start
+if assert_exit 1 && assert_has "no stored keyring password for agent 'claude'" \
+    && assert_has "rustok init"; then
+    ok "start without init: named error pointing at init"
+else not_ok "start without init: named error pointing at init"; fi
+
+fresh
+printf '%s' pw >"$WORK/state/secret-rustok-keyring-claude"
+: >"$WORK/state/volume-rustok-wallet-tui"
+export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
+export RUSTOK_KEYRING_PASSWORD="sneaky-env-password"
+run_shim start
+unset RUSTOK_RPC_URLS_1 RUSTOK_KEYRING_PASSWORD
+if assert_exit 0 && assert_has "starting in the background" \
+    && grep -q -- '--label rustok=wallet --label rustok.agent=claude' "$WORK/log" \
+    && grep -q -- '--secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD' "$WORK/log" \
+    && grep -q -- '-e RUSTOK_RPC_URLS_1 ' "$WORK/log" \
+    && ! grep -q 'with-key' "$WORK/log" \
+    && ! grep -qE 'KEYRING_PASSWORD=|sneaky' "$WORK/log"; then
+    ok "start: labeled detached run, secret delivery, RPC by NAME only, keyring env never forwarded"
+else not_ok "start: labeled detached run, secret delivery, RPC by NAME only, keyring env never forwarded"; fi
+
+fresh
+printf '%s' pw >"$WORK/state/secret-rustok-keyring-claude"
+: >"$WORK/state/volume-rustok-wallet-tui"
+run_shim start
+run_shim start
+if assert_exit 1 && assert_has "already running"; then
+    ok "second start refuses: already running"
+else not_ok "second start refuses: already running"; fi
+
+fresh
+STUB_CONTAINERS="aaa1;rustok=wallet;rustok.agent=claude;image=img"
+run_shim stop
+if assert_exit 0 && assert_has "wallet stopped" && grep -q '^podman stop aaa1' "$WORK/log"; then
+    ok "stop stops the single running wallet"
+else not_ok "stop stops the single running wallet"; fi
+
+fresh
+run_shim stop
+if assert_exit 0 && assert_has "nothing to stop"; then
+    ok "stop with nothing running says so"
+else not_ok "stop with nothing running says so"; fi
+
+# --- console exec-or-start (epic pain #6) ----------------------------------------
+
+fresh
+printf '%s' pw >"$WORK/state/secret-rustok-keyring-claude"
+: >"$WORK/state/volume-rustok-wallet-tui"
+run_shim console
+if assert_exit 0 && assert_has "starting in the background" && assert_has "EXEC:" \
+    && assert_has ":rustok-console" && grep -q 'run -d' "$WORK/log"; then
+    ok "console with initialized-but-stopped wallet: starts it, then execs the console"
+else not_ok "console with initialized-but-stopped wallet: starts it, then execs the console"; fi
+
+fresh
+run_shim console
+if assert_exit 1 && assert_has "no wallet running" && assert_has "rustok init"; then
+    ok "console with nothing initialized points at init"
+else not_ok "console with nothing initialized points at init"; fi
+
+# --- docker parity: init stores a 0600 file, not a podman secret -----------------
+
+fresh
+plant_docker_stub
+remove_podman_stub
+mkdir -p "$WORK/home/.config/rustok"
+echo "engine=docker" >"$WORK/home/.config/rustok/config"
+run_init_pty "$PW_QUOTED" "$PW_QUOTED"
+PWFILE="$WORK/home/.config/rustok/keyring-pass-claude"
+if assert_exit 0 && [ -f "$PWFILE" ] \
+    && [ "$(cat "$PWFILE")" = "$PW_QUOTED" ] \
+    && [ "$(stat -c '%a' "$PWFILE")" = "600" ] \
+    && ! grep -q 'secret create' "$WORK/log" \
+    && ! grep -qF "$PW_QUOTED" "$WORK/log"; then
+    ok "docker init: 0600 password file, byte-exact, no secret store, argv clean"
+else not_ok "docker init: 0600 password file, byte-exact, no secret store, argv clean"; fi
+
+# --- static invariant: init/start never destroy keystore volumes ------------------
+
+N=$((N + 1))
+if sed 's/^[[:space:]]*#.*//' "$SHIM" | grep -qE 'volume (rm|prune)|system prune'; then
+    FAIL=$((FAIL + 1))
+    echo "not ok $N - shim code never removes volumes (keystore data-safety)"
+else
+    PASS=$((PASS + 1))
+    echo "ok $N - shim code never removes volumes (keystore data-safety)"
+fi
 
 # --- static invariant: the shim never uses --name ------------------------------
 
