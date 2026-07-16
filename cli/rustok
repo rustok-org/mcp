@@ -168,10 +168,17 @@ password_args_for() {
 
 rustok_env_names() {
     # RUSTOK_* config vars forwarded to `start` BY NAME (`-e NAME` inherits the
-    # value engine-side — values stay out of argv). The keyring password is
-    # deliberately excluded: it travels only as a secret/_FILE, and a stray env
-    # var would win over the stored secret and cause mismatched-unlock mysteries.
-    # RUSTOK_IMAGE is the shim's own knob, not wallet config.
+    # value engine-side — values stay out of argv AND out of shell history).
+    # The keyring password is deliberately excluded: it travels only as a
+    # secret/_FILE, and a stray env var would win over the stored secret and
+    # cause mismatched-unlock mysteries. RUSTOK_IMAGE is the shim's own knob.
+    #
+    # INTERIM (epic escalation #2): a keyed RPC URL is a second-class secret and
+    # the epic ratified delivering it as a podman `--secret rustok-rpc-<agent>`.
+    # That secret is created by `connect` (PR-2.3a), which does not exist yet, so
+    # `start` forwards RUSTOK_RPC_URLS_* by name for now — the value is out of
+    # argv/history but visible in `podman inspect Config.Env`. PR-2.3a moves it to
+    # a secret. Not fund/seed exposure (same-user inspect); documented, not silent.
     env | sed -n 's/^\(RUSTOK_[A-Z0-9_]*\)=.*/\1/p' \
         | grep -v -E '^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE)$' || true
 }
@@ -190,6 +197,9 @@ read_password_twice() {
     if ! { exec 3</dev/tty; } 2>/dev/null; then
         die "init needs your own terminal (no /dev/tty here) — never run it through an agent or a pipe: the recovery phrase would leak into its context"
     fi
+    # Restore echo (and drop the password) on Ctrl-C / kill during entry —
+    # otherwise the terminal is left with echo off.
+    trap 'stty echo </dev/tty 2>/dev/null || true; PW="" PW2=""; exit 130' INT TERM HUP
     printf 'Keyring password (unlocks the keystore): ' >/dev/tty
     stty -echo </dev/tty 2>/dev/null || true
     IFS= read -r PW <&3 || PW=""
@@ -200,6 +210,7 @@ read_password_twice() {
     IFS= read -r PW2 <&3 || PW2=""
     stty echo </dev/tty 2>/dev/null || true
     printf '\n' >/dev/tty
+    trap - INT TERM HUP
     exec 3<&-
     [ -n "$PW" ] || die "empty password — nothing stored"
     [ "$PW" = "$PW2" ] || die "passwords do not match — nothing stored"
@@ -454,6 +465,15 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --agent)
             [ $# -ge 2 ] || die "--agent needs a value (e.g. --agent claude)"
+            # Strict charset: the agent name becomes a container label, a volume
+            # name and (unquoted) a run-argv token. Anything outside this set —
+            # spaces, newlines, a leading dash, shell metacharacters — could
+            # inject flags/args into `podman run`, so it is a named refusal here,
+            # once, for every command. (Threat model: pasted untrusted commands.)
+            case "$2" in
+                [a-zA-Z0-9]*[!a-zA-Z0-9_-]* | [!a-zA-Z0-9]* | "") \
+                    die "--agent name '$2' is invalid — use letters, digits, '-' or '_', starting with a letter or digit (e.g. claude, hermes)" ;;
+            esac
             AGENT="$2"
             shift 2
             ;;

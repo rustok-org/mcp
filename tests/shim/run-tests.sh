@@ -342,6 +342,38 @@ if assert_exit 1 && assert_has "force is an init-only flag"; then
     ok "--force outside init is refused"
 else not_ok "--force outside init is refused"; fi
 
+# --- BLOCKER #1: --agent argument injection ------------------------------------
+# The threat model is a pasted untrusted command. A crafted --agent must be a
+# named refusal BEFORE any engine call, and the injected flag must never reach
+# the engine argv (stub log).
+
+fresh
+run_shim status --agent 'x -e INJECTED=pwn z'
+if assert_exit 1 && assert_has "is invalid" \
+    && ! grep -q 'INJECTED' "$WORK/log"; then
+    ok "injected --agent is refused and the flag never reaches the engine argv"
+else not_ok "injected --agent is refused and the flag never reaches the engine argv"; fi
+
+fresh
+# a newline-bearing agent name — the other half of the injection class
+run_shim status --agent "$(printf 'a\n-e X=1')"
+if assert_exit 1 && assert_has "is invalid" && ! grep -q 'X=1' "$WORK/log"; then
+    ok "newline in --agent is refused, nothing injected"
+else not_ok "newline in --agent is refused, nothing injected"; fi
+
+fresh
+run_shim status --agent -e
+if assert_exit 1 && assert_has "is invalid"; then
+    ok "a --agent that looks like a flag is refused"
+else not_ok "a --agent that looks like a flag is refused"; fi
+
+fresh
+STUB_CONTAINERS="aaa1;rustok=wallet;rustok.agent=my-agent_2;image=img"
+run_shim status --agent my-agent_2
+if assert_exit 0 && assert_has "my-agent_2"; then
+    ok "a valid --agent (letters, digits, - and _) is accepted"
+else not_ok "a valid --agent (letters, digits, - and _) is accepted"; fi
+
 # --- start / stop ---------------------------------------------------------------
 
 fresh
