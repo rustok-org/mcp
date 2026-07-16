@@ -117,8 +117,18 @@ class Wallet:
         return self.mcp.tool("get_execution_status", {"preview_id": preview_id})
 
 
-def create_wallet(image: str, network: str, volume: str) -> tuple[str, str]:
+def create_wallet(
+    image: str,
+    network: str,
+    volume: str,
+    password_args: tuple[str, ...] | None = None,
+) -> tuple[str, str]:
     """Run one-shot onboarding and return the (address, PIN) shown to the human once.
+
+    `password_args` is the podman-run fragment that delivers the keyring password
+    (default: the plain `-e` env var). The `_FILE` acceptance passes a
+    `--secret`/`RUSTOK_KEYRING_PASSWORD_FILE` fragment instead — the password value
+    itself must never ride the argv.
 
     NOTHING from this command's output may ever reach a failure message. Its stderr is
     where the wallet prints the 12-word recovery phrase and the approval PIN — the two
@@ -127,6 +137,9 @@ def create_wallet(image: str, network: str, volume: str) -> tuple[str, str]:
     shared helper's "echo stderr so a human can debug it" behaviour: a container that
     dies AFTER printing the banner would publish a real, spendable seed phrase.
     """
+    if password_args is None:
+        password_args = ("-e", f"RUSTOK_KEYRING_PASSWORD={KEYRING_PASSWORD}")
+
     timed_out_after: float | None = None
     try:
         done = podman(
@@ -137,8 +150,7 @@ def create_wallet(image: str, network: str, volume: str) -> tuple[str, str]:
             network,
             "-v",
             f"{volume}:/data",
-            "-e",
-            f"RUSTOK_KEYRING_PASSWORD={KEYRING_PASSWORD}",
+            *password_args,
             image,
             "create-wallet",
             timeout=120,
@@ -176,8 +188,15 @@ def start_wallet(
     name: str,
     anvil_url: str,
     stderr_path: Path,
+    password_args: tuple[str, ...] | None = None,
 ) -> McpStdio:
-    """Start the wallet container with its stdio as the MCP channel."""
+    """Start the wallet container with its stdio as the MCP channel.
+
+    `password_args` — same contract as in `create_wallet`.
+    """
+    if password_args is None:
+        password_args = ("-e", f"RUSTOK_KEYRING_PASSWORD={KEYRING_PASSWORD}")
+
     argv = [
         PODMAN,
         "run",
@@ -190,8 +209,7 @@ def start_wallet(
         network,
         "-v",
         f"{volume}:/data",
-        "-e",
-        f"RUSTOK_KEYRING_PASSWORD={KEYRING_PASSWORD}",
+        *password_args,
         "-e",
         f"RUSTOK_ALLOWED_CHAINS={CHAIN_ID}",
         "-e",
