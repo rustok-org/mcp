@@ -1,8 +1,11 @@
 """Acceptance: the keyring password delivered as a FILE (`RUSTOK_KEYRING_PASSWORD_FILE`).
 
 Stage 1 of the easy-install epic (PR-1.1): the entrypoint accepts the password via
-the standard `_FILE` convention, which enables `podman secret` (type=mount) and the
-docker bind-mount parity — no plaintext in `inspect`, MCP configs or shell history.
+the standard `_FILE` convention — no plaintext in `inspect`, MCP configs or shell
+history. Live coverage here is podman (secret type=mount, and a bind-mounted plain
+file). The docker fallback rides the same engine-agnostic mechanism (an env var
+plus a mounted file), but docker itself is NOT exercised by this suite — its
+0600/uid-matched specifics are manually probed only.
 
 Redaction discipline: `create_wallet` prints the recovery phrase on stderr — no raw
 container output may ever reach a failure message here (same contract as
@@ -12,6 +15,7 @@ container output may ever reach a failure message here (same contract as
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -31,18 +35,20 @@ QUOTED_PASSWORD = "pa\"ss$wo'rd"  # noqa: S105  (throwaway keystore, per-test vo
 
 # The entrypoint's named errors — asserted VERBATIM: a silent 60s "core not ready"
 # timeout instead of these is exactly the failure mode this PR removes.
-UNREADABLE_ERROR = "RUSTOK_KEYRING_PASSWORD_FILE points to an unreadable file"
+NOT_A_FILE_ERROR = "RUSTOK_KEYRING_PASSWORD_FILE does not point to a readable regular file"
 EMPTY_ERROR = "RUSTOK_KEYRING_PASSWORD_FILE is empty"
 
 
 @pytest.fixture
-def password_secret(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[str]:
+def password_secret(tmp_path: Path) -> Iterator[str]:
     """A podman secret holding the quoted password; removed after the test.
 
     Created from a file, not stdin — the `podman` helper is a fixed no-input argv.
-    The file is a 0600 throwaway inside pytest's private tmp dir.
+    The file is a 0600 throwaway inside pytest's private tmp dir. The name is
+    uuid-random like everywhere in the suite: a deterministic name survives a
+    killed run and collides with the next one.
     """
-    name = f"rustok-e2e-pass-{request.node.name[:20]}-{tmp_path.name[-8:]}"
+    name = f"rustok-e2e-pass-{uuid.uuid4().hex[:8]}"
     source = tmp_path / "keyring-password"
     source.write_text(QUOTED_PASSWORD, encoding="utf-8")
     source.chmod(0o600)
@@ -61,7 +67,7 @@ def file_wallet(chain: Chain, image: str, tmp_path: Path, password_secret: str) 
     `--secret …,type=mount` + `RUSTOK_KEYRING_PASSWORD_FILE` — never `-e` with a
     value, never argv.
     """
-    suffix = tmp_path.name[-8:]
+    suffix = uuid.uuid4().hex[:8]
     name = f"rustok-wallet-tui-e2e-file-{suffix}"
     volume = f"rustok-e2e-data-file-{suffix}"
     password_args = (
@@ -152,10 +158,10 @@ def test_missing_password_file_fails_fast_with_named_error(image: str) -> None:
     # phrase lives, and pytest's assert introspection pastes referenced values into
     # the report — the raw stderr must never be one of them.
     failed = done.returncode != 0
-    named = UNREADABLE_ERROR in done.stderr
+    named = NOT_A_FILE_ERROR in done.stderr
     assert failed, "a missing password file must fail the container"
     assert named, (
-        "the entrypoint must name the unreadable RUSTOK_KEYRING_PASSWORD_FILE "
+        "the entrypoint must name the unusable RUSTOK_KEYRING_PASSWORD_FILE "
         f"(exit {done.returncode}; stderr redacted: {len(done.stderr)} chars)"
     )
 
@@ -163,12 +169,13 @@ def test_missing_password_file_fails_fast_with_named_error(image: str) -> None:
 def test_empty_password_file_fails_with_named_error(image: str, tmp_path: Path) -> None:
     """An empty password file must be refused by name, not passed on as ''.
 
-    Delivered as a bind-mounted plain file — the docker-parity mechanism — mounted
-    world-readable (0644): under rootless podman the host file arrives root-owned,
-    so 0600 would be unreadable for the container user. Docker (rootful) preserves
-    the matching uid, which is why the docs can keep 0600 there. `:z` relabels the
-    throwaway tmp file for SELinux hosts — an unreadable mount is a DIFFERENT named
-    error, and the unreadable case is what `test_missing_password_file…` guards.
+    Delivered as a bind-mounted plain file. This is the same MECHANISM the docker
+    fallback uses (mounted file + `_FILE` env var), but the run below is still
+    podman: `:z`/0644 are podman/SELinux-specifics (rootless podman hands the file
+    to the container root-owned, so 0600 would be unreadable here). Docker's own
+    0600/uid-matched behaviour is manually probed only — NOT covered by this suite.
+    An unreadable mount is a DIFFERENT named error, guarded by
+    `test_missing_password_file…`.
     """
     empty = tmp_path / "empty-password"
     empty.write_text("", encoding="utf-8")
@@ -203,7 +210,7 @@ def test_explicit_env_password_wins_over_file(chain: Chain, image: str, tmp_path
     not fire when the password already arrived. (Red-proven by mutation: an
     entrypoint that reads the file first fails this test — see the PR report.)
     """
-    volume = f"rustok-e2e-data-prec-{tmp_path.name[-8:]}"
+    volume = f"rustok-e2e-data-prec-{uuid.uuid4().hex[:8]}"
     podman("volume", "create", volume)
     try:
         address, pin = create_wallet(
@@ -220,4 +227,77 @@ def test_explicit_env_password_wins_over_file(chain: Chain, image: str, tmp_path
         assert address.startswith("0x")
         assert len(pin) == 6
     finally:
+        volume_rm(volume)
+
+
+def test_device_password_file_fails_with_named_error(image: str) -> None:
+    """`_FILE` at a non-regular file (a device, a FIFO, a dir) must die by name.
+
+    `cat` on such a path can block forever — WORSE than the 60s hang this PR
+    removes. `/dev/null` stands in for the class: it exists in every container,
+    needs no mount, and is not a regular file.
+    """
+    done = podman(
+        "run",
+        "--rm",
+        "-e",
+        "RUSTOK_KEYRING_PASSWORD_FILE=/dev/null",
+        image,
+        "create-wallet",
+        check=False,
+        timeout=60,
+    )
+    # Same redaction rule as above: assert booleans, never the raw stderr.
+    failed = done.returncode != 0
+    named = NOT_A_FILE_ERROR in done.stderr
+    assert failed, "a non-regular password file must fail the container"
+    assert named, (
+        "the entrypoint must name the non-regular RUSTOK_KEYRING_PASSWORD_FILE "
+        f"(exit {done.returncode}; stderr redacted: {len(done.stderr)} chars)"
+    )
+
+
+def test_trailing_newline_in_password_file_is_stripped(
+    chain: Chain, image: str, tmp_path: Path
+) -> None:
+    """The documented `_FILE` contract: `$(cat …)` strips trailing newlines.
+
+    Locked across the delivery boundary: the wallet is CREATED with the plain
+    `-e` password and STARTED with a file holding the same password plus `\\n`
+    (what `echo`-made files carry). The keystore unlocks — the MCP handshake in
+    `start_wallet` fails otherwise — only if the file path stripped the newline
+    to the byte-identical password.
+    """
+    volume = f"rustok-e2e-data-nl-{uuid.uuid4().hex[:8]}"
+    name = f"rustok-wallet-tui-e2e-nl-{uuid.uuid4().hex[:8]}"
+    password_file = tmp_path / "password-with-newline"
+    password_file.write_text(KEYRING_PASSWORD + "\n", encoding="utf-8")
+    password_file.chmod(0o644)
+
+    podman("volume", "create", volume)
+    try:
+        create_wallet(image, chain.network, volume)  # plain -e delivery
+        mcp = start_wallet(
+            image=image,
+            network=chain.network,
+            volume=volume,
+            name=name,
+            anvil_url=chain.url_from_container,
+            stderr_path=tmp_path / f"{name}.stderr.log",
+            password_args=(
+                "-v",
+                f"{password_file}:/run/keyring-pass:ro,z",
+                "-e",
+                "RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass",
+            ),
+        )
+        # The handshake inside start_wallet IS the assertion (a wrong password
+        # never unlocks the keystore); one tool call proves the channel end2end.
+        try:
+            context = mcp.tool("get_wallet_context", {})
+        finally:
+            mcp.close()
+        assert context, "the wallet must answer over MCP after a file unlock"
+    finally:
+        rm_force(name)
         volume_rm(volume)
