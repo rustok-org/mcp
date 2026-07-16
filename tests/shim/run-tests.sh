@@ -363,7 +363,7 @@ if assert_exit 0 && assert_has "starting in the background" \
     && grep -q -- '--secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD' "$WORK/log" \
     && grep -q -- '-e RUSTOK_RPC_URLS_1 ' "$WORK/log" \
     && ! grep -q 'with-key' "$WORK/log" \
-    && ! grep -qE 'KEYRING_PASSWORD=|sneaky' "$WORK/log"; then
+    && ! grep -qE -- '-e RUSTOK_KEYRING_PASSWORD|KEYRING_PASSWORD=|sneaky' "$WORK/log"; then
     ok "start: labeled detached run, secret delivery, RPC by NAME only, keyring env never forwarded"
 else not_ok "start: labeled detached run, secret delivery, RPC by NAME only, keyring env never forwarded"; fi
 
