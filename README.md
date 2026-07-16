@@ -22,7 +22,8 @@ The wallet ships as one self-contained Docker image (Core + Gateway + MCP over
 and never leave your machine. Follow the [Installation Guide](docs/INSTALL.md):
 run `create-wallet` once, then add it as a stdio MCP server in Claude Desktop /
 Cursor. Transactions that move funds are approved by a human in a second
-terminal: `docker exec -it rustok-wallet-tui rustok-console`.
+terminal by opening `rustok-console` against the running wallet container
+(see [Opening the approval console](docs/INSTALL.md#opening-the-approval-console)).
 
 ## Install as an agent skill
 

@@ -5,7 +5,7 @@
 The wallet hasn't been created in this volume yet. Run onboarding once:
 
 ```bash
-docker run -it --rm --name rustok-wallet-tui -v rustok-wallet-tui:/data \
+docker run -it --rm -v rustok-wallet-tui:/data \
   -e RUSTOK_KEYRING_PASSWORD="your-password" \
   ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1 create-wallet
 ```
@@ -29,15 +29,19 @@ or recover from the 12-word phrase into a fresh wallet.
 The PIN is printed only during `create-wallet`. If you lost it, run:
 
 ```bash
-docker exec -it rustok-wallet-tui core-server set-pin
+docker exec -it "$(docker ps -q --filter label=rustok.agent=claude)" core-server set-pin
 ```
 
 This requires the keyring password and an interactive TTY.
 
 ## "container name already in use" / cannot create container
 
-The wallet runs as a singleton named `--name rustok-wallet-tui`. Stop the old
-container first (`docker rm -f rustok-wallet-tui`) if a previous run is still alive.
+You launched the wallet with a fixed `--name`. The agent-launched container must
+**not** use `--name` — a fixed name collides the moment a health probe or a second
+`mcp list` starts another instance. Use `--label rustok=wallet --label
+rustok.agent=<agent>` instead (as in [INSTALL](INSTALL.md#3-connect-an-agent-stdio));
+the container then runs under an auto-generated name and stays discoverable by label.
+A leftover named container from an older setup: `docker rm -f rustok-wallet-tui`.
 
 ## After an upgrade the wallet looks empty / the agent still runs the old version
 
