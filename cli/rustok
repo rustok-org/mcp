@@ -1,0 +1,244 @@
+#!/bin/sh
+# rustok — the wallet's one command.
+#
+# PR-2.1 surface: `console` (default), `status`, `doctor`, `help`, `version`.
+# The wallet container is agent-launched and has NO fixed name (a fixed --name
+# collides with health probes and a second `mcp list` — the real production bug
+# this shim exists to bury). Everything here discovers it by BOTH labels:
+# `rustok=wallet` and `rustok.agent=<name>`.
+#
+# POSIX sh on purpose (see epic decision #3): no arrays, no bashisms.
+set -eu
+
+VERSION="0.1.0"
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rustok"
+CONFIG_FILE="$CONFIG_DIR/config"
+
+usage() {
+    cat <<'EOF'
+rustok — self-custody wallet helper
+
+Usage: rustok [command] [--agent <name>]
+
+Commands:
+  console        open the human approval console (default when no command)
+  status         show the running wallet container(s)
+  doctor         diagnose the setup (engine, config, PATH, leftovers)
+  help           show this help
+  version        show the shim version
+
+Options:
+  --agent <name>   pick the wallet of one agent (e.g. claude, hermes) when
+                   several run side by side
+EOF
+}
+
+die() {
+    echo "rustok: $*" 1>&2
+    exit 1
+}
+
+# --- engine ------------------------------------------------------------------
+# Deterministic and STICKY (epic М-3): first resolution (podman preferred,
+# docker fallback) is written to the config and never silently re-chosen —
+# wallet volumes live per-engine, so a quiet switch would "lose" the wallet.
+
+resolve_engine() {
+    engine=""
+    if [ -f "$CONFIG_FILE" ]; then
+        engine="$(sed -n 's/^engine=//p' "$CONFIG_FILE" | head -n 1)"
+    fi
+    if [ -n "$engine" ]; then
+        case "$engine" in
+            podman | docker) ;;
+            *) die "configured engine '$engine' in $CONFIG_FILE is not podman or docker — edit the config" ;;
+        esac
+        command -v "$engine" >/dev/null 2>&1 || die \
+            "configured engine '$engine' ($CONFIG_FILE) is not installed — reinstall it, or edit the config (a wallet volume does not move between engines)"
+        return 0
+    fi
+    if command -v podman >/dev/null 2>&1; then
+        engine="podman"
+    elif command -v docker >/dev/null 2>&1; then
+        engine="docker"
+    else
+        die "neither podman nor docker found — install podman (recommended): https://podman.io/getting-started/installation"
+    fi
+    mkdir -p "$CONFIG_DIR"
+    printf 'engine=%s\n' "$engine" >"$CONFIG_FILE"
+}
+
+# --- discovery ---------------------------------------------------------------
+# ALWAYS both labels. `--filter label=rustok=wallet` alone would match another
+# agent's wallet; `rustok.agent` alone would match a non-wallet container.
+
+discover_ids() {
+    # $1: agent name or "" for any agent. An installed-but-dead engine must be
+    # a named error here too, not a raw `ps` stderr (doctor already says it
+    # nicely — console/status deserve the same).
+    if [ -n "$1" ]; then
+        "$engine" ps -q --filter label=rustok=wallet --filter "label=rustok.agent=$1" \
+            || die "'$engine' failed listing containers — is the service running? (try: rustok doctor)"
+    else
+        "$engine" ps -q --filter label=rustok=wallet \
+            || die "'$engine' failed listing containers — is the service running? (try: rustok doctor)"
+    fi
+}
+
+agent_of() {
+    # `inspect … index .Config.Labels` is the one label accessor both engines
+    # implement identically (ps --format templates differ between them).
+    # Pre-label wallets (older launch configs) carry no rustok.agent at all —
+    # they are real and must show up readably, not as an empty string.
+    name="$("$engine" inspect --format '{{ index .Config.Labels "rustok.agent" }}' "$1" 2>/dev/null || true)"
+    if [ -n "$name" ]; then
+        printf '%s\n' "$name"
+    else
+        echo "(unlabeled)"
+    fi
+}
+
+agent_list() {
+    # Sorted, comma-separated agent names of every running wallet — the loud
+    # N>1 refusal must NAME the choices, never pick the first match.
+    # (awk, not `paste -d ', '`: paste CYCLES multi-char delimiter lists.)
+    for id in "$@"; do
+        agent_of "$id"
+    done | LC_ALL=C sort | awk 'NR > 1 { printf ", " } { printf "%s", $0 } END { print "" }'
+}
+
+# --- commands ----------------------------------------------------------------
+
+cmd_console() {
+    ids="$(discover_ids "$AGENT")"
+    # shellcheck disable=SC2086  # word-splitting the id list is the point
+    set -- $ids
+    case $# in
+        0)
+            if [ -n "$AGENT" ]; then
+                die "no wallet running for agent '$AGENT' — start that agent's session first (check: rustok status)"
+            fi
+            die "no wallet running — the agent session starts it; check: rustok status"
+            ;;
+        1)
+            exec "$engine" exec -it "$1" rustok-console
+            ;;
+        *)
+            list="$(agent_list "$@")"
+            echo "rustok: multiple wallets running: $list — use --agent <name>" 1>&2
+            case "$list" in
+                *"(unlabeled)"*)
+                    echo "rustok: hint: an '(unlabeled)' wallet predates the label model — add --label rustok.agent=<name> to its launch config (see docs/INSTALL.md)" 1>&2
+                    ;;
+            esac
+            exit 1
+            ;;
+    esac
+}
+
+cmd_status() {
+    echo "engine: $engine ($CONFIG_FILE)"
+    ids="$(discover_ids "$AGENT")"
+    # shellcheck disable=SC2086
+    set -- $ids
+    if [ $# -eq 0 ]; then
+        echo "no wallet running — the agent session starts it"
+        return 0
+    fi
+    printf '%-12s %-14s %s\n' "AGENT" "CONTAINER" "IMAGE"
+    for id in "$@"; do
+        image="$("$engine" inspect --format '{{.Config.Image}}' "$id" 2>/dev/null || echo '?')"
+        printf '%-12s %-14s %s\n' "$(agent_of "$id")" "$(printf '%.12s' "$id")" "$image"
+    done
+}
+
+cmd_doctor() {
+    failed=0
+    # resolve_engine has already pinned the choice by the time we are here.
+    echo "ok: engine '$engine' (pinned in $CONFIG_FILE)"
+    if ! "$engine" info >/dev/null 2>&1; then
+        echo "fail: '$engine' is installed but not usable — is the service/machine running?"
+        failed=1
+    else
+        echo "ok: $engine is responding"
+    fi
+    # PATH sanity for the shim install dir.
+    case ":$PATH:" in
+        *":$HOME/.local/bin:"*) echo "ok: ~/.local/bin is on PATH" ;;
+        *) echo "warn: ~/.local/bin is NOT on PATH — the installer puts rustok there; add it to your shell profile" ;;
+    esac
+    # Running wallets.
+    ids="$(discover_ids "")"
+    # shellcheck disable=SC2086
+    set -- $ids
+    if [ $# -eq 0 ]; then
+        echo "info: no wallet running (the agent session starts it)"
+    else
+        echo "ok: $# wallet(s) running: $(agent_list "$@")"
+        unlabeled=0
+        for id in "$@"; do
+            if [ "$(agent_of "$id")" = "(unlabeled)" ]; then
+                unlabeled=$((unlabeled + 1))
+            fi
+        done
+        if [ "$unlabeled" -gt 0 ]; then
+            echo "warn: $unlabeled wallet(s) without a rustok.agent label (pre-label config) — add --label rustok.agent=<name> (see docs/INSTALL.md)"
+        fi
+    fi
+    # The legacy fixed-name container the label model replaced.
+    legacy="$("$engine" ps -aq --filter name=rustok-wallet-tui 2>/dev/null || true)"
+    if [ -n "$legacy" ]; then
+        echo "warn: leftover fixed-name container 'rustok-wallet-tui' from an old setup — remove it: $engine rm -f rustok-wallet-tui"
+    fi
+    return "$failed"
+}
+
+# --- entry -------------------------------------------------------------------
+
+COMMAND="console"
+AGENT=""
+
+if [ $# -gt 0 ]; then
+    case "$1" in
+        console | status | doctor)
+            COMMAND="$1"
+            shift
+            ;;
+        help | --help | -h)
+            usage
+            exit 0
+            ;;
+        version | --version)
+            echo "rustok $VERSION"
+            exit 0
+            ;;
+        --agent) ;; # fall through to the option loop (command stays `console`)
+        *)
+            echo "rustok: unknown command '$1' (try: rustok help)" 1>&2
+            exit 2
+            ;;
+    esac
+fi
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --agent)
+            [ $# -ge 2 ] || die "--agent needs a value (e.g. --agent claude)"
+            AGENT="$2"
+            shift 2
+            ;;
+        *)
+            echo "rustok: unknown option '$1' (try: rustok help)" 1>&2
+            exit 2
+            ;;
+    esac
+done
+
+resolve_engine
+
+case "$COMMAND" in
+    console) cmd_console ;;
+    status) cmd_status ;;
+    doctor) cmd_doctor ;;
+esac

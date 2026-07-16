@@ -46,8 +46,18 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Run shellcheck
         run: |
+          FILES="scripts/*.sh cli/rustok tests/shim/run-tests.sh tests/shim/stub-bin/podman"
           if command -v shellcheck >/dev/null 2>&1; then
-            shellcheck scripts/*.sh
+            # shellcheck disable=SC2086
+            shellcheck $FILES
           else
-            docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:stable scripts/*.sh
+            docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:stable $FILES
           fi
+
+  shim-tests:
+    name: Shim Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Run the shim test suite (stub engine, no containers needed)
+        run: sh tests/shim/run-tests.sh
