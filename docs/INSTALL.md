@@ -26,14 +26,16 @@ TTY). It prints two things only once:
   session and is required for high-risk approvals.
 
 ```bash
-docker run -it --rm --name rustok-wallet-tui \
+docker run -it --rm \
   -v rustok-wallet-tui:/data \
   -e RUSTOK_KEYRING_PASSWORD="choose-a-strong-password" \
   ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1 create-wallet
 ```
 
 Back up the **12 words** and the **PIN** offline, then fund the address. If the
-PIN is lost, run `docker exec -it rustok-wallet-tui core-server set-pin`.
+PIN is lost, open a shell in the running wallet container and reset it (see
+[Opening the approval console](#opening-the-approval-console) for how to find the
+container) — `… core-server set-pin` in place of `… rustok-console`.
 
 ## 3. Connect an agent (stdio)
 
@@ -45,7 +47,8 @@ to the MCP config (`claude_desktop_config.json`):
   "mcpServers": {
     "rustok-wallet-tui": {
       "command": "docker",
-      "args": ["run", "-i", "--rm", "--init", "--name", "rustok-wallet-tui",
+      "args": ["run", "-i", "--rm", "--init",
+               "--label", "rustok=wallet", "--label", "rustok.agent=claude",
                "-v", "rustok-wallet-tui:/data",
                "-e", "RUSTOK_KEYRING_PASSWORD",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
@@ -64,6 +67,45 @@ For **ClawHub / Smithery**, install the `rustok-wallet-tui` skill and provide
 `RUSTOK_KEYRING_PASSWORD` (and an RPC URL) when prompted; the registry runs the
 same `docker run -i` command.
 
+> **Why labels, not `--name`.** The agent launches this container itself, and a
+> fixed `--name` collides the moment anything starts a second instance (a health
+> probe, a `claude mcp list`) — the launcher would refuse or, with `--replace`,
+> kill your live wallet. The two `--label`s let the container run under an
+> auto-generated name while staying discoverable; the `rustok.agent` sub-label
+> identifies *which* agent's wallet it is (see below).
+
+## Opening the approval console
+
+The console is a **separate window** the agent cannot drive. The container has no
+fixed name (see above), so find it by label:
+
+```bash
+docker exec -it "$(docker ps -q --filter label=rustok=wallet --filter label=rustok.agent=claude)" rustok-console
+```
+
+This works while the agent session is live (the MCP client keeps the container
+running). A short `rustok` command that wraps this discovery is coming; until
+then, the one-liner above is the reliable way in. (Swap `rustok-console` for
+`core-server set-pin` to reset a lost PIN.)
+
+## Running a second agent
+
+Each agent gets **its own wallet** — its own volume, keys and address. Sharing one
+wallet between two agents is deliberately not supported yet: two independent
+signers race the nonce and a decision can surface in the wrong console. Give the
+second agent (e.g. Hermes) a distinct volume and sub-label:
+
+```jsonc
+"args": ["run", "-i", "--rm", "--init",
+         "--label", "rustok=wallet", "--label", "rustok.agent=hermes",
+         "-v", "rustok-hermes:/data",                // its own wallet volume
+         "-e", "RUSTOK_KEYRING_PASSWORD", …,
+         "ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"]
+```
+
+`create-wallet` that volume once (as in step 2, with `-v rustok-hermes:/data`),
+and open its console with `--filter label=rustok.agent=hermes`.
+
 ## Upgrading the wallet image
 
 Your wallet lives in the **volume**, not in the image — so upgrading is: pull the new
@@ -71,8 +113,8 @@ tag, recreate the container, keep the volume.
 
 ```bash
 docker pull ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1
-docker rm -f rustok-wallet-tui            # the old container; the volume is untouched
-# then start the new image with the SAME -v rustok-wallet-tui:/data as before
+# the agent-launched container is --rm (it disappears when the agent session ends);
+# just restart the agent with the new tag in its MCP config, same -v … :/data volume
 ```
 
 - **Your keys, address and PIN survive.** They are in the volume

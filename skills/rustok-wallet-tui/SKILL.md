@@ -34,7 +34,7 @@ The wallet's guarantee is narrow and specific. State it plainly; do not oversell
 
 | | |
 |---|---|
-| **Protected** | Private keys stay in the user's **local Docker volume** and never leave the machine. **Sending funds on-chain** (`execute_transaction`) is parked and requires the user's approval in a **separate console window** (`docker exec -it rustok-wallet-tui rustok-console`), with a PIN for high-risk items. |
+| **Protected** | Private keys stay in the user's **local Docker volume** and never leave the machine. **Sending funds on-chain** (`execute_transaction`) is parked and requires the user's approval in a **separate console window** (`rustok-console`, opened by label — see the run block below), with a PIN for high-risk items. |
 | **Not gated by the console** | `sign_message` (EIP-191) returns a signature **without** console approval. The wallet refuses to sign a **raw hex blob** (which could hide a transaction, an approval, or typed data), but it **will** sign an ordinary plaintext message (e.g. a sign-in or an off-chain order). Treat message signing as unprotected: don't connect this wallet to an agent you wouldn't trust to sign a message. |
 | **Outside the model** | An agent with **shell / `docker exec` access to the container** can read the gateway key and reach the full signing surface (including EIP-712 permits — a classic drain). That is why the console is a **separate window, not an agent command**. Trusting your own agent is the user's call, the same as never pasting a seed phrase into an untrusted tool. |
 
@@ -59,7 +59,7 @@ TTY). The image prints two things exactly once:
 # Choose a strong keyring password; read -s keeps it out of shell history and ps.
 read -r -s -p "Keyring password: " RUSTOK_KEYRING_PASSWORD && export RUSTOK_KEYRING_PASSWORD
 
-docker run -it --rm --name rustok-wallet-tui \
+docker run -it --rm \
   -v rustok-wallet-tui:/data \
   -e RUSTOK_KEYRING_PASSWORD \
   ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1 create-wallet
@@ -67,7 +67,8 @@ docker run -it --rm --name rustok-wallet-tui \
 
 Write both the **12 words** and the **PIN** down offline. Recovery = the 12 words
 (importable into any standard wallet) or the `rustok-wallet-tui` volume + password.
-If the PIN is lost, use `docker exec -it rustok-wallet-tui core-server set-pin`.
+If the PIN is lost, open a shell in the running container (find it by label, as
+above) and run `core-server set-pin`.
 
 > **Rule of two windows:** never run `create-wallet` or `rustok-console` through an
 > agent shell/command — the seed and PIN would leak into the agent's context.
@@ -86,7 +87,8 @@ read -r -s -p "Keyring password: " pw \
   && printf 'RUSTOK_KEYRING_PASSWORD=%s\n' "$pw" > ~/.rustok-wallet-tui.env \
   && unset pw
 
-docker run -i --rm --init --name rustok-wallet-tui \
+docker run -i --rm --init \
+  --label rustok=wallet --label rustok.agent=claude \
   -v rustok-wallet-tui:/data \
   --env-file ~/.rustok-wallet-tui.env \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
@@ -94,16 +96,22 @@ docker run -i --rm --init --name rustok-wallet-tui \
   ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1
 ```
 
+> **Labels, not `--name`:** the agent launches this itself, and a fixed name
+> collides with health probes / a second `mcp list`. The `rustok.agent` sub-label
+> also lets a second agent run its **own** wallet (own volume) alongside.
+
 > The container automatically mints an ephemeral `RUSTOK_MCP_API_KEY` for the
 > loopback gateway↔mcp hop, so no API key configuration is needed for stdio use.
 > Set `RUSTOK_MCP_API_KEY` yourself **only** when exposing the gateway over a
 > network (not the default stdio setup).
 
 When the agent asks the user to approve a transaction, the user opens the
-console in a **second terminal** (window 2), never through the agent session:
+console in a **second terminal** (window 2), never through the agent session.
+The container runs under an auto-generated name (labels, not `--name`), so find
+it by label:
 
 ```bash
-docker exec -it rustok-wallet-tui rustok-console
+docker exec -it "$(docker ps -q --filter label=rustok=wallet --filter label=rustok.agent=claude)" rustok-console
 ```
 
 The console shows the decoded transaction from the wallet core and waits for
@@ -118,7 +126,8 @@ config file** — only the non-secret RPC URL lives here:
   "mcpServers": {
     "rustok-wallet-tui": {
       "command": "docker",
-      "args": ["run", "-i", "--rm", "--init", "--name", "rustok-wallet-tui",
+      "args": ["run", "-i", "--rm", "--init",
+               "--label", "rustok=wallet", "--label", "rustok.agent=claude",
                "-v", "rustok-wallet-tui:/data",
                "--env-file", "/home/you/.rustok-wallet-tui.env",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
@@ -167,9 +176,9 @@ To run a restricted agent, set `RUSTOK_MCP_CAPABILITIES` to a subset
 1. **Always `preview_transaction` first** and show its decoded call + simulation (revert check) + risk level so the user gives informed approval.
 2. **The money path is preview → summary card → `execute_transaction` → human.**
    `execute_transaction` only parks the transaction (`state: "pending"`) — the user
-   releases it in a separate terminal window with
-   `docker exec -it rustok-wallet-tui rustok-console`. Never offer to run the console
-   command yourself and never ask the user to paste the approval PIN into this chat.
+   releases it in a separate terminal window by opening `rustok-console` (found by
+   label; see the run block above). Never offer to run the console command yourself
+   and never ask the user to paste the approval PIN into this chat.
 3. **Poll `get_execution_status` reasonably**: when the user asks, or every ~15–30
    seconds until the `not_after_unix` deadline (if it is `null` — only on request).
    Stop on any terminal state: `executed`, `denied`, `expired`, `failed`. A
