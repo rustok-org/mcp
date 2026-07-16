@@ -10,11 +10,15 @@ name: Wallet Image Publish
 #     GITHUB_TOKEN cannot pull a private package, so the build fails at `FROM`
 #     (flipping visibility is a Captain op; core PR #90 names it a precondition);
 #   - the pinned ghcr.io/rustok-org/rustok-console image is published and public.
-# Fallback (break-glass): build + push manually from an authorized machine — but
-# then it MUST be signed too, or the invariant "every shipped wallet image is
-# cosign-signed" breaks and install.sh's `cosign verify` will reject it. Runbook:
-#   cosign sign --yes ghcr.io/rustok-org/rustok-wallet-tui@<digest>
-# with the same keyless identity (a Sigstore account), never an unsigned push.
+# Fallback (break-glass): if CI cannot build (e.g. a base image is briefly
+# unreachable), build + push manually from an authorized machine — but the image
+# MUST still be signed by THIS workflow's identity, or install.sh's `cosign verify`
+# (which pins that one identity) rejects it for every user. Do NOT sign from the
+# laptop: a local run cannot reproduce the workflow's keyless OIDC identity, and a
+# second signer (a personal Sigstore account) would force verify to trust two
+# identities. Instead, sign in CI — re-run this workflow so its cosign step signs
+# the pushed digest (the build step no-ops on an already-present image). One
+# identity end to end.
 
 on:
   workflow_dispatch:
