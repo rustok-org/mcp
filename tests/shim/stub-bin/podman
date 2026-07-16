@@ -1,0 +1,102 @@
+#!/bin/sh
+# Stub container engine for the shim tests. No containers anywhere: it answers
+# from a table in $STUB_CONTAINERS and logs every call to $STUB_LOG.
+#
+# Table format (one entry per whitespace-separated word):
+#   <id>;label1=v1;label2=v2;image=IMG
+# The stub applies `--filter label=k=v` semantics ITSELF, so a shim that drops
+# one of the two labels gets a WRONG answer here — the both-labels contract is
+# tested behaviorally, not by log-grepping alone.
+set -eu
+
+[ -n "${STUB_LOG:-}" ] && printf '%s %s\n' "$(basename "$0")" "$*" >>"$STUB_LOG"
+
+entry_id() { printf '%s' "$1" | cut -d';' -f1; }
+
+entry_has() {
+    # $1 entry, $2 k=v pair
+    case ";$(printf '%s' "$1" | cut -d';' -f2-);" in
+        *";$2;"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+entry_field() {
+    # $1 entry, $2 field key (image)
+    printf '%s' "$1" | tr ';' '\n' | sed -n "s/^$2=//p"
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+    ps)
+        name_filter=""
+        filters=""
+        all=0
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                -q | -aq) ;;
+                -a) all=1 ;;
+                --filter)
+                    case "$2" in
+                        label=*) filters="$filters ${2#label=}" ;;
+                        name=*) name_filter="${2#name=}" ;;
+                    esac
+                    shift
+                    ;;
+            esac
+            shift
+        done
+        # `-aq --filter name=…` — the legacy fixed-name probe.
+        if [ -n "$name_filter" ]; then
+            [ "$all" -eq 1 ] || true
+            printf '%s' "${STUB_LEGACY:-}"
+            [ -n "${STUB_LEGACY:-}" ] && echo
+            exit 0
+        fi
+        for entry in ${STUB_CONTAINERS:-}; do
+            keep=1
+            for f in $filters; do
+                entry_has "$entry" "$f" || keep=0
+            done
+            [ "$keep" -eq 1 ] && entry_id "$entry"
+        done
+        exit 0
+        ;;
+    inspect)
+        # inspect --format '<tpl>' <id>
+        tpl="$2"
+        id="$3"
+        for entry in ${STUB_CONTAINERS:-}; do
+            if [ "$(entry_id "$entry")" = "$id" ]; then
+                case "$tpl" in
+                    *rustok.agent*)
+                        printf '%s' "$entry" | tr ';' '\n' | sed -n 's/^rustok\.agent=//p'
+                        exit 0
+                        ;;
+                    *Config.Image*)
+                        entry_field "$entry" image
+                        exit 0
+                        ;;
+                esac
+            fi
+        done
+        echo "no such object: $id" 1>&2
+        exit 1
+        ;;
+    exec)
+        # exec -it <id> rustok-console — prove WHICH container was targeted.
+        shift # -it
+        echo "EXEC:$1:$2"
+        exit 0
+        ;;
+    info)
+        [ "${STUB_INFO_FAIL:-0}" = "1" ] && exit 1
+        exit 0
+        ;;
+    *)
+        echo "stub: unexpected engine command: $cmd $*" 1>&2
+        exit 64
+        ;;
+esac
