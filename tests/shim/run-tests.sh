@@ -203,6 +203,33 @@ if assert_exit 0 && assert_has "1 wallet(s) running: hermes"; then
     ok "doctor: reports running wallets by agent"
 else not_ok "doctor: reports running wallets by agent"; fi
 
+# --- transition: pre-label wallets (no rustok.agent at all) --------------------
+# Real production state: wallets launched before the label model carry only
+# rustok=wallet. They must be readable, selectable-around, and nudged to migrate.
+
+fresh
+STUB_CONTAINERS="old111;rustok=wallet;image=img"
+run_shim status
+if assert_exit 0 && assert_has "(unlabeled)"; then
+    ok "status shows a pre-label wallet as (unlabeled), not an empty cell"
+else not_ok "status shows a pre-label wallet as (unlabeled), not an empty cell"; fi
+
+fresh
+STUB_CONTAINERS="old111;rustok=wallet;image=img bbb2;rustok=wallet;rustok.agent=claude;image=img"
+run_shim console
+if assert_exit 1 \
+    && assert_has "multiple wallets running: (unlabeled), claude — use --agent <name>" \
+    && assert_has "hint: an '(unlabeled)' wallet predates the label model"; then
+    ok "refusal names (unlabeled) and hints at the label migration"
+else not_ok "refusal names (unlabeled) and hints at the label migration"; fi
+
+fresh
+STUB_CONTAINERS="old111;rustok=wallet;image=img"
+run_shim doctor
+if assert_exit 0 && assert_has "warn: 1 wallet(s) without a rustok.agent label"; then
+    ok "doctor warns about pre-label wallets"
+else not_ok "doctor warns about pre-label wallets"; fi
+
 # --- static invariant: the shim never uses --name ------------------------------
 
 N=$((N + 1))

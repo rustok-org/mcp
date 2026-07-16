@@ -85,8 +85,14 @@ discover_ids() {
 agent_of() {
     # `inspect … index .Config.Labels` is the one label accessor both engines
     # implement identically (ps --format templates differ between them).
-    "$engine" inspect --format '{{ index .Config.Labels "rustok.agent" }}' "$1" 2>/dev/null \
-        || echo "(unlabeled)"
+    # Pre-label wallets (older launch configs) carry no rustok.agent at all —
+    # they are real and must show up readably, not as an empty string.
+    name="$("$engine" inspect --format '{{ index .Config.Labels "rustok.agent" }}' "$1" 2>/dev/null || true)"
+    if [ -n "$name" ]; then
+        printf '%s\n' "$name"
+    else
+        echo "(unlabeled)"
+    fi
 }
 
 agent_list() {
@@ -95,7 +101,7 @@ agent_list() {
     # (awk, not `paste -d ', '`: paste CYCLES multi-char delimiter lists.)
     for id in "$@"; do
         agent_of "$id"
-    done | sort | awk 'NR > 1 { printf ", " } { printf "%s", $0 } END { print "" }'
+    done | LC_ALL=C sort | awk 'NR > 1 { printf ", " } { printf "%s", $0 } END { print "" }'
 }
 
 # --- commands ----------------------------------------------------------------
@@ -115,7 +121,14 @@ cmd_console() {
             exec "$engine" exec -it "$1" rustok-console
             ;;
         *)
-            die "multiple wallets running: $(agent_list "$@") — use --agent <name>"
+            list="$(agent_list "$@")"
+            echo "rustok: multiple wallets running: $list — use --agent <name>" 1>&2
+            case "$list" in
+                *"(unlabeled)"*)
+                    echo "rustok: hint: an '(unlabeled)' wallet predates the label model — add --label rustok.agent=<name> to its launch config (see docs/INSTALL.md)" 1>&2
+                    ;;
+            esac
+            exit 1
             ;;
     esac
 }
@@ -163,6 +176,15 @@ cmd_doctor() {
         echo "info: no wallet running (the agent session starts it)"
     else
         echo "ok: $# wallet(s) running: $(agent_list "$@")"
+        unlabeled=0
+        for id in "$@"; do
+            if [ "$(agent_of "$id")" = "(unlabeled)" ]; then
+                unlabeled=$((unlabeled + 1))
+            fi
+        done
+        if [ "$unlabeled" -gt 0 ]; then
+            echo "warn: $unlabeled wallet(s) without a rustok.agent label (pre-label config) — add --label rustok.agent=<name> (see docs/INSTALL.md)"
+        fi
     fi
     # The legacy fixed-name container the label model replaced.
     legacy="$("$engine" ps -aq --filter name=rustok-wallet-tui 2>/dev/null || true)"
