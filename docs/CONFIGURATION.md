@@ -6,7 +6,8 @@ All configuration is via environment variables passed to the wallet container.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `RUSTOK_KEYRING_PASSWORD` | Yes | — | Unlocks your local keystore (set at `create-wallet`). **Never commit it.** |
+| `RUSTOK_KEYRING_PASSWORD` | Yes² | — | Unlocks your local keystore (set at `create-wallet`). **Never commit it.** Prefer delivering it via podman secret (`type=env`) or `RUSTOK_KEYRING_PASSWORD_FILE` — an inline `-e` value or `--env-file` is visible in `inspect`, and env-file quotes become part of the password. |
+| `RUSTOK_KEYRING_PASSWORD_FILE` | Yes² | — | Path to a file *inside the container* holding the keystore password (podman secret `type=mount`, or a bind-mounted `0600` file). Used only when `RUSTOK_KEYRING_PASSWORD` is not set; trailing newlines are stripped; a missing/non-regular/empty file fails with a named error. |
 | `RUSTOK_ALLOWED_CHAINS` | No | `1,8453` | Comma-separated chain IDs to enable (e.g. `1,8453,42161,10`). |
 | `RUSTOK_RPC_URLS_<chain>` | No¹ | — | RPC URL(s) for a chain, e.g. `RUSTOK_RPC_URLS_1=https://…`. Comma-separated for fallbacks. |
 | `RUSTOK_ALCHEMY_API_KEY` | No¹ | — | Alchemy key (primary RPC for supported chains). |
@@ -16,6 +17,9 @@ All configuration is via environment variables passed to the wallet container.
 
 ¹ Provide **either** an Alchemy key **or** a public RPC URL per enabled chain;
 otherwise that chain is skipped (no balances/positions for it).
+
+² Exactly one of the two: the password itself, **or** the path to a file holding it
+(the explicit password wins if both are set).
 
 ## Data & keys
 

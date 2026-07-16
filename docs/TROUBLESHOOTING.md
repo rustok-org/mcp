@@ -2,11 +2,14 @@
 
 ## "no wallet keystore … create one first"
 
-The wallet hasn't been created in this volume yet. Run onboarding once:
+The wallet hasn't been created in this volume yet. Run onboarding once (podman shown;
+the docker `_FILE` variant is in [INSTALL](INSTALL.md#2-create-your-wallet-one-time)):
 
 ```bash
-docker run -it --rm -v rustok-wallet-tui:/data \
-  -e RUSTOK_KEYRING_PASSWORD="your-password" \
+read -r -s -p "Keyring password: " pw && printf '%s' "$pw" | podman secret create rustok-keyring-claude - && unset pw
+
+podman run -it --rm -v rustok-wallet-tui:/data \
+  --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD \
   ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1 create-wallet
 ```
 
@@ -14,10 +17,26 @@ Back up the printed 12 words and approval PIN, then start the agent again.
 
 ## "backend not ready" / the agent can't reach the wallet
 
-- Confirm Docker is running and the image is pulled.
-- Confirm `RUSTOK_KEYRING_PASSWORD` is set and matches the password used at
+- Confirm the engine is running and the image is pulled.
+- Confirm the password actually reaches the container — podman
+  `--secret …,type=env,target=RUSTOK_KEYRING_PASSWORD`, docker
+  `RUSTOK_KEYRING_PASSWORD_FILE` + file mount — and that it matches the one used at
   `create-wallet` (a wrong password fails the unlock).
 - Confirm the same `-v rustok-wallet-tui:/data` volume is mounted as at onboarding.
+
+## "RUSTOK_KEYRING_PASSWORD_FILE does not point to a readable regular file" / "… is empty"
+
+The named errors of the `_FILE` delivery — the container refuses to start instead of
+hanging on a missing password:
+
+- **Wrong path**: the value of `RUSTOK_KEYRING_PASSWORD_FILE` must match the mount
+  target (podman secret default: `/run/secrets/<secret-name>`).
+- **Secret not created**: check `podman secret ls`.
+- **SELinux host** (Fedora and friends): a bind-mounted file needs the `:z` mount
+  option, or the container is denied the read.
+- **Not a regular file**: a directory, FIFO or device at that path is refused.
+- **"is empty"**: the file has no content — recreate it with `printf '%s' "$pw" > file`
+  (an `echo`-made file with only a newline counts as empty after stripping).
 
 ## Wrong password
 

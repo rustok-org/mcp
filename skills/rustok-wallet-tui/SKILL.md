@@ -77,24 +77,40 @@ above) and run `core-server set-pin`.
 ## How the agent runs the wallet
 
 The MCP client launches the image over stdio (keys stay local). **Never put the
-keyring password in the MCP config or shell history** — keep it in a private,
-`0600` env-file that only you can read:
+keyring password in the MCP config or shell history.** On podman, store it once in
+the secret store; on docker, keep it in a private `0600` file and pass its *path*:
 
 ```bash
-# One-time: write the keyring password into a private env-file (chmod 600).
-umask 077
-read -r -s -p "Keyring password: " pw \
-  && printf 'RUSTOK_KEYRING_PASSWORD=%s\n' "$pw" > ~/.rustok-wallet-tui.env \
-  && unset pw
+# One-time (podman): the value never touches history, inspect or configs.
+read -r -s -p "Keyring password: " pw && printf '%s' "$pw" | podman secret create rustok-keyring-claude - && unset pw
 
-docker run -i --rm --init \
+podman run -i --rm --init \
   --label rustok=wallet --label rustok.agent=claude \
   -v rustok-wallet-tui:/data \
-  --env-file ~/.rustok-wallet-tui.env \
+  --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
   ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1
 ```
+
+```bash
+# Docker variant: a 0600 file + RUSTOK_KEYRING_PASSWORD_FILE (path, not value).
+umask 077
+read -r -s -p "Keyring password: " pw && printf '%s' "$pw" > ~/.rustok-keyring-pass && unset pw
+
+docker run -i --rm --init \
+  --label rustok=wallet --label rustok.agent=claude \
+  -v rustok-wallet-tui:/data \
+  -v ~/.rustok-keyring-pass:/run/keyring-pass:ro \
+  -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
+  -e RUSTOK_ALLOWED_CHAINS="1,8453" \
+  -e RUSTOK_RPC_URLS_1="https://your-rpc" \
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1
+```
+
+> Legacy `--env-file` delivery still works but is deprecated: the value lands in
+> `inspect`, and quotes inside an env-file become part of the password (a silent
+> unlock failure). Migrate to the secret / `_FILE` delivery above.
 
 > **Labels, not `--name`:** the agent launches this itself, and a fixed name
 > collides with health probes / a second `mcp list`. The `rustok.agent` sub-label
@@ -118,18 +134,18 @@ The console shows the decoded transaction from the wallet core and waits for
 `y/N` (high-risk items also ask for the per-transaction PIN).
 
 For **Claude Desktop / Cursor** (stdio MCP), add to the MCP config. The keyring
-password stays in the `0600` env-file above (`--env-file`), **never in this
-config file** — only the non-secret RPC URL lives here:
+password is delivered by the podman secret (or the docker `_FILE` mount) above,
+**never in this config file** — only the non-secret RPC URL lives here:
 
 ```json
 {
   "mcpServers": {
     "rustok-wallet-tui": {
-      "command": "docker",
+      "command": "podman",
       "args": ["run", "-i", "--rm", "--init",
                "--label", "rustok=wallet", "--label", "rustok.agent=claude",
                "-v", "rustok-wallet-tui:/data",
-               "--env-file", "/home/you/.rustok-wallet-tui.env",
+               "--secret", "rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
                "ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"],

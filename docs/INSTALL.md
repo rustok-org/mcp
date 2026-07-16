@@ -7,7 +7,9 @@ Docker volume and never leave your machine.
 
 ## Prerequisites
 
-- **Docker** installed and running.
+- **Podman** (recommended — rootless, ships a secret store) or **Docker**, installed
+  and running. Non-password commands below show `docker`; `podman` accepts the same
+  syntax. Password delivery differs per engine — both variants are shown.
 - An Ethereum RPC URL (an Alchemy key URL is recommended; a public RPC works for testing).
 
 ## 1. Pull the image
@@ -25,10 +27,31 @@ TTY). It prints two things only once:
 - the **6-digit approval PIN** — keep it with the phrase; it unlocks the console
   session and is required for high-risk approvals.
 
+**Podman (recommended)** — store the password once in podman's secret store: it never
+touches shell history, `podman inspect` or the MCP config, and quotes in the password
+are safe (they are read as-is, not parsed):
+
 ```bash
+read -r -s -p "Keyring password: " pw && printf '%s' "$pw" | podman secret create rustok-keyring-claude - && unset pw
+
+podman run -it --rm \
+  -v rustok-wallet-tui:/data \
+  --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD \
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1 create-wallet
+```
+
+**Docker** (no secret store without swarm) — keep the password in a `0600` file and
+hand the wallet its *path* via `RUSTOK_KEYRING_PASSWORD_FILE` (a trailing newline in
+the file is stripped):
+
+```bash
+umask 077
+read -r -s -p "Keyring password: " pw && printf '%s' "$pw" > ~/.rustok-keyring-pass && unset pw
+
 docker run -it --rm \
   -v rustok-wallet-tui:/data \
-  -e RUSTOK_KEYRING_PASSWORD="choose-a-strong-password" \
+  -v ~/.rustok-keyring-pass:/run/keyring-pass:ro \
+  -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
   ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1 create-wallet
 ```
 
@@ -39,33 +62,56 @@ container) — `… core-server set-pin` in place of `… rustok-console`.
 
 ## 3. Connect an agent (stdio)
 
-The MCP client launches the image over stdio. For **Claude Desktop / Cursor**, add
-to the MCP config (`claude_desktop_config.json`):
+The MCP client launches the image over stdio — **the password never goes into this
+config file**. For **Claude Desktop / Cursor**, add to the MCP config
+(`claude_desktop_config.json`); with podman the secret from step 2 does the delivery:
 
 ```json
 {
   "mcpServers": {
     "rustok-wallet-tui": {
-      "command": "docker",
+      "command": "podman",
       "args": ["run", "-i", "--rm", "--init",
                "--label", "rustok=wallet", "--label", "rustok.agent=claude",
                "-v", "rustok-wallet-tui:/data",
-               "-e", "RUSTOK_KEYRING_PASSWORD",
+               "--secret", "rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
-               "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"],
-      "env": {
-        "RUSTOK_KEYRING_PASSWORD": "your-strong-password",
-        "RUSTOK_RPC_URLS_1": "https://ethereum-rpc.publicnode.com"
-      }
+               "-e", "RUSTOK_RPC_URLS_1=https://ethereum-rpc.publicnode.com",
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"]
     }
   }
 }
 ```
 
+With **docker**, swap the `--secret` argument pair for the `0600`-file mount from
+step 2:
+
+```jsonc
+"command": "docker",
+"args": ["run", "-i", "--rm", "--init",
+         "--label", "rustok=wallet", "--label", "rustok.agent=claude",
+         "-v", "rustok-wallet-tui:/data",
+         "-v", "/home/you/.rustok-keyring-pass:/run/keyring-pass:ro",
+         "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass",
+         "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
+         "-e", "RUSTOK_RPC_URLS_1=https://ethereum-rpc.publicnode.com",
+         "ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"]
+```
+
+> **An RPC URL that embeds a provider key** (an Alchemy URL) is a credential too — on
+> podman deliver it the same way: `--secret rustok-rpc-claude,type=env,target=RUSTOK_RPC_URLS_1`.
+> The public-endpoint URLs above are not secrets.
+
+> **Legacy: inline `-e` password / `--env-file`.** Older setups passed the password as
+> `-e RUSTOK_KEYRING_PASSWORD=…` or via an env-file. Both still work but are
+> deprecated: the value is visible in `inspect` (and, for the `env` block, in the MCP
+> config file), and inside an env-file **quotes become part of the password** — a
+> silent unlock failure that broke real onboardings. Migrate to the secret / `_FILE`
+> delivery above.
+
 For **ClawHub / Smithery**, install the `rustok-wallet-tui` skill and provide
-`RUSTOK_KEYRING_PASSWORD` (and an RPC URL) when prompted; the registry runs the
-same `docker run -i` command.
+`RUSTOK_KEYRING_PASSWORD` (and an RPC URL) when prompted; the registry flow passes it
+as an env var — the secret/`_FILE` delivery above is the recommended manual setup.
 
 > **Why labels, not `--name`.** The agent launches this container itself, and a
 > fixed `--name` collides the moment anything starts a second instance (a health
@@ -99,12 +145,13 @@ second agent (e.g. Hermes) a distinct volume and sub-label:
 "args": ["run", "-i", "--rm", "--init",
          "--label", "rustok=wallet", "--label", "rustok.agent=hermes",
          "-v", "rustok-hermes:/data",                // its own wallet volume
-         "-e", "RUSTOK_KEYRING_PASSWORD", …,
+         "--secret", "rustok-keyring-hermes,type=env,target=RUSTOK_KEYRING_PASSWORD", …,
          "ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"]
 ```
 
-`create-wallet` that volume once (as in step 2, with `-v rustok-hermes:/data`),
-and open its console with `--filter label=rustok.agent=hermes`.
+`create-wallet` that volume once (as in step 2, with `-v rustok-hermes:/data` and its
+own secret `rustok-keyring-hermes`), and open its console with
+`--filter label=rustok.agent=hermes`.
 
 ## Upgrading the wallet image
 
