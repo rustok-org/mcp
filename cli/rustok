@@ -1,36 +1,62 @@
 #!/bin/sh
 # rustok — the wallet's one command.
 #
-# PR-2.1 surface: `console` (default), `status`, `doctor`, `help`, `version`.
-# The wallet container is agent-launched and has NO fixed name (a fixed --name
-# collides with health probes and a second `mcp list` — the real production bug
-# this shim exists to bury). Everything here discovers it by BOTH labels:
-# `rustok=wallet` and `rustok.agent=<name>`.
+# Surface: `console` (default), `init`, `start`, `stop`, `status`, `doctor`,
+# `help`, `version`. The wallet container is agent-launched and has NO fixed
+# name (a fixed --name collides with health probes and a second `mcp list` —
+# the real production bug this shim exists to bury). Everything here discovers
+# it by BOTH labels: `rustok=wallet` and `rustok.agent=<name>`.
+#
+# Security invariants (the trust boundary of init):
+#   - the keyring password is read from /dev/tty only (Rule of two windows:
+#     a pipe or an agent shell has no tty and gets a named refusal), travels
+#     via a builtin printf into `podman secret create -` stdin or a 0600 file —
+#     NEVER through an engine argv, an env-file or a config;
+#   - the seed + PIN print happens inside `create-wallet` on the INHERITED tty —
+#     the shim never captures, logs or re-echoes that output;
+#   - `init` NEVER deletes a keystore volume; --force re-stores the SECRET only.
 #
 # POSIX sh on purpose (see epic decision #3): no arrays, no bashisms.
 set -eu
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rustok"
 CONFIG_FILE="$CONFIG_DIR/config"
+# The shipped wallet image; RUSTOK_IMAGE overrides (a digest-pinned ref comes
+# with the installer stage of the epic).
+DEFAULT_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"
 
 usage() {
     cat <<'EOF'
 rustok — self-custody wallet helper
 
-Usage: rustok [command] [--agent <name>]
+Usage: rustok [command] [--agent <name>] [--force]
 
 Commands:
-  console        open the human approval console (default when no command)
+  console        open the human approval console (default when no command);
+                 starts the wallet first if an initialized one is not running
+  init           create a NEW wallet for an agent (interactive; prints the
+                 12-word phrase and approval PIN exactly once — run it in your
+                 own terminal, never through an agent)
+  start          start the wallet container in the background
+  stop           stop the running wallet container
   status         show the running wallet container(s)
   doctor         diagnose the setup (engine, config, PATH, leftovers)
   help           show this help
   version        show the shim version
 
 Options:
-  --agent <name>   pick the wallet of one agent (e.g. claude, hermes) when
-                   several run side by side
+  --agent <name>   the agent this wallet belongs to (default: claude)
+  --force          init only: re-store the keyring password secret when it
+                   already exists (the keystore volume is never touched)
+
+Environment:
+  RUSTOK_IMAGE       wallet image override
+  RUSTOK_RPC_URLS_*  forwarded to `start` (never the keyring password). NOTE:
+                     until `rustok connect` lands, a keyed RPC URL is passed by
+                     name and is visible in `podman inspect` — move provider
+                     keys to a secret when connect is available.
 EOF
 }
 
@@ -108,7 +134,208 @@ agent_list() {
     done | LC_ALL=C sort | awk 'NR > 1 { printf ", " } { printf "%s", $0 } END { print "" }'
 }
 
+# --- per-agent naming ----------------------------------------------------------
+
+volume_for() {
+    # claude keeps the historical volume name every doc and existing user has;
+    # any other agent gets its own per-agent volume (epic decision #4).
+    if [ "$1" = "claude" ]; then
+        echo "rustok-wallet-tui"
+    else
+        echo "rustok-$1"
+    fi
+}
+
+secret_for() { echo "rustok-keyring-$1"; }
+password_file_for() { echo "$CONFIG_DIR/keyring-pass-$1"; }
+
+image_ref() { echo "${RUSTOK_IMAGE:-$DEFAULT_IMAGE}"; }
+
+secret_present() {
+    # podman: the secret store; docker (no store without swarm): the 0600 file.
+    if [ "$engine" = "podman" ]; then
+        "$engine" secret exists "$(secret_for "$1")"
+    else
+        [ -f "$(password_file_for "$1")" ]
+    fi
+}
+
+password_args_for() {
+    # The engine-run fragment delivering the password — value never in argv.
+    if [ "$engine" = "podman" ]; then
+        echo "--secret $(secret_for "$1"),type=env,target=RUSTOK_KEYRING_PASSWORD"
+    else
+        echo "-v $(password_file_for "$1"):/run/keyring-pass:ro -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass"
+    fi
+}
+
+rustok_env_names() {
+    # RUSTOK_* config vars forwarded to `start` BY NAME (`-e NAME` inherits the
+    # value engine-side — values stay out of argv AND out of shell history).
+    # The keyring password is deliberately excluded: it travels only as a
+    # secret/_FILE, and a stray env var would win over the stored secret and
+    # cause mismatched-unlock mysteries. RUSTOK_IMAGE is the shim's own knob.
+    #
+    # INTERIM (epic escalation #2): a keyed RPC URL is a second-class secret and
+    # the epic ratified delivering it as a podman `--secret rustok-rpc-<agent>`.
+    # That secret is created by `connect` (PR-2.3a), which does not exist yet, so
+    # `start` forwards RUSTOK_RPC_URLS_* by name for now — the value is out of
+    # argv/history but visible in `podman inspect Config.Env`. PR-2.3a moves it to
+    # a secret. Not fund/seed exposure (same-user inspect); documented, not silent.
+    env | sed -n 's/^\(RUSTOK_[A-Z0-9_]*\)=.*/\1/p' \
+        | grep -v -E '^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE)$' || true
+}
+
 # --- commands ----------------------------------------------------------------
+
+read_password_twice() {
+    # The gate: stdin must BE a terminal (a pipe or an agent shell fails
+    # `-t 0` deterministically — some agent sandboxes still carry a readable
+    # /dev/tty, so probing /dev/tty alone is not a reliable refusal). Then the
+    # password is read from /dev/tty itself, immune to later redirections
+    # (Rule of two windows).
+    if [ ! -t 0 ]; then
+        die "init needs your own terminal — never run it through an agent or a pipe: the recovery phrase would leak into its context"
+    fi
+    if ! { exec 3</dev/tty; } 2>/dev/null; then
+        die "init needs your own terminal (no /dev/tty here) — never run it through an agent or a pipe: the recovery phrase would leak into its context"
+    fi
+    # Restore echo (and drop the password) on Ctrl-C / kill during entry —
+    # otherwise the terminal is left with echo off.
+    trap 'stty echo </dev/tty 2>/dev/null || true; PW="" PW2=""; exit 130' INT TERM HUP
+    printf 'Keyring password (unlocks the keystore): ' >/dev/tty
+    stty -echo </dev/tty 2>/dev/null || true
+    IFS= read -r PW <&3 || PW=""
+    stty echo </dev/tty 2>/dev/null || true
+    printf '\n' >/dev/tty
+    printf 'Repeat the password: ' >/dev/tty
+    stty -echo </dev/tty 2>/dev/null || true
+    IFS= read -r PW2 <&3 || PW2=""
+    stty echo </dev/tty 2>/dev/null || true
+    printf '\n' >/dev/tty
+    trap - INT TERM HUP
+    exec 3<&-
+    [ -n "$PW" ] || die "empty password — nothing stored"
+    [ "$PW" = "$PW2" ] || die "passwords do not match — nothing stored"
+}
+
+store_password() {
+    # printf is a shell BUILTIN in every /bin/sh we target (dash/bash/ash):
+    # the password never becomes a process argv.
+    if [ "$engine" = "podman" ]; then
+        printf '%s' "$PW" | "$engine" secret create "$(secret_for "$1")" - >/dev/null
+    else
+        umask 077
+        mkdir -p "$CONFIG_DIR"
+        printf '%s' "$PW" >"$(password_file_for "$1")"
+    fi
+}
+
+remove_stored_password() {
+    if [ "$engine" = "podman" ]; then
+        "$engine" secret rm "$(secret_for "$1")" >/dev/null
+    else
+        rm -f "$(password_file_for "$1")"
+    fi
+}
+
+cmd_init() {
+    agent="${AGENT:-claude}"
+    volume="$(volume_for "$agent")"
+
+    volume_exists=0
+    "$engine" volume exists "$volume" 2>/dev/null && volume_exists=1
+
+    if [ "$volume_exists" -eq 1 ] && [ "$FORCE" -eq 0 ]; then
+        die "wallet volume '$volume' already exists — init creates NEW wallets and never touches keystores. To re-store a changed keyring password: rustok init --force (secret only; your keys stay put)"
+    fi
+    if secret_present "$agent" && [ "$FORCE" -eq 0 ]; then
+        die "a stored keyring password for agent '$agent' already exists — rerun with --force to replace it (the keystore volume is never touched)"
+    fi
+
+    read_password_twice
+    if secret_present "$agent"; then
+        remove_stored_password "$agent"
+    fi
+    store_password "$agent"
+    PW="" PW2=""
+    echo "rustok: keyring password stored for agent '$agent' ($engine)"
+
+    if [ "$volume_exists" -eq 1 ]; then
+        echo "rustok: keystore volume '$volume' already present — password re-stored, wallet untouched"
+        return 0
+    fi
+
+    # Onboarding prints the 12 words + PIN ONCE, on the inherited tty — the
+    # shim adds no capture, no tee, no log around it.
+    echo "rustok: creating the wallet — back up the 12 words and the PIN it prints:"
+    # shellcheck disable=SC2046  # password_args_for emits a word-split fragment
+    "$engine" run -it --rm \
+        -v "$volume:/data" \
+        $(password_args_for "$agent") \
+        "$(image_ref)" create-wallet
+    echo "rustok: wallet created for agent '$agent' — next: rustok start (or connect your agent), then fund the address"
+}
+
+wallet_run_args() {
+    # The detached labeled run — shared by `start` and console auto-start.
+    # NEVER --name: labels only (that is the whole point of the label model).
+    agent="$1"
+    volume="$(volume_for "$agent")"
+    set -- run -d -i --rm --init \
+        --label rustok=wallet --label "rustok.agent=$agent" \
+        -v "$volume:/data"
+    for name in $(rustok_env_names); do
+        set -- "$@" -e "$name"
+    done
+    # shellcheck disable=SC2046
+    set -- "$@" $(password_args_for "$agent") "$(image_ref)"
+    printf '%s\n' "$@"
+}
+
+start_wallet_detached() {
+    agent="$1"
+    secret_present "$agent" || die "no stored keyring password for agent '$agent' — run: rustok init"
+    "$engine" volume exists "$(volume_for "$agent")" 2>/dev/null \
+        || die "no wallet volume '$(volume_for "$agent")' — run: rustok init"
+    # Rebuild argv from the newline list (values never contain newlines here:
+    # names/labels/volumes are ours, the password rides the secret store).
+    set --
+    while IFS= read -r arg; do
+        set -- "$@" "$arg"
+    done <<EOF
+$(wallet_run_args "$agent")
+EOF
+    "$engine" "$@" >/dev/null
+    echo "rustok: wallet for agent '$agent' starting in the background"
+}
+
+cmd_start() {
+    agent="${AGENT:-claude}"
+    ids="$(discover_ids "$agent")"
+    if [ -n "$ids" ]; then
+        die "wallet for agent '$agent' is already running (see: rustok status)"
+    fi
+    start_wallet_detached "$agent"
+}
+
+cmd_stop() {
+    ids="$(discover_ids "$AGENT")"
+    # shellcheck disable=SC2086
+    set -- $ids
+    case $# in
+        0)
+            echo "rustok: nothing to stop"
+            ;;
+        1)
+            "$engine" stop "$1" >/dev/null
+            echo "rustok: wallet stopped"
+            ;;
+        *)
+            die "multiple wallets running: $(agent_list "$@") — use --agent <name>"
+            ;;
+    esac
+}
 
 cmd_console() {
     ids="$(discover_ids "$AGENT")"
@@ -116,10 +343,25 @@ cmd_console() {
     set -- $ids
     case $# in
         0)
-            if [ -n "$AGENT" ]; then
-                die "no wallet running for agent '$AGENT' — start that agent's session first (check: rustok status)"
+            # exec-or-start (epic pain #6): an initialized wallet is started
+            # here and now; an uninitialized one gets pointed at init.
+            agent="${AGENT:-claude}"
+            if ! secret_present "$agent" 2>/dev/null; then
+                if [ -n "$AGENT" ]; then
+                    die "no wallet running for agent '$AGENT' — start that agent's session first (check: rustok status)"
+                fi
+                die "no wallet running — the agent session starts it; check: rustok status (new here? rustok init)"
             fi
-            die "no wallet running — the agent session starts it; check: rustok status"
+            start_wallet_detached "$agent"
+            # The console needs the approver socket, which core creates during
+            # startup — poll briefly instead of failing into a raw error.
+            tries=0
+            while ! "$engine" exec "$(discover_ids "$agent")" test -S /run/wallet/approve.sock 2>/dev/null; do
+                tries=$((tries + 1))
+                [ "$tries" -gt 30 ] && die "wallet started but the approval socket never appeared — check: rustok status / $engine logs"
+                sleep 1
+            done
+            exec "$engine" exec -it "$(discover_ids "$agent")" rustok-console
             ;;
         1)
             exec "$engine" exec -it "$1" rustok-console
@@ -198,10 +440,11 @@ cmd_doctor() {
 
 COMMAND="console"
 AGENT=""
+FORCE=0
 
 if [ $# -gt 0 ]; then
     case "$1" in
-        console | status | doctor)
+        console | status | doctor | init | start | stop)
             COMMAND="$1"
             shift
             ;;
@@ -225,8 +468,22 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --agent)
             [ $# -ge 2 ] || die "--agent needs a value (e.g. --agent claude)"
+            # Strict charset: the agent name becomes a container label, a volume
+            # name and (unquoted) a run-argv token. Anything outside this set —
+            # spaces, newlines, a leading dash, shell metacharacters — could
+            # inject flags/args into `podman run`, so it is a named refusal here,
+            # once, for every command. (Threat model: pasted untrusted commands.)
+            case "$2" in
+                [a-zA-Z0-9]*[!a-zA-Z0-9_-]* | [!a-zA-Z0-9]* | "") \
+                    die "--agent name '$2' is invalid — use letters, digits, '-' or '_', starting with a letter or digit (e.g. claude, hermes)" ;;
+            esac
             AGENT="$2"
             shift 2
+            ;;
+        --force)
+            [ "$COMMAND" = "init" ] || die "--force is an init-only flag"
+            FORCE=1
+            shift
             ;;
         *)
             echo "rustok: unknown option '$1' (try: rustok help)" 1>&2
@@ -241,4 +498,7 @@ case "$COMMAND" in
     console) cmd_console ;;
     status) cmd_status ;;
     doctor) cmd_doctor ;;
+    init) cmd_init ;;
+    start) cmd_start ;;
+    stop) cmd_stop ;;
 esac
