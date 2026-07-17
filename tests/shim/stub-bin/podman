@@ -32,7 +32,9 @@ shift || true
 # Containers started by `run -d` within a test persist in $STUB_STATE and are
 # merged into `ps` answers — the exec-or-start flow re-discovers after starting.
 state_containers() {
-    [ -n "${STUB_STATE:-}" ] && [ -f "$STUB_STATE/containers" ] && cat "$STUB_STATE/containers" || true
+    if [ -n "${STUB_STATE:-}" ] && [ -f "$STUB_STATE/containers" ]; then
+        cat "$STUB_STATE/containers"
+    fi
 }
 
 case "$cmd" in
