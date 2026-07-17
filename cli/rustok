@@ -200,8 +200,33 @@ rpc_secret_names() {
     # cross-agent leak); chain suffixes are [A-Z0-9_] by construction
     # (rpc_env_names), so the tail anchor rejects any hyphenated agent name.
     [ "$engine" = "podman" ] || return 0
-    "$engine" secret ls --format '{{.Name}}' 2>/dev/null \
-        | grep -E "^rustok-rpc-$1-[A-Z0-9_]+$" | LC_ALL=C sort || true
+    # Engine status is checked SEPARATELY from the grep: in one pipeline the
+    # exit status belongs to sort (0 on empty input), so a dead secret store
+    # would silently read as "no secrets" — and on podman the RPC URL rides
+    # ONLY this channel, so the caller would go on without RPC at all.
+    rpc_ls_out="$("$engine" secret ls --format '{{.Name}}' 2>/dev/null)" \
+        || die "'$engine' failed listing secrets — is the service running? (try: rustok doctor)"
+    printf '%s\n' "$rpc_ls_out" | grep -E "^rustok-rpc-$1-[A-Z0-9_]+$" | LC_ALL=C sort || true
+}
+
+label_volume_args() {
+    # Shared header of the agent-run argv (registration AND detached start) —
+    # kept in ONE place: label drift is a proven production bug class (the
+    # live pre-label containers are invisible to two-label discovery today).
+    # Safe as a word-split fragment: the agent passed the charset gate and
+    # the volume name is ours — no arbitrary values (unlike the -e NAME=value
+    # loop, which MUST stay inline at its call sites).
+    echo "--label rustok=wallet --label rustok.agent=$1 -v $(volume_for "$1"):/data"
+}
+
+rpc_secret_args() {
+    # stdin: anchored secret names, one per line ($1: agent); emits the
+    # --secret fragment both argv builders splice in verbatim.
+    while IFS= read -r rpc_secret; do
+        [ -n "$rpc_secret" ] || continue
+        printf ' --secret %s,type=env,target=RUSTOK_RPC_URLS_%s' \
+            "$rpc_secret" "${rpc_secret#rustok-rpc-"$1"-}"
+    done
 }
 
 store_rpc_secrets() {
@@ -318,9 +343,8 @@ wallet_run_args() {
     agent="$1"
     volume="$(volume_for "$agent")"
     rpc_secrets="$(rpc_secret_names "$agent")"
-    set -- run -d -i --rm --init \
-        --label rustok=wallet --label "rustok.agent=$agent" \
-        -v "$volume:/data"
+    # shellcheck disable=SC2046  # label_volume_args emits a word-split fragment
+    set -- run -d -i --rm --init $(label_volume_args "$agent")
     for name in $(rustok_env_names); do
         case "$name" in
             RUSTOK_RPC_URLS_*)
@@ -334,9 +358,8 @@ wallet_run_args() {
         esac
         set -- "$@" -e "$name"
     done
-    for rpc_secret in $rpc_secrets; do
-        set -- "$@" --secret "$rpc_secret,type=env,target=RUSTOK_RPC_URLS_${rpc_secret#rustok-rpc-"$agent"-}"
-    done
+    # shellcheck disable=SC2046
+    set -- "$@" $(printf '%s\n' "$rpc_secrets" | rpc_secret_args "$agent")
     # shellcheck disable=SC2046
     set -- "$@" $(password_args_for "$agent") "$(image_ref)"
     printf '%s\n' "$@"
@@ -487,18 +510,15 @@ cmd_connect() {
     store_rpc_secrets "$agent"
 
     # The registration argv — also the exact retry command if `add` fails.
-    # Built inline, NOT via a printf-newline-list helper like wallet_run_args:
-    # this argv carries literal -e NAME=value entries, and a value bearing a
-    # newline would corrupt a line-based hand-off (wallet_run_args only ever
-    # passes names, which is why the list channel is safe there).
+    # The header/password/rpc segments come from the same fragment helpers
+    # the start path uses (no drift); ONLY the -e NAME=value loop stays
+    # inline, because it alone carries arbitrary values a line-based
+    # hand-off could not survive.
+    reg_rpc_secrets="$(rpc_secret_names "$agent")"
+    # shellcheck disable=SC2046  # fragment helpers emit word-split args
     set -- mcp add -s user rustok -- "$engine" run -i --rm --init \
-        --label rustok=wallet --label "rustok.agent=$agent" \
-        -v "$volume:/data"
-    # shellcheck disable=SC2046  # password_args_for emits a word-split fragment
-    set -- "$@" $(password_args_for "$agent")
-    for rpc_secret in $(rpc_secret_names "$agent"); do
-        set -- "$@" --secret "$rpc_secret,type=env,target=RUSTOK_RPC_URLS_${rpc_secret#rustok-rpc-"$agent"-}"
-    done
+        $(label_volume_args "$agent") $(password_args_for "$agent") \
+        $(printf '%s\n' "$reg_rpc_secrets" | rpc_secret_args "$agent")
     # Non-secret RUSTOK_* config is FROZEN as literal -e values: the agent
     # client launches this command from ITS environment, not your shell —
     # a name-only -e would inherit nothing. Change a value → re-run connect.
@@ -521,12 +541,24 @@ cmd_connect() {
         echo "rustok: note: docker fallback — RPC URLs ride as plain -e in the agent config (second tier; podman delivers them as secrets)" 1>&2
     fi
 
+    old_entry=""
     if [ "$registered" -eq 0 ]; then
+        # Snapshot BEFORE remove: `claude mcp add` has no replace flag, so
+        # remove→add is forced — and a failed add would otherwise leave the
+        # wallet silently unregistered with no way back but memory.
+        old_entry="$(jq -c '.mcpServers.rustok' "$cfg" 2>/dev/null || true)"
         claude mcp remove -s user rustok >/dev/null \
             || die "claude mcp remove failed — registration left unchanged"
     fi
     if ! claude "$@"; then
-        echo "rustok: 'claude mcp add' failed — re-run it manually:" 1>&2
+        if [ -n "$old_entry" ] && [ "$old_entry" != "null" ]; then
+            echo "rustok: 'claude mcp add' failed AND the old registration is already removed — the wallet is currently NOT registered" 1>&2
+            echo "rustok: previous entry (restore by hand under .mcpServers.rustok in $cfg):" 1>&2
+            printf '  %s\n' "$old_entry" 1>&2
+            echo "rustok: or re-run it manually:" 1>&2
+        else
+            echo "rustok: 'claude mcp add' failed — re-run it manually:" 1>&2
+        fi
         printf '  claude' 1>&2
         for arg in "$@"; do printf ' %s' "$arg" 1>&2; done
         printf '\n' 1>&2

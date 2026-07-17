@@ -40,6 +40,7 @@ fresh() {
     STUB_PS_FAIL=0
     STUB_CLAUDE_ADD_FAIL=0
     STUB_CLAUDE_REMOVE_FAIL=0
+    STUB_SECRET_LS_FAIL=0
     TEST_PATH="$WORK/bin"
 }
 
@@ -62,6 +63,7 @@ run_shim() {
         STUB_INFO_FAIL="$STUB_INFO_FAIL" STUB_PS_FAIL="$STUB_PS_FAIL" \
         STUB_CLAUDE_ADD_FAIL="$STUB_CLAUDE_ADD_FAIL" \
         STUB_CLAUDE_REMOVE_FAIL="$STUB_CLAUDE_REMOVE_FAIL" \
+        STUB_SECRET_LS_FAIL="$STUB_SECRET_LS_FAIL" \
         sh "$SHIM" "$@" 2>&1)" && RC=0 || RC=$?
 }
 
@@ -711,6 +713,79 @@ if assert_exit 0 \
     && grep '^claude mcp add' "$WORK/log" | grep -q -- '--secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1'; then
     ok "connect --force keeps a stored RPC secret in the registration without its env var"
 else not_ok "connect --force keeps a stored RPC secret in the registration without its env var"; fi
+
+# --- guard tests for the load-bearing preflights (Gate-2 round-2 gaps) -----------
+
+fresh
+plant_claude_stub
+plant_jq
+# secret present but NO volume — reachable state: init stores the secret BEFORE
+# create-wallet registers the volume, and this machine has already proven that
+# a power cut can land between any two steps
+printf '%s' pw >"$WORK/state/secret-rustok-keyring-claude"
+run_shim connect claude
+if assert_exit 1 && assert_has "no wallet volume 'rustok-wallet-tui'" \
+    && assert_has "rustok init" && ! grep -q '^claude' "$WORK/log"; then
+    ok "connect with a secret but no volume: named error, no registration"
+else not_ok "connect with a secret but no volume: named error, no registration"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_docker_stub
+remove_podman_stub
+mkdir -p "$WORK/home/.config/rustok"
+echo "engine=docker" >"$WORK/home/.config/rustok/config"
+printf '%s' pw >"$WORK/home/.config/rustok/keyring-pass-claude"
+: >"$WORK/state/volume-rustok-wallet-tui"
+# a leftover podman-era rpc secret FILE in the store: the docker tier must not
+# see the secret channel at all — dropping the engine gate would double-deliver
+printf '%s' 'stored-url' >"$WORK/state/secret-rustok-rpc-claude-1"
+export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
+run_shim connect claude
+unset RUSTOK_RPC_URLS_1
+ADD_LINE="$(grep '^claude mcp add' "$WORK/log" || echo none)"
+if assert_exit 0 \
+    && case "$ADD_LINE" in *"--secret rustok-rpc-"*) false ;; *) true ;; esac \
+    && case "$ADD_LINE" in *"-e RUSTOK_RPC_URLS_1=https://rpc.example/with-key"*) true ;; *) false ;; esac; then
+    ok "docker tier never rides the podman secret channel, even with a stored rpc secret"
+else not_ok "docker tier never rides the podman secret channel, even with a stored rpc secret"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+# TWO wallets on DIFFERENT volumes: the warn must count by the TARGET volume
+# only — a dropped/typoed filter would count both (or none)
+STUB_CONTAINERS="livec1;rustok=wallet;volume=rustok-wallet-tui;image=img otherc2;rustok=wallet;volume=rustok-hermes;image=img"
+run_shim connect claude
+if assert_exit 0 && assert_has "1 container(s) already use keystore volume 'rustok-wallet-tui'" \
+    && assert_not_has "2 container(s)"; then
+    ok "multiplicity warn counts only the target volume's containers (filter is live)"
+else not_ok "multiplicity warn counts only the target volume's containers (filter is live)"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+STUB_SECRET_LS_FAIL=1
+run_shim connect claude
+if assert_exit 1 && assert_has "failed listing secrets" \
+    && ! grep -q '^claude mcp add' "$WORK/log"; then
+    ok "connect with a failing secret ls dies named — never registers without RPC silently"
+else not_ok "connect with a failing secret ls dies named — never registers without RPC silently"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","OLDMARKER"]}}}' >"$WORK/home/.claude.json"
+STUB_CLAUDE_ADD_FAIL=1
+run_shim connect claude --force
+if assert_exit 1 && assert_has "NOT registered" && assert_has "OLDMARKER" \
+    && assert_has "re-run it manually"; then
+    ok "connect --force with a failing add says the old entry is gone and prints it back"
+else not_ok "connect --force with a failing add says the old entry is gone and prints it back"; fi
 
 # --- docker parity: init stores a 0600 file, not a podman secret -----------------
 

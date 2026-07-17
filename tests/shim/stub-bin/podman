@@ -63,6 +63,10 @@ case "$cmd" in
                 ;;
             rm) rm -f "${STUB_STATE:?}/secret-$1" ;;
             ls)
+                if [ "${STUB_SECRET_LS_FAIL:-0}" = "1" ]; then
+                    echo "cannot connect to the engine service" 1>&2
+                    exit 125
+                fi
                 # Bare names come ONLY with --format '{{.Name}}' — real podman
                 # without it prints an ID/NAME/DRIVER table, which would break
                 # any caller grepping names; diverging here would hide exactly
