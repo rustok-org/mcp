@@ -38,11 +38,20 @@ fresh() {
     STUB_LEGACY=""
     STUB_INFO_FAIL=0
     STUB_PS_FAIL=0
+    STUB_CLAUDE_ADD_FAIL=0
     TEST_PATH="$WORK/bin"
 }
 
 plant_docker_stub() { ln -s "$TESTS_DIR/stub-bin/podman" "$WORK/bin/docker"; }
 remove_podman_stub() { rm "$WORK/bin/podman"; }
+plant_claude_stub() { ln -s "$TESTS_DIR/stub-bin/claude" "$WORK/bin/claude"; }
+# jq is a host tool (like python3 for the pty driver): planted per-test so its
+# ABSENCE stays a testable state, not an accident of the machine.
+plant_jq() { ln -s "$(command -v jq)" "$WORK/bin/jq"; }
+seed_wallet() {
+    printf '%s' pw >"$WORK/state/secret-rustok-keyring-claude"
+    : >"$WORK/state/volume-rustok-wallet-tui"
+}
 
 run_shim() {
     # run_shim <args…> — capture stdout+stderr and exit code, stub-injected.
@@ -50,6 +59,7 @@ run_shim() {
         PATH="$TEST_PATH" STUB_LOG="$WORK/log" STUB_STATE="$WORK/state" \
         STUB_CONTAINERS="$STUB_CONTAINERS" STUB_LEGACY="$STUB_LEGACY" \
         STUB_INFO_FAIL="$STUB_INFO_FAIL" STUB_PS_FAIL="$STUB_PS_FAIL" \
+        STUB_CLAUDE_ADD_FAIL="$STUB_CLAUDE_ADD_FAIL" \
         sh "$SHIM" "$@" 2>&1)" && RC=0 || RC=$?
 }
 
@@ -99,9 +109,10 @@ if assert_exit 0 && assert_has "Usage: rustok"; then ok "help shows usage"; else
 
 fresh
 run_shim help
-if assert_exit 0 && assert_has "podman inspect" && assert_has "RUSTOK_RPC_URLS"; then
-    ok "help documents the keyed-RPC inspect-visibility interim (escalation #2)"
-else not_ok "help documents the keyed-RPC inspect-visibility interim (escalation #2)"; fi
+if assert_exit 0 && assert_has "RUSTOK_RPC_URLS" && assert_has "connect" \
+    && assert_has "secret" && assert_not_has "until"; then
+    ok "help documents secret-based RPC delivery — the inspect-visibility interim is CLOSED"
+else not_ok "help documents secret-based RPC delivery — the inspect-visibility interim is CLOSED"; fi
 
 fresh
 run_shim frobnicate
@@ -344,9 +355,9 @@ else not_ok "init --force re-stores the secret ONLY: no create-wallet, no volume
 
 fresh
 run_shim status --force
-if assert_exit 1 && assert_has "force is an init-only flag"; then
-    ok "--force outside init is refused"
-else not_ok "--force outside init is refused"; fi
+if assert_exit 1 && assert_has "force is an init/connect-only flag"; then
+    ok "--force outside init/connect is refused"
+else not_ok "--force outside init/connect is refused"; fi
 
 # --- BLOCKER #1: --agent argument injection ------------------------------------
 # The threat model is a pasted untrusted command. A crafted --agent must be a
@@ -443,6 +454,201 @@ run_shim console
 if assert_exit 1 && assert_has "no wallet running" && assert_has "rustok init"; then
     ok "console with nothing initialized points at init"
 else not_ok "console with nothing initialized points at init"; fi
+
+# --- start + RPC secrets: the inspect-visibility interim is CLOSED ---------------
+
+fresh
+seed_wallet
+printf '%s' 'stored-url' >"$WORK/state/secret-rustok-rpc-claude-1"
+export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
+run_shim start
+unset RUSTOK_RPC_URLS_1
+if assert_exit 0 \
+    && grep -q -- '--secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1' "$WORK/log" \
+    && ! grep -q -- '-e RUSTOK_RPC_URLS_1 ' "$WORK/log" \
+    && ! grep -q 'with-key' "$WORK/log"; then
+    ok "start with an RPC secret delivers via the secret, drops the name-forward (interim closed)"
+else not_ok "start with an RPC secret delivers via the secret, drops the name-forward (interim closed)"; fi
+
+# --- connect: registration through the agent config ------------------------------
+# The trust rules: existence probe reads $HOME/.claude.json (jq, read-only) —
+# never `claude mcp get`/`list`, which health-check and START a wallet container
+# on the shared keystore just to answer a question. Writes go through the CLI.
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
+export RUSTOK_ALLOWED_CHAINS="1"
+run_shim connect claude
+unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
+EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --init --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 -e RUSTOK_ALLOWED_CHAINS=1 ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"
+if assert_exit 0 \
+    && [ "$(grep '^claude mcp add' "$WORK/log")" = "$EXPECTED" ] \
+    && [ "$(cat "$WORK/state/secret-rustok-rpc-claude-1")" = "https://rpc.example/with-key" ]; then
+    ok "connect: registration argv is byte-exact (labels, volume, both secrets, frozen -e, image)"
+else RC="$RC (log: $(grep '^claude' "$WORK/log" || echo none))"; not_ok "connect: registration argv is byte-exact (labels, volume, both secrets, frozen -e, image)"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+# shellcheck disable=SC2016,SC2089,SC2090  # literal quotes/$ in the URL are the point: byte-exactness probe
+RPCV='https://u:p@rpc.example/?key=a"b$c&d'
+export RUSTOK_RPC_URLS_1="$RPCV"
+run_shim connect claude
+unset RUSTOK_RPC_URLS_1
+if assert_exit 0 \
+    && [ "$(cat "$WORK/state/secret-rustok-rpc-claude-1")" = "$RPCV" ] \
+    && grep -q 'secret create --replace rustok-rpc-claude-1' "$WORK/log" \
+    && ! grep -q 'secret rm ' "$WORK/log" \
+    && ! grep -qF "$RPCV" "$WORK/log"; then
+    ok "connect: RPC secret byte-exact via --replace, value never in any argv, no secret rm anywhere"
+else not_ok "connect: RPC secret byte-exact via --replace, value never in any argv, no secret rm anywhere"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+run_shim connect claude
+if assert_exit 1 && assert_has "run: rustok init" && ! grep -q '^claude' "$WORK/log"; then
+    ok "connect on a blank machine points at init, no registration attempted"
+else not_ok "connect on a blank machine points at init, no registration attempted"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+: >"$WORK/state/volume-rustok-wallet-tui"
+run_shim connect claude
+if assert_exit 1 && assert_has "env-file-era" && assert_has "rustok init --force" \
+    && ! grep -q '^claude' "$WORK/log"; then
+    ok "connect over a volume without a stored secret prints the migration path (Blocker-1)"
+else not_ok "connect over a volume without a stored secret prints the migration path (Blocker-1)"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run"]}}}' >"$WORK/home/.claude.json"
+run_shim connect claude
+if assert_exit 1 && assert_has "already registered" && assert_has "--force" \
+    && ! grep -q '^claude mcp' "$WORK/log"; then
+    ok "connect over an existing registration refuses without --force"
+else not_ok "connect over an existing registration refuses without --force"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","--env-file","/x/wallet.env"]}}}' >"$WORK/home/.claude.json"
+# shellcheck disable=SC2090  # false positive: the var NAME is tainted by the byte-exactness probe above
+export RUSTOK_RPC_URLS_1="url"
+run_shim connect claude --force
+unset RUSTOK_RPC_URLS_1
+n_sec="$(grep -n 'secret create --replace' "$WORK/log" | head -n 1 | cut -d: -f1)"
+n_rm="$(grep -n '^claude mcp remove -s user rustok$' "$WORK/log" | head -n 1 | cut -d: -f1)"
+n_add="$(grep -n '^claude mcp add' "$WORK/log" | head -n 1 | cut -d: -f1)"
+if assert_exit 0 && [ -n "$n_sec" ] && [ -n "$n_rm" ] && [ -n "$n_add" ] \
+    && [ "$n_sec" -lt "$n_rm" ] && [ "$n_rm" -lt "$n_add" ] \
+    && assert_has "env-file registration"; then
+    ok "connect --force: secrets first, then remove, then add; env-file replacement is announced"
+else not_ok "connect --force: secrets first, then remove, then add; env-file replacement is announced"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+# no .claude.json at all (jq exit 2) — the fresh-machine path this epic exists for
+run_shim connect claude
+if assert_exit 0 && grep -q '^claude mcp add' "$WORK/log"; then
+    ok "connect with no agent config file yet proceeds (fresh machine = free)"
+else not_ok "connect with no agent config file yet proceeds (fresh machine = free)"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{' >"$WORK/home/.claude.json"
+run_shim connect claude
+if assert_exit 1 && assert_has "broken JSON" && ! grep -q '^claude' "$WORK/log"; then
+    ok "connect over a broken agent config: named refusal, nothing written"
+else not_ok "connect over a broken agent config: named refusal, nothing written"; fi
+
+fresh
+plant_claude_stub
+seed_wallet
+# jq deliberately NOT planted
+run_shim connect claude
+if assert_exit 1 && assert_has "connect needs jq" && ! grep -q '^claude' "$WORK/log"; then
+    ok "connect without jq: named refusal before any engine or claude call"
+else not_ok "connect without jq: named refusal before any engine or claude call"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+# a live-machine-shaped container: on the keystore volume, NO rustok.agent label
+STUB_CONTAINERS="livec1;rustok=wallet;volume=rustok-wallet-tui;image=img"
+run_shim connect claude
+if assert_exit 0 && assert_has "1 container(s) already use keystore volume 'rustok-wallet-tui'" \
+    && assert_has "UNVERIFIED"; then
+    ok "connect warns by VOLUME about containers sharing the keystore (agent-label-blind)"
+else not_ok "connect warns by VOLUME about containers sharing the keystore (agent-label-blind)"; fi
+
+fresh
+run_shim connect cursor
+if assert_exit 2 && assert_has "coming in PR-2.3b"; then
+    ok "connect cursor: named not-yet refusal"
+else not_ok "connect cursor: named not-yet refusal"; fi
+
+fresh
+run_shim connect
+if assert_exit 2 && assert_has "connect needs a target"; then
+    ok "connect without a target: named usage error"
+else not_ok "connect without a target: named usage error"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok-wallet-tui":{"command":"podman","args":[]}}}' >"$WORK/home/.claude.json"
+run_shim connect claude
+if assert_exit 0 && assert_has "doc-era" \
+    && assert_has "claude mcp remove -s user rustok-wallet-tui"; then
+    ok "connect warns about a doc-era rustok-wallet-tui entry with the removal command"
+else not_ok "connect warns about a doc-era rustok-wallet-tui entry with the removal command"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_docker_stub
+remove_podman_stub
+mkdir -p "$WORK/home/.config/rustok"
+echo "engine=docker" >"$WORK/home/.config/rustok/config"
+printf '%s' pw >"$WORK/home/.config/rustok/keyring-pass-claude"
+: >"$WORK/state/volume-rustok-wallet-tui"
+export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
+run_shim connect claude
+unset RUSTOK_RPC_URLS_1
+ADD_LINE="$(grep '^claude mcp add' "$WORK/log" || echo none)"
+if assert_exit 0 \
+    && case "$ADD_LINE" in *"docker run -i --rm --init"*) true ;; *) false ;; esac \
+    && case "$ADD_LINE" in *"-e RUSTOK_RPC_URLS_1=https://rpc.example/with-key"*) true ;; *) false ;; esac \
+    && case "$ADD_LINE" in *"keyring-pass-claude:/run/keyring-pass:ro -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass"*) true ;; *) false ;; esac \
+    && assert_has "second tier"; then
+    ok "connect on docker: _FILE keyring mount, RPC as honest bare -e, tier note printed"
+else not_ok "connect on docker: _FILE keyring mount, RPC as honest bare -e, tier note printed"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+STUB_CLAUDE_ADD_FAIL=1
+run_shim connect claude
+if assert_exit 1 && assert_has "re-run it manually" \
+    && assert_has "claude mcp add -s user rustok"; then
+    ok "connect surfaces a failed mcp add with the exact retry command"
+else not_ok "connect surfaces a failed mcp add with the exact retry command"; fi
 
 # --- docker parity: init stores a 0600 file, not a podman secret -----------------
 

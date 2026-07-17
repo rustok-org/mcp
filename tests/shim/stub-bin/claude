@@ -1,0 +1,23 @@
+#!/bin/sh
+# Stub Claude Code CLI for the connect tests: records argv, emulates ONLY the
+# WRITE commands (mcp add / mcp remove). There is deliberately no read here —
+# the shim probes $HOME/.claude.json itself (jq, read-only), because the real
+# `claude mcp get`/`list` health-check, i.e. START a wallet container just to
+# answer a question; planting that config file is the TEST's job.
+set -eu
+
+[ -n "${STUB_LOG:-}" ] && printf '%s %s\n' "$(basename "$0")" "$*" >>"$STUB_LOG"
+
+case "${1:-} ${2:-}" in
+    "mcp add")
+        [ "${STUB_CLAUDE_ADD_FAIL:-0}" = "1" ] && exit 1
+        exit 0
+        ;;
+    "mcp remove")
+        exit 0
+        ;;
+    *)
+        echo "stub: unexpected claude command: $*" 1>&2
+        exit 64
+        ;;
+esac
