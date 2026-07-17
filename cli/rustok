@@ -195,9 +195,30 @@ rpc_env_names() {
 rpc_secret_names() {
     # Existing per-agent RPC secrets (podman store only; docker has no store —
     # its RPC rides as an honest literal -e, the documented second tier).
+    # ANCHORED both ways: a bare prefix grep would let agent 'claude' swallow
+    # 'rustok-rpc-claude-backup-1' (agent claude-backup's provider key — a
+    # cross-agent leak); chain suffixes are [A-Z0-9_] by construction
+    # (rpc_env_names), so the tail anchor rejects any hyphenated agent name.
     [ "$engine" = "podman" ] || return 0
     "$engine" secret ls --format '{{.Name}}' 2>/dev/null \
-        | grep "^rustok-rpc-$1-" | LC_ALL=C sort || true
+        | grep -E "^rustok-rpc-$1-[A-Z0-9_]+$" | LC_ALL=C sort || true
+}
+
+store_rpc_secrets() {
+    # Every RUSTOK_RPC_URLS_<chain> in the environment becomes the per-agent
+    # secret rustok-rpc-<agent>-<chain>. Atomic --replace ONLY: `secret rm`
+    # succeeds silently even on a held secret, leaving a no-secret window a
+    # crashed caller would freeze forever. podman-only (see rpc_secret_names).
+    [ "$engine" = "podman" ] || return 0
+    for name in $(rpc_env_names); do
+        rpc_secret="rustok-rpc-$1-${name#RUSTOK_RPC_URLS_}"
+        # the name matched ^RUSTOK_RPC_URLS_[A-Z0-9_]*$ — eval is closed;
+        # a builtin printf into stdin keeps the value out of every argv
+        eval "rpc_value=\${$name}"
+        printf '%s' "$rpc_value" | "$engine" secret create --replace "$rpc_secret" - >/dev/null
+        rpc_value=""
+        echo "rustok: RPC secret '$rpc_secret' stored ($name)"
+    done
 }
 
 # --- commands ----------------------------------------------------------------
@@ -461,23 +482,15 @@ cmd_connect() {
         echo "rustok: warn: $nrun container(s) already use keystore volume '$volume' (each agent session starts one); concurrent writers on one keystore are UNVERIFIED — close extra sessions before starting new ones" 1>&2
     fi
 
-    # RPC secrets FIRST (atomic --replace; `secret rm` is banned here — it
-    # succeeds silently even on a held secret, leaving a no-secret window a
-    # crashed connect would freeze forever), registration second: a failure
-    # between the two leaves the old registration working.
-    if [ "$engine" = "podman" ]; then
-        for name in $(rpc_env_names); do
-            rpc_secret="rustok-rpc-$agent-${name#RUSTOK_RPC_URLS_}"
-            # the name matched ^RUSTOK_RPC_URLS_[A-Z0-9_]*$ — eval is closed;
-            # a builtin printf into stdin keeps the value out of every argv
-            eval "rpc_value=\${$name}"
-            printf '%s' "$rpc_value" | "$engine" secret create --replace "$rpc_secret" - >/dev/null
-            rpc_value=""
-            echo "rustok: RPC secret '$rpc_secret' stored ($name)"
-        done
-    fi
+    # RPC secrets FIRST, registration second: a failure between the two
+    # leaves the old registration working.
+    store_rpc_secrets "$agent"
 
     # The registration argv — also the exact retry command if `add` fails.
+    # Built inline, NOT via a printf-newline-list helper like wallet_run_args:
+    # this argv carries literal -e NAME=value entries, and a value bearing a
+    # newline would corrupt a line-based hand-off (wallet_run_args only ever
+    # passes names, which is why the list channel is safe there).
     set -- mcp add -s user rustok -- "$engine" run -i --rm --init \
         --label rustok=wallet --label "rustok.agent=$agent" \
         -v "$volume:/data"

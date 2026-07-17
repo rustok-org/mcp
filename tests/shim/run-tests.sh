@@ -39,6 +39,7 @@ fresh() {
     STUB_INFO_FAIL=0
     STUB_PS_FAIL=0
     STUB_CLAUDE_ADD_FAIL=0
+    STUB_CLAUDE_REMOVE_FAIL=0
     TEST_PATH="$WORK/bin"
 }
 
@@ -60,6 +61,7 @@ run_shim() {
         STUB_CONTAINERS="$STUB_CONTAINERS" STUB_LEGACY="$STUB_LEGACY" \
         STUB_INFO_FAIL="$STUB_INFO_FAIL" STUB_PS_FAIL="$STUB_PS_FAIL" \
         STUB_CLAUDE_ADD_FAIL="$STUB_CLAUDE_ADD_FAIL" \
+        STUB_CLAUDE_REMOVE_FAIL="$STUB_CLAUDE_REMOVE_FAIL" \
         sh "$SHIM" "$@" 2>&1)" && RC=0 || RC=$?
 }
 
@@ -649,6 +651,66 @@ if assert_exit 1 && assert_has "re-run it manually" \
     && assert_has "claude mcp add -s user rustok"; then
     ok "connect surfaces a failed mcp add with the exact retry command"
 else not_ok "connect surfaces a failed mcp add with the exact retry command"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run"]}}}' >"$WORK/home/.claude.json"
+STUB_CLAUDE_REMOVE_FAIL=1
+run_shim connect claude --force
+if assert_exit 1 && assert_has "registration left unchanged" \
+    && ! grep -q '^claude mcp add' "$WORK/log"; then
+    ok "connect --force with a failing mcp remove dies named, never runs add"
+else not_ok "connect --force with a failing mcp remove dies named, never runs add"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+# a FOREIGN agent's secret sharing the hyphenated prefix: claude-backup is a
+# valid --agent name, its secrets must NEVER leak into claude's container
+printf '%s' 'foreign-url' >"$WORK/state/secret-rustok-rpc-claude-backup-1"
+run_shim connect claude
+if assert_exit 0 \
+    && ! grep -q 'claude-backup' "$WORK/log"; then
+    ok "connect for claude never attaches claude-backup's RPC secret (prefix isolation)"
+else not_ok "connect for claude never attaches claude-backup's RPC secret (prefix isolation)"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+# THREE literals exported as the permutation C,N,A — unsorted BOTH as-is
+# (dash environ = insertion order) and reversed (bash rebuilds environ in
+# reverse) — so on either shell only the shim's own LC_ALL=C sort can
+# produce the expected argv; dropping the sort goes red, not lucky-green.
+# (A 2-name set cannot do this: the reverse of an unsorted pair is sorted.)
+export RUSTOK_RPC_URLS_8453="url-base"
+export RUSTOK_RPC_URLS_1="url-one"
+export RUSTOK_CHAIN_LABELS="mainnet,base"
+export RUSTOK_NETWORK_MODE="live"
+export RUSTOK_ALLOWED_CHAINS="1,8453"
+run_shim connect claude
+unset RUSTOK_RPC_URLS_1 RUSTOK_RPC_URLS_8453 RUSTOK_ALLOWED_CHAINS RUSTOK_CHAIN_LABELS RUSTOK_NETWORK_MODE
+EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --init --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 --secret rustok-rpc-claude-8453,type=env,target=RUSTOK_RPC_URLS_8453 -e RUSTOK_ALLOWED_CHAINS=1,8453 -e RUSTOK_CHAIN_LABELS=mainnet,base -e RUSTOK_NETWORK_MODE=live ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"
+if assert_exit 0 && [ "$(grep '^claude mcp add' "$WORK/log")" = "$EXPECTED" ]; then
+    ok "connect with two chains and three literals: full argv byte-exact in sorted order"
+else not_ok "connect with two chains and three literals: full argv byte-exact in sorted order"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run"]}}}' >"$WORK/home/.claude.json"
+# the secret EXISTS but its env var is NOT exported this run — spec decision #3:
+# the secret store is the source of truth, the registration must still carry it
+printf '%s' 'stored-url' >"$WORK/state/secret-rustok-rpc-claude-1"
+run_shim connect claude --force
+if assert_exit 0 \
+    && grep '^claude mcp add' "$WORK/log" | grep -q -- '--secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1'; then
+    ok "connect --force keeps a stored RPC secret in the registration without its env var"
+else not_ok "connect --force keeps a stored RPC secret in the registration without its env var"; fi
 
 # --- docker parity: init stores a 0600 file, not a podman secret -----------------
 

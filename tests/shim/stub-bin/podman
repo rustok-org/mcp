@@ -63,7 +63,14 @@ case "$cmd" in
                 ;;
             rm) rm -f "${STUB_STATE:?}/secret-$1" ;;
             ls)
-                # secret ls --format '{{.Name}}'
+                # Bare names come ONLY with --format '{{.Name}}' — real podman
+                # without it prints an ID/NAME/DRIVER table, which would break
+                # any caller grepping names; diverging here would hide exactly
+                # that bug class.
+                if [ "${1:-}" != "--format" ] || [ "${2:-}" != "{{.Name}}" ]; then
+                    echo "ID                         NAME        DRIVER      CREATED       UPDATED"
+                    exit 0
+                fi
                 for f in "${STUB_STATE:?}"/secret-*; do
                     [ -f "$f" ] && basename "$f" | sed 's/^secret-//'
                 done
