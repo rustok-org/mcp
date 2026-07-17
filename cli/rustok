@@ -39,9 +39,11 @@ Commands:
   init           create a NEW wallet for an agent (interactive; prints the
                  12-word phrase and approval PIN exactly once — run it in your
                  own terminal, never through an agent)
-  connect        register the wallet as an MCP server with an agent client
-                 (today: rustok connect claude); needs jq; --force replaces
-                 an existing registration
+  connect        register the wallet as an MCP server with an agent client:
+                 rustok connect claude|cursor|hermes (the wallet defaults to
+                 that client's own — --agent overrides); claude/cursor need
+                 jq, hermes needs python3+PyYAML; --force replaces an
+                 existing registration
   start          start the wallet container in the background
   stop           stop the running wallet container
   status         show the running wallet container(s)
@@ -452,47 +454,95 @@ cmd_console() {
 }
 
 cmd_connect() {
-    # Registration probes READ $HOME/.claude.json (jq): `claude mcp get`/`list`
+    # Registration probes READ the client's config file: `claude mcp get`/`list`
     # both health-check, i.e. START a wallet container on the shared keystore
     # just to answer "am I registered?". User-scope only, by design — the shim
-    # manages exactly what it writes (-s user) and never touches other scopes.
-    agent="${AGENT:-claude}"
+    # manages exactly what it writes and never touches other scopes. The wallet
+    # defaults to the CLIENT's own (epic decision #4: every agent gets its own
+    # keystore; sharing one is the unverified multi-writer class).
+    client="${CONNECT_TARGET:-claude}"
+    agent="${AGENT:-$client}"
     volume="$(volume_for "$agent")"
-    cfg="$HOME/.claude.json"
 
-    command -v jq >/dev/null 2>&1 \
-        || die "connect needs jq to read the agent config safely — install it (dnf/apt install jq); no other rustok command uses it"
+    case "$client" in
+        claude | cursor)
+            command -v jq >/dev/null 2>&1 \
+                || die "connect needs jq to read the agent config safely — install it (dnf/apt install jq); no other rustok command uses it"
+            ;;
+        hermes)
+            if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import yaml' 2>/dev/null; then
+                die "connect hermes needs python3 with PyYAML (Hermes itself ships both) — install python3 + PyYAML"
+            fi
+            ;;
+    esac
+    case "$client" in
+        claude) cfg="$HOME/.claude.json" ;;
+        cursor) cfg="$HOME/.cursor/mcp.json" ;;
+        hermes) cfg="$HOME/.hermes/config.yaml" ;;
+    esac
 
     # Differentiated init preflight: a volume without a stored secret is the
     # env-file era — the exact live state Blocker-1 found; a blank machine
     # just needs init.
     if ! secret_present "$agent" 2>/dev/null; then
         if "$engine" volume exists "$volume" 2>/dev/null; then
-            die "wallet volume '$volume' exists but no keyring password is stored — an env-file-era setup. Migrate: rustok init --force (re-enter your password; your keys stay put), then: rustok connect claude --force"
+            die "wallet volume '$volume' exists but no keyring password is stored — an env-file-era setup. Migrate: rustok init --force (re-enter your password; your keys stay put), then: rustok connect $client --force"
         fi
         die "no wallet for agent '$agent' yet — run: rustok init"
     fi
     "$engine" volume exists "$volume" 2>/dev/null \
         || die "no wallet volume '$volume' — run: rustok init"
 
-    # Existence probe, full jq -e contract: 0 = registered; 1 = no entry and
-    # 2 = no config file yet — both FREE (a fresh machine is who this epic is
-    # for); anything else = an unreadable config we refuse to write over.
-    registered=0
-    jq -e '.mcpServers.rustok' "$cfg" >/dev/null 2>&1 || registered=$?
-    case "$registered" in
-        0)
-            [ "$FORCE" -eq 1 ] || die "MCP server 'rustok' is already registered — rerun with --force to replace the registration (RPC secrets refresh either way)"
-            if jq -e '.mcpServers.rustok.args | index("--env-file")' "$cfg" >/dev/null 2>&1; then
-                echo "rustok: replacing an --env-file registration — the plaintext env file itself is NOT deleted; remove it after the new setup is verified" 1>&2
+    # Existence probe. claude/cursor: full jq -e contract — 0 = registered;
+    # 1 = no entry and 2 = no config file yet, both FREE (a fresh machine is
+    # who this epic is for); anything else = an unreadable config we refuse
+    # to write over. hermes: same contract via python (an ABSENT config is a
+    # missing Hermes install, not a fresh state — its config ships with it).
+    registered=1
+    case "$client" in
+        claude | cursor)
+            registered=0
+            jq -e '.mcpServers.rustok' "$cfg" >/dev/null 2>&1 || registered=$?
+            case "$registered" in
+                0)
+                    [ "$FORCE" -eq 1 ] || die "MCP server 'rustok' is already registered — rerun with --force to replace the registration (RPC secrets refresh either way)"
+                    if [ "$client" = "claude" ] && jq -e '.mcpServers.rustok.args | index("--env-file")' "$cfg" >/dev/null 2>&1; then
+                        echo "rustok: replacing an --env-file registration — the plaintext env file itself is NOT deleted; remove it after the new setup is verified" 1>&2
+                    fi
+                    ;;
+                1 | 2) registered=1 ;;
+                *) die "cannot read $cfg (jq exit $registered — broken JSON?) — fix the agent config by hand; connect refuses to write over it" ;;
+            esac
+            if [ "$client" = "claude" ] && jq -e '.mcpServers."rustok-wallet-tui"' "$cfg" >/dev/null 2>&1; then
+                echo "rustok: warn: a doc-era 'rustok-wallet-tui' entry is also registered — remove it: claude mcp remove -s user rustok-wallet-tui" 1>&2
             fi
             ;;
-        1 | 2) ;;
-        *) die "cannot read $cfg (jq exit $registered — broken JSON?) — fix the agent config by hand; connect refuses to write over it" ;;
+        hermes)
+            [ -f "$cfg" ] || die "no Hermes config at $cfg — is Hermes installed?"
+            hrc=0
+            python3 - "$cfg" <<'PYEOF' || hrc=$?
+import sys
+import yaml
+try:
+    cfg = yaml.safe_load(open(sys.argv[1]))
+    if not isinstance(cfg, dict):
+        raise ValueError("top level is not a mapping")
+except Exception as exc:
+    print("unreadable YAML: %s" % exc, file=sys.stderr)
+    sys.exit(3)
+servers = cfg.get("mcp_servers")
+sys.exit(0 if isinstance(servers, dict) and "rustok" in servers else 1)
+PYEOF
+            case "$hrc" in
+                0)
+                    registered=0
+                    [ "$FORCE" -eq 1 ] || die "MCP server 'rustok' is already registered — rerun with --force to replace the registration (RPC secrets refresh either way)"
+                    ;;
+                1) registered=1 ;;
+                *) die "unreadable YAML in $cfg — fix the Hermes config by hand; connect refuses to write over it" ;;
+            esac
+            ;;
     esac
-    if jq -e '.mcpServers."rustok-wallet-tui"' "$cfg" >/dev/null 2>&1; then
-        echo "rustok: warn: a doc-era 'rustok-wallet-tui' entry is also registered — remove it: claude mcp remove -s user rustok-wallet-tui" 1>&2
-    fi
 
     # Multiplicity is born from agent SESSIONS (each one starts a container),
     # and live pre-label containers carry no rustok.agent — so the honest
@@ -509,14 +559,14 @@ cmd_connect() {
     # leaves the old registration working.
     store_rpc_secrets "$agent"
 
-    # The registration argv — also the exact retry command if `add` fails.
+    # The engine-run argv TAIL — one build for every client transport.
     # The header/password/rpc segments come from the same fragment helpers
     # the start path uses (no drift); ONLY the -e NAME=value loop stays
     # inline, because it alone carries arbitrary values a line-based
     # hand-off could not survive.
     reg_rpc_secrets="$(rpc_secret_names "$agent")"
     # shellcheck disable=SC2046  # fragment helpers emit word-split args
-    set -- mcp add -s user rustok -- "$engine" run -i --rm --init \
+    set -- run -i --rm --init \
         $(label_volume_args "$agent") $(password_args_for "$agent") \
         $(printf '%s\n' "$reg_rpc_secrets" | rpc_secret_args "$agent")
     # Non-secret RUSTOK_* config is FROZEN as literal -e values: the agent
@@ -541,6 +591,15 @@ cmd_connect() {
         echo "rustok: note: docker fallback — RPC URLs ride as plain -e in the agent config (second tier; podman delivers them as secrets)" 1>&2
     fi
 
+    case "$client" in
+        claude) connect_write_claude "$@" ;;
+        cursor) connect_write_cursor "$@" ;;
+        hermes) connect_write_hermes "$@" ;;
+    esac
+}
+
+connect_write_claude() {
+    # Transport: the claude CLI owns the write; "$@" is the engine-run tail.
     old_entry=""
     if [ "$registered" -eq 0 ]; then
         # Snapshot BEFORE remove: `claude mcp add` has no replace flag, so
@@ -550,6 +609,7 @@ cmd_connect() {
         claude mcp remove -s user rustok >/dev/null \
             || die "claude mcp remove failed — registration left unchanged"
     fi
+    set -- mcp add -s user rustok -- "$engine" "$@"
     if ! claude "$@"; then
         if [ -n "$old_entry" ] && [ "$old_entry" != "null" ]; then
             echo "rustok: 'claude mcp add' failed AND the old registration is already removed — the wallet is currently NOT registered" 1>&2
@@ -565,6 +625,82 @@ cmd_connect() {
         exit 1
     fi
     echo "rustok: MCP server 'rustok' registered for agent '$agent' ($engine) — restart the agent session to pick it up"
+}
+
+connect_write_cursor() {
+    # No registrar CLI exists for Cursor — the shim owns the file write:
+    # print the old entry as the return path, then ONE atomic tmp+mv (the
+    # previous registration stays valid until the very rename — no
+    # unregistered window at any point).
+    if [ "$registered" -eq 0 ]; then
+        echo "rustok: replacing the previous entry (return path if needed):" 1>&2
+        printf '  %s\n' "$(jq -c '.mcpServers.rustok' "$cfg" 2>/dev/null || true)" 1>&2
+    fi
+    mkdir -p "${cfg%/*}" 2>/dev/null || true
+    if [ ! -f "$cfg" ]; then
+        printf '{}\n' >"$cfg" 2>/dev/null \
+            || die "could not update $cfg — is the directory writable? (nothing was changed)"
+    fi
+    cursor_tmp="$cfg.rustok-tmp"
+    if ! jq --arg cmd "$engine" \
+        '.mcpServers.rustok = {command: $cmd, args: $ARGS.positional}' \
+        --args -- "$@" <"$cfg" >"$cursor_tmp" 2>/dev/null; then
+        rm -f "$cursor_tmp"
+        die "could not update $cfg (write failed) — the existing config is untouched"
+    fi
+    mv "$cursor_tmp" "$cfg" \
+        || die "could not update $cfg (rename failed) — the existing config is untouched"
+    echo "rustok: MCP server 'rustok' registered for Cursor, agent '$agent' ($engine) — reload Cursor to pick it up"
+}
+
+connect_write_hermes() {
+    # No registrar CLI for Hermes either. Plain YAML round-trip (ratified:
+    # comments are not preserved) — backup FIRST, then one atomic tmp+mv;
+    # any failure leaves the live config untouched.
+    hermes_backup="$cfg.rustok-bak-$(date +%Y%m%d-%H%M%S)"
+    cp "$cfg" "$hermes_backup" 2>/dev/null \
+        || die "cannot write backup next to $cfg — is the directory writable? (nothing was changed)"
+    hermes_note="$(python3 - "$cfg" "$engine" "$@" <<'PYEOF'
+import os
+import sys
+import tempfile
+import yaml
+cfg_path, engine = sys.argv[1], sys.argv[2]
+args = sys.argv[3:]
+try:
+    with open(cfg_path) as f:
+        cfg = yaml.safe_load(f) or {}
+    if not isinstance(cfg, dict):
+        raise ValueError("top level is not a mapping")
+except Exception as exc:
+    print("unreadable YAML: %s" % exc, file=sys.stderr)
+    sys.exit(3)
+servers = cfg.get("mcp_servers")
+if not isinstance(servers, dict):
+    servers = {}
+dropped = "rustok-wallet" in servers
+servers.pop("rustok-wallet", None)
+servers["rustok"] = {"command": engine, "args": list(args), "enabled": True}
+cfg["mcp_servers"] = servers
+try:
+    fd, tmp = tempfile.mkstemp(
+        dir=os.path.dirname(os.path.abspath(cfg_path)), prefix=".rustok-tmp-")
+    with os.fdopen(fd, "w") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
+    os.replace(tmp, cfg_path)
+except Exception as exc:
+    print("write failed: %s" % exc, file=sys.stderr)
+    sys.exit(4)
+print("DROPPED" if dropped else "CLEAN")
+PYEOF
+)" || die "could not update $cfg — backup untouched at $hermes_backup"
+    if [ "$hermes_note" = "DROPPED" ]; then
+        echo "rustok: note: legacy 'rustok-wallet' entry (Stage-0 era) replaced by 'rustok'" 1>&2
+    fi
+    if [ -f "$HOME/.hermes/scripts/rustok-mcp-server.py" ]; then
+        echo "rustok: hint: the Stage-0 wrapper is no longer used — remove it: rm ~/.hermes/scripts/rustok-mcp-server.py" 1>&2
+    fi
+    echo "rustok: MCP server 'rustok' registered for Hermes, agent '$agent' ($engine, enabled: true) — restart Hermes to pick it up"
 }
 
 cmd_status() {
@@ -603,6 +739,11 @@ cmd_doctor() {
     else
         echo "info: jq not found — needed only by 'rustok connect' (dnf/apt install jq)"
     fi
+    if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null; then
+        echo "ok: python3+PyYAML present (used only by 'rustok connect hermes')"
+    else
+        echo "info: python3+PyYAML not found — needed only by 'rustok connect hermes'"
+    fi
     # Running wallets.
     ids="$(discover_ids "")"
     # shellcheck disable=SC2086
@@ -634,6 +775,7 @@ cmd_doctor() {
 COMMAND="console"
 AGENT=""
 FORCE=0
+CONNECT_TARGET=""
 
 if [ $# -gt 0 ]; then
     case "$1" in
@@ -645,19 +787,18 @@ if [ $# -gt 0 ]; then
             COMMAND="connect"
             shift
             # the positional target names the agent CLIENT being registered
-            # with; only claude exists today (cursor/hermes = PR-2.3b)
+            # with; the wallet defaults to that client's own (--agent overrides)
             case "${1:-}" in
-                claude) shift ;;
-                cursor | hermes)
-                    echo "rustok: connect $1 is coming in PR-2.3b — today only: rustok connect claude" 1>&2
-                    exit 2
+                claude | cursor | hermes)
+                    CONNECT_TARGET="$1"
+                    shift
                     ;;
                 "" | -*)
-                    echo "rustok: connect needs a target agent client: rustok connect claude" 1>&2
+                    echo "rustok: connect needs a target agent client: rustok connect claude|cursor|hermes" 1>&2
                     exit 2
                     ;;
                 *)
-                    echo "rustok: unknown connect target '$1' (today only: rustok connect claude)" 1>&2
+                    echo "rustok: unknown connect target '$1' (supported: claude, cursor, hermes)" 1>&2
                     exit 2
                     ;;
             esac

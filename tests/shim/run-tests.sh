@@ -30,7 +30,7 @@ fresh() {
     : >"$WORK/log"
     # env hygiene: a previous test's exported wallet config must not leak in
     unset RUSTOK_RPC_URLS_1 RUSTOK_KEYRING_PASSWORD RUSTOK_IMAGE 2>/dev/null || true
-    for tool in sh cat sed head sort awk mkdir basename cut tr rm mv grep env sleep stty; do
+    for tool in sh cat sed head sort awk mkdir basename cut tr rm mv grep env sleep stty date cp; do
         ln -s "$(command -v "$tool")" "$WORK/bin/$tool"
     done
     ln -s "$TESTS_DIR/stub-bin/podman" "$WORK/bin/podman"
@@ -50,6 +50,7 @@ plant_claude_stub() { ln -s "$TESTS_DIR/stub-bin/claude" "$WORK/bin/claude"; }
 # jq is a host tool (like python3 for the pty driver): planted per-test so its
 # ABSENCE stays a testable state, not an accident of the machine.
 plant_jq() { ln -s "$(command -v jq)" "$WORK/bin/jq"; }
+plant_python3() { ln -s "$(command -v python3)" "$WORK/bin/python3"; }
 seed_wallet() {
     printf '%s' pw >"$WORK/state/secret-rustok-keyring-claude"
     : >"$WORK/state/volume-rustok-wallet-tui"
@@ -600,10 +601,10 @@ if assert_exit 0 && assert_has "1 container(s) already use keystore volume 'rust
 else not_ok "connect warns by VOLUME about containers sharing the keystore (agent-label-blind)"; fi
 
 fresh
-run_shim connect cursor
-if assert_exit 2 && assert_has "coming in PR-2.3b"; then
-    ok "connect cursor: named not-yet refusal"
-else not_ok "connect cursor: named not-yet refusal"; fi
+run_shim connect vscode
+if assert_exit 2 && assert_has "unknown connect target 'vscode'"; then
+    ok "connect with an unknown target: named refusal listing the supported set"
+else not_ok "connect with an unknown target: named refusal listing the supported set"; fi
 
 fresh
 run_shim connect
@@ -786,6 +787,223 @@ if assert_exit 1 && assert_has "NOT registered" && assert_has "OLDMARKER" \
     && assert_has "re-run it manually"; then
     ok "connect --force with a failing add says the old entry is gone and prints it back"
 else not_ok "connect --force with a failing add says the old entry is gone and prints it back"; fi
+
+# --- connect cursor: the shim writes ~/.cursor/mcp.json itself (no CLI exists) ---
+
+seed_cursor() {
+    printf '%s' pw >"$WORK/state/secret-rustok-keyring-cursor"
+    : >"$WORK/state/volume-rustok-cursor"
+}
+
+fresh
+plant_claude_stub
+plant_jq
+seed_cursor
+export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
+export RUSTOK_ALLOWED_CHAINS="1"
+run_shim connect cursor
+unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
+CJSON="$(jq -cS '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
+CEXP='{"args":["run","-i","--rm","--init","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=env,target=RUSTOK_KEYRING_PASSWORD","--secret","rustok-rpc-cursor-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"],"command":"podman"}'
+if assert_exit 0 && [ "$CJSON" = "$CEXP" ] \
+    && [ "$(cat "$WORK/state/secret-rustok-rpc-cursor-1")" = "https://rpc.example/with-key" ]; then
+    ok "connect cursor: entry byte-exact (default agent=cursor, own volume, leading-dash args survive)"
+else RC="$RC json=$CJSON"; not_ok "connect cursor: entry byte-exact (default agent=cursor, own volume, leading-dash args survive)"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_cursor
+mkdir -p "$WORK/home/.cursor"
+printf '%s' '{"mcpServers":{"other":{"command":"keepme"}}}' >"$WORK/home/.cursor/mcp.json"
+run_shim connect cursor
+if assert_exit 0 \
+    && [ "$(jq -r '.mcpServers.other.command' "$WORK/home/.cursor/mcp.json")" = "keepme" ] \
+    && jq -e '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" >/dev/null; then
+    ok "connect cursor preserves foreign mcpServers keys"
+else not_ok "connect cursor preserves foreign mcpServers keys"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_cursor
+run_shim connect cursor
+if assert_exit 0 && jq -e '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" >/dev/null 2>&1; then
+    ok "connect cursor creates mcp.json from nothing (fresh machine)"
+else not_ok "connect cursor creates mcp.json from nothing (fresh machine)"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_cursor
+mkdir -p "$WORK/home/.cursor"
+printf '%s' '{"mcpServers":{"rustok":{"command":"old","args":["CURSOROLD"]}}}' >"$WORK/home/.cursor/mcp.json"
+run_shim connect cursor
+CUNCHANGED="$(jq -r '.mcpServers.rustok.command' "$WORK/home/.cursor/mcp.json")"
+if assert_exit 1 && assert_has "already registered" && assert_has "--force" \
+    && [ "$CUNCHANGED" = "old" ]; then
+    ok "connect cursor over an existing entry refuses without --force, file untouched"
+else not_ok "connect cursor over an existing entry refuses without --force, file untouched"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_cursor
+mkdir -p "$WORK/home/.cursor"
+printf '%s' '{"mcpServers":{"rustok":{"command":"old","args":["CURSOROLD"]}}}' >"$WORK/home/.cursor/mcp.json"
+run_shim connect cursor --force
+if assert_exit 0 && assert_has "CURSOROLD" \
+    && [ "$(jq -r '.mcpServers.rustok.command' "$WORK/home/.cursor/mcp.json")" = "podman" ]; then
+    ok "connect cursor --force prints the old entry back and replaces it"
+else not_ok "connect cursor --force prints the old entry back and replaces it"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_cursor
+mkdir -p "$WORK/home/.cursor"
+printf '%s' '{"mcpServers":{' >"$WORK/home/.cursor/mcp.json"
+run_shim connect cursor
+if assert_exit 1 && assert_has "broken JSON" \
+    && [ "$(cat "$WORK/home/.cursor/mcp.json")" = '{"mcpServers":{' ]; then
+    ok "connect cursor over broken JSON: named refusal, file untouched"
+else not_ok "connect cursor over broken JSON: named refusal, file untouched"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_cursor
+mkdir -p "$WORK/home/.cursor"
+printf '%s' '{"mcpServers":{"other":{"command":"keepme"}}}' >"$WORK/home/.cursor/mcp.json"
+chmod 500 "$WORK/home/.cursor"
+run_shim connect cursor
+CAFTER="$(cat "$WORK/home/.cursor/mcp.json")"
+chmod 755 "$WORK/home/.cursor"
+if assert_exit 1 && assert_has "could not update" \
+    && [ "$CAFTER" = '{"mcpServers":{"other":{"command":"keepme"}}}' ]; then
+    ok "connect cursor with an unwritable dir dies named, config intact (atomic write)"
+else not_ok "connect cursor with an unwritable dir dies named, config intact (atomic write)"; fi
+
+# --- connect hermes: YAML round-trip into ~/.hermes/config.yaml -------------------
+
+seed_hermes() {
+    printf '%s' pw >"$WORK/state/secret-rustok-keyring-hermes"
+    : >"$WORK/state/volume-rustok-hermes"
+    mkdir -p "$WORK/home/.hermes"
+    cat >"$WORK/home/.hermes/config.yaml" <<'YEOF'
+model: test-model
+workspace: /tmp/x
+mcp_servers:
+  rustok-wallet:
+    command: python3
+    args: ['["/home/x/wrap.py"]']
+    enabled: false
+  other-srv:
+    command: foo
+    args: [a]
+channels:
+  cli: on
+YEOF
+}
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+seed_hermes
+mkdir -p "$WORK/home/.hermes/scripts"
+: >"$WORK/home/.hermes/scripts/rustok-mcp-server.py"
+run_shim connect hermes
+HCHECK="$("$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF'
+import sys, yaml
+c = yaml.safe_load(open(sys.argv[1]))
+r = c["mcp_servers"]["rustok"]
+assert r["command"] == "podman", r
+assert isinstance(r["args"], list) and r["args"][0] == "run", r
+assert "rustok.agent=hermes" in r["args"] and "rustok-hermes:/data" in r["args"], r
+assert r["enabled"] is True, r
+assert "rustok-wallet" not in c["mcp_servers"]
+assert c["mcp_servers"]["other-srv"]["command"] == "foo"
+assert c["model"] == "test-model" and c["workspace"] == "/tmp/x"
+assert c["channels"] == {"cli": True}
+print("HOK")
+PEOF
+)" || HCHECK="HFAIL"
+if assert_exit 0 && [ "$HCHECK" = "HOK" ] \
+    && assert_has "legacy" && assert_has "rustok-mcp-server.py" \
+    && ls "$WORK/home/.hermes/"config.yaml.rustok-bak-* >/dev/null 2>&1; then
+    ok "connect hermes: real args list, enabled true, legacy dropped+noted, keys survive, backup made, wrapper hint"
+else RC="$RC hcheck=$HCHECK"; not_ok "connect hermes: real args list, enabled true, legacy dropped+noted, keys survive, backup made, wrapper hint"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+seed_hermes
+"$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF'
+import sys, yaml
+p = sys.argv[1]
+c = yaml.safe_load(open(p))
+c["mcp_servers"]["rustok"] = {"command": "old", "args": ["HERMESOLD"], "enabled": True}
+yaml.safe_dump(c, open(p, "w"), sort_keys=False)
+PEOF
+cp "$WORK/home/.hermes/config.yaml" "$WORK/hermes-before"
+run_shim connect hermes
+if assert_exit 1 && assert_has "already registered" && assert_has "--force" \
+    && cmp -s "$WORK/home/.hermes/config.yaml" "$WORK/hermes-before"; then
+    ok "connect hermes over an existing entry refuses without --force, file untouched"
+else not_ok "connect hermes over an existing entry refuses without --force, file untouched"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+printf '%s' pw >"$WORK/state/secret-rustok-keyring-hermes"
+: >"$WORK/state/volume-rustok-hermes"
+mkdir -p "$WORK/home/.hermes"
+printf 'a: [unclosed\n' >"$WORK/home/.hermes/config.yaml"
+run_shim connect hermes
+if assert_exit 1 && assert_has "unreadable YAML" \
+    && ! ls "$WORK/home/.hermes/"config.yaml.rustok-bak-* >/dev/null 2>&1; then
+    ok "connect hermes over broken YAML: named refusal, no backup, no write"
+else not_ok "connect hermes over broken YAML: named refusal, no backup, no write"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_hermes
+# python3 deliberately NOT planted
+run_shim connect hermes
+if assert_exit 1 && assert_has "needs python3"; then
+    ok "connect hermes without python3: named refusal"
+else not_ok "connect hermes without python3: named refusal"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+printf '%s' pw >"$WORK/state/secret-rustok-keyring-hermes"
+: >"$WORK/state/volume-rustok-hermes"
+run_shim connect hermes
+if assert_exit 1 && assert_has "is Hermes installed"; then
+    ok "connect hermes without a Hermes config: named refusal"
+else not_ok "connect hermes without a Hermes config: named refusal"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+seed_hermes
+cp "$WORK/home/.hermes/config.yaml" "$WORK/hermes-before"
+chmod 500 "$WORK/home/.hermes"
+run_shim connect hermes
+HAFTER_OK=0
+cmp -s "$WORK/home/.hermes/config.yaml" "$WORK/hermes-before" && HAFTER_OK=1
+chmod 755 "$WORK/home/.hermes"
+if assert_exit 1 && [ "$HAFTER_OK" = "1" ] \
+    && { assert_has "cannot write backup" || assert_has "could not update"; }; then
+    ok "connect hermes with an unwritable dir dies named, config intact"
+else not_ok "connect hermes with an unwritable dir dies named, config intact"; fi
 
 # --- docker parity: init stores a 0600 file, not a podman secret -----------------
 
