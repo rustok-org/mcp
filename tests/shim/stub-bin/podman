@@ -44,12 +44,42 @@ case "$cmd" in
         case "$sub" in
             exists) [ -f "${STUB_STATE:?}/secret-$1" ] ;;
             create)
+                replace=0
+                if [ "$1" = "--replace" ]; then
+                    replace=1
+                    shift
+                fi
                 name="$1"
+                # real podman refuses a bare create over an existing secret;
+                # only --replace overwrites (atomic — the rm+create window is
+                # exactly what the shim must never have)
+                if [ "$replace" -eq 0 ] && [ -f "${STUB_STATE:?}/secret-$name" ]; then
+                    echo "Error: secret name in use: $name" 1>&2
+                    exit 125
+                fi
                 # value arrives on STDIN ('-'), exactly like real podman
                 cat >"${STUB_STATE:?}/secret-$name"
                 echo "stubsecret-$name"
                 ;;
             rm) rm -f "${STUB_STATE:?}/secret-$1" ;;
+            ls)
+                if [ "${STUB_SECRET_LS_FAIL:-0}" = "1" ]; then
+                    echo "cannot connect to the engine service" 1>&2
+                    exit 125
+                fi
+                # Bare names come ONLY with --format '{{.Name}}' — real podman
+                # without it prints an ID/NAME/DRIVER table, which would break
+                # any caller grepping names; diverging here would hide exactly
+                # that bug class.
+                if [ "${1:-}" != "--format" ] || [ "${2:-}" != "{{.Name}}" ]; then
+                    echo "ID                         NAME        DRIVER      CREATED       UPDATED"
+                    exit 0
+                fi
+                for f in "${STUB_STATE:?}"/secret-*; do
+                    [ -f "$f" ] && basename "$f" | sed 's/^secret-//'
+                done
+                exit 0
+                ;;
             *) echo "stub: unexpected secret sub: $sub" 1>&2 && exit 64 ;;
         esac
         exit $?
@@ -92,7 +122,7 @@ case "$cmd" in
         if [ "$detached" -eq 1 ]; then
             id="detached$(tr -dc 'a-f0-9' </dev/urandom 2>/dev/null | head -c 8 || echo cafe0001)"
             [ -n "$volume" ] && : >"${STUB_STATE:?}/volume-$volume"
-            echo "$id;${labels#;};image=stub-img" >>"${STUB_STATE:?}/containers"
+            echo "$id;${labels#;};volume=$volume;image=stub-img" >>"${STUB_STATE:?}/containers"
             : >"${STUB_STATE:?}/socket-$id"
             echo "$id"
             exit 0
@@ -115,6 +145,9 @@ case "$cmd" in
                 --filter)
                     case "$2" in
                         label=*) filters="$filters ${2#label=}" ;;
+                        # volume filter: entries carry a volume=<name> field,
+                        # entry_has matches it like any other k=v pair
+                        volume=*) filters="$filters $2" ;;
                         name=*) name_filter="${2#name=}" ;;
                     esac
                     shift

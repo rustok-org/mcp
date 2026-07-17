@@ -39,6 +39,9 @@ Commands:
   init           create a NEW wallet for an agent (interactive; prints the
                  12-word phrase and approval PIN exactly once — run it in your
                  own terminal, never through an agent)
+  connect        register the wallet as an MCP server with an agent client
+                 (today: rustok connect claude); needs jq; --force replaces
+                 an existing registration
   start          start the wallet container in the background
   stop           stop the running wallet container
   status         show the running wallet container(s)
@@ -48,15 +51,18 @@ Commands:
 
 Options:
   --agent <name>   the agent this wallet belongs to (default: claude)
-  --force          init only: re-store the keyring password secret when it
-                   already exists (the keystore volume is never touched)
+  --force          init: re-store the keyring password secret when it already
+                   exists (the keystore volume is never touched);
+                   connect: replace an existing MCP registration
 
 Environment:
   RUSTOK_IMAGE       wallet image override
-  RUSTOK_RPC_URLS_*  forwarded to `start` (never the keyring password). NOTE:
-                     until `rustok connect` lands, a keyed RPC URL is passed by
-                     name and is visible in `podman inspect` — move provider
-                     keys to a secret when connect is available.
+  RUSTOK_RPC_URLS_*  chain RPC URLs. `connect` stores each one as a per-agent
+                     podman secret (rustok-rpc-<agent>-<chain>) and both the
+                     registration and `start` deliver through that secret —
+                     a keyed URL stays out of argv, agent configs and
+                     `podman inspect`. Other RUSTOK_* config is frozen into
+                     the registration as literal values at connect time.
 EOF
 }
 
@@ -175,15 +181,69 @@ rustok_env_names() {
     # The keyring password is deliberately excluded: it travels only as a
     # secret/_FILE, and a stray env var would win over the stored secret and
     # cause mismatched-unlock mysteries. RUSTOK_IMAGE is the shim's own knob.
-    #
-    # INTERIM (epic escalation #2): a keyed RPC URL is a second-class secret and
-    # the epic ratified delivering it as a podman `--secret rustok-rpc-<agent>`.
-    # That secret is created by `connect` (PR-2.3a), which does not exist yet, so
-    # `start` forwards RUSTOK_RPC_URLS_* by name for now — the value is out of
-    # argv/history but visible in `podman inspect Config.Env`. PR-2.3a moves it to
-    # a secret. Not fund/seed exposure (same-user inspect); documented, not silent.
+    # Sorted so every argv built from this list is deterministic.
     env | sed -n 's/^\(RUSTOK_[A-Z0-9_]*\)=.*/\1/p' \
-        | grep -v -E '^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE)$' || true
+        | grep -v -E '^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE)$' | LC_ALL=C sort || true
+}
+
+rpc_env_names() {
+    # The RPC subset of the environment — each one is a second-class secret
+    # (provider key in the URL) and gets its own per-agent podman secret.
+    env | sed -n 's/^\(RUSTOK_RPC_URLS_[A-Z0-9_]*\)=.*/\1/p' | LC_ALL=C sort || true
+}
+
+rpc_secret_names() {
+    # Existing per-agent RPC secrets (podman store only; docker has no store —
+    # its RPC rides as an honest literal -e, the documented second tier).
+    # ANCHORED both ways: a bare prefix grep would let agent 'claude' swallow
+    # 'rustok-rpc-claude-backup-1' (agent claude-backup's provider key — a
+    # cross-agent leak); chain suffixes are [A-Z0-9_] by construction
+    # (rpc_env_names), so the tail anchor rejects any hyphenated agent name.
+    [ "$engine" = "podman" ] || return 0
+    # Engine status is checked SEPARATELY from the grep: in one pipeline the
+    # exit status belongs to sort (0 on empty input), so a dead secret store
+    # would silently read as "no secrets" — and on podman the RPC URL rides
+    # ONLY this channel, so the caller would go on without RPC at all.
+    rpc_ls_out="$("$engine" secret ls --format '{{.Name}}' 2>/dev/null)" \
+        || die "'$engine' failed listing secrets — is the service running? (try: rustok doctor)"
+    printf '%s\n' "$rpc_ls_out" | grep -E "^rustok-rpc-$1-[A-Z0-9_]+$" | LC_ALL=C sort || true
+}
+
+label_volume_args() {
+    # Shared header of the agent-run argv (registration AND detached start) —
+    # kept in ONE place: label drift is a proven production bug class (the
+    # live pre-label containers are invisible to two-label discovery today).
+    # Safe as a word-split fragment: the agent passed the charset gate and
+    # the volume name is ours — no arbitrary values (unlike the -e NAME=value
+    # loop, which MUST stay inline at its call sites).
+    echo "--label rustok=wallet --label rustok.agent=$1 -v $(volume_for "$1"):/data"
+}
+
+rpc_secret_args() {
+    # stdin: anchored secret names, one per line ($1: agent); emits the
+    # --secret fragment both argv builders splice in verbatim.
+    while IFS= read -r rpc_secret; do
+        [ -n "$rpc_secret" ] || continue
+        printf ' --secret %s,type=env,target=RUSTOK_RPC_URLS_%s' \
+            "$rpc_secret" "${rpc_secret#rustok-rpc-"$1"-}"
+    done
+}
+
+store_rpc_secrets() {
+    # Every RUSTOK_RPC_URLS_<chain> in the environment becomes the per-agent
+    # secret rustok-rpc-<agent>-<chain>. Atomic --replace ONLY: `secret rm`
+    # succeeds silently even on a held secret, leaving a no-secret window a
+    # crashed caller would freeze forever. podman-only (see rpc_secret_names).
+    [ "$engine" = "podman" ] || return 0
+    for name in $(rpc_env_names); do
+        rpc_secret="rustok-rpc-$1-${name#RUSTOK_RPC_URLS_}"
+        # the name matched ^RUSTOK_RPC_URLS_[A-Z0-9_]*$ — eval is closed;
+        # a builtin printf into stdin keeps the value out of every argv
+        eval "rpc_value=\${$name}"
+        printf '%s' "$rpc_value" | "$engine" secret create --replace "$rpc_secret" - >/dev/null
+        rpc_value=""
+        echo "rustok: RPC secret '$rpc_secret' stored ($name)"
+    done
 }
 
 # --- commands ----------------------------------------------------------------
@@ -282,12 +342,24 @@ wallet_run_args() {
     # NEVER --name: labels only (that is the whole point of the label model).
     agent="$1"
     volume="$(volume_for "$agent")"
-    set -- run -d -i --rm --init \
-        --label rustok=wallet --label "rustok.agent=$agent" \
-        -v "$volume:/data"
+    rpc_secrets="$(rpc_secret_names "$agent")"
+    # shellcheck disable=SC2046  # label_volume_args emits a word-split fragment
+    set -- run -d -i --rm --init $(label_volume_args "$agent")
     for name in $(rustok_env_names); do
+        case "$name" in
+            RUSTOK_RPC_URLS_*)
+                # a `connect`-created secret owns this URL — the env
+                # name-forward stays only for pre-connect setups
+                if printf '%s\n' "$rpc_secrets" \
+                    | grep -qx "rustok-rpc-$agent-${name#RUSTOK_RPC_URLS_}"; then
+                    continue
+                fi
+                ;;
+        esac
         set -- "$@" -e "$name"
     done
+    # shellcheck disable=SC2046
+    set -- "$@" $(printf '%s\n' "$rpc_secrets" | rpc_secret_args "$agent")
     # shellcheck disable=SC2046
     set -- "$@" $(password_args_for "$agent") "$(image_ref)"
     printf '%s\n' "$@"
@@ -379,6 +451,122 @@ cmd_console() {
     esac
 }
 
+cmd_connect() {
+    # Registration probes READ $HOME/.claude.json (jq): `claude mcp get`/`list`
+    # both health-check, i.e. START a wallet container on the shared keystore
+    # just to answer "am I registered?". User-scope only, by design — the shim
+    # manages exactly what it writes (-s user) and never touches other scopes.
+    agent="${AGENT:-claude}"
+    volume="$(volume_for "$agent")"
+    cfg="$HOME/.claude.json"
+
+    command -v jq >/dev/null 2>&1 \
+        || die "connect needs jq to read the agent config safely — install it (dnf/apt install jq); no other rustok command uses it"
+
+    # Differentiated init preflight: a volume without a stored secret is the
+    # env-file era — the exact live state Blocker-1 found; a blank machine
+    # just needs init.
+    if ! secret_present "$agent" 2>/dev/null; then
+        if "$engine" volume exists "$volume" 2>/dev/null; then
+            die "wallet volume '$volume' exists but no keyring password is stored — an env-file-era setup. Migrate: rustok init --force (re-enter your password; your keys stay put), then: rustok connect claude --force"
+        fi
+        die "no wallet for agent '$agent' yet — run: rustok init"
+    fi
+    "$engine" volume exists "$volume" 2>/dev/null \
+        || die "no wallet volume '$volume' — run: rustok init"
+
+    # Existence probe, full jq -e contract: 0 = registered; 1 = no entry and
+    # 2 = no config file yet — both FREE (a fresh machine is who this epic is
+    # for); anything else = an unreadable config we refuse to write over.
+    registered=0
+    jq -e '.mcpServers.rustok' "$cfg" >/dev/null 2>&1 || registered=$?
+    case "$registered" in
+        0)
+            [ "$FORCE" -eq 1 ] || die "MCP server 'rustok' is already registered — rerun with --force to replace the registration (RPC secrets refresh either way)"
+            if jq -e '.mcpServers.rustok.args | index("--env-file")' "$cfg" >/dev/null 2>&1; then
+                echo "rustok: replacing an --env-file registration — the plaintext env file itself is NOT deleted; remove it after the new setup is verified" 1>&2
+            fi
+            ;;
+        1 | 2) ;;
+        *) die "cannot read $cfg (jq exit $registered — broken JSON?) — fix the agent config by hand; connect refuses to write over it" ;;
+    esac
+    if jq -e '.mcpServers."rustok-wallet-tui"' "$cfg" >/dev/null 2>&1; then
+        echo "rustok: warn: a doc-era 'rustok-wallet-tui' entry is also registered — remove it: claude mcp remove -s user rustok-wallet-tui" 1>&2
+    fi
+
+    # Multiplicity is born from agent SESSIONS (each one starts a container),
+    # and live pre-label containers carry no rustok.agent — so the honest
+    # domain is the VOLUME, not the label pair.
+    nrun=0
+    for id in $("$engine" ps -q --filter "volume=$volume" 2>/dev/null || true); do
+        nrun=$((nrun + 1))
+    done
+    if [ "$nrun" -gt 0 ]; then
+        echo "rustok: warn: $nrun container(s) already use keystore volume '$volume' (each agent session starts one); concurrent writers on one keystore are UNVERIFIED — close extra sessions before starting new ones" 1>&2
+    fi
+
+    # RPC secrets FIRST, registration second: a failure between the two
+    # leaves the old registration working.
+    store_rpc_secrets "$agent"
+
+    # The registration argv — also the exact retry command if `add` fails.
+    # The header/password/rpc segments come from the same fragment helpers
+    # the start path uses (no drift); ONLY the -e NAME=value loop stays
+    # inline, because it alone carries arbitrary values a line-based
+    # hand-off could not survive.
+    reg_rpc_secrets="$(rpc_secret_names "$agent")"
+    # shellcheck disable=SC2046  # fragment helpers emit word-split args
+    set -- mcp add -s user rustok -- "$engine" run -i --rm --init \
+        $(label_volume_args "$agent") $(password_args_for "$agent") \
+        $(printf '%s\n' "$reg_rpc_secrets" | rpc_secret_args "$agent")
+    # Non-secret RUSTOK_* config is FROZEN as literal -e values: the agent
+    # client launches this command from ITS environment, not your shell —
+    # a name-only -e would inherit nothing. Change a value → re-run connect.
+    tier_note=0
+    for name in $(rustok_env_names); do
+        case "$name" in
+            RUSTOK_RPC_URLS_*)
+                if [ "$engine" = "podman" ]; then
+                    continue # rides the secret built above
+                fi
+                tier_note=1 # docker: honest bare -e, the documented second tier
+                ;;
+        esac
+        eval "env_value=\${$name}"
+        set -- "$@" -e "$name=$env_value"
+        env_value=""
+    done
+    set -- "$@" "$(image_ref)"
+    if [ "$tier_note" -eq 1 ]; then
+        echo "rustok: note: docker fallback — RPC URLs ride as plain -e in the agent config (second tier; podman delivers them as secrets)" 1>&2
+    fi
+
+    old_entry=""
+    if [ "$registered" -eq 0 ]; then
+        # Snapshot BEFORE remove: `claude mcp add` has no replace flag, so
+        # remove→add is forced — and a failed add would otherwise leave the
+        # wallet silently unregistered with no way back but memory.
+        old_entry="$(jq -c '.mcpServers.rustok' "$cfg" 2>/dev/null || true)"
+        claude mcp remove -s user rustok >/dev/null \
+            || die "claude mcp remove failed — registration left unchanged"
+    fi
+    if ! claude "$@"; then
+        if [ -n "$old_entry" ] && [ "$old_entry" != "null" ]; then
+            echo "rustok: 'claude mcp add' failed AND the old registration is already removed — the wallet is currently NOT registered" 1>&2
+            echo "rustok: previous entry (restore by hand under .mcpServers.rustok in $cfg):" 1>&2
+            printf '  %s\n' "$old_entry" 1>&2
+            echo "rustok: or re-run it manually:" 1>&2
+        else
+            echo "rustok: 'claude mcp add' failed — re-run it manually:" 1>&2
+        fi
+        printf '  claude' 1>&2
+        for arg in "$@"; do printf ' %s' "$arg" 1>&2; done
+        printf '\n' 1>&2
+        exit 1
+    fi
+    echo "rustok: MCP server 'rustok' registered for agent '$agent' ($engine) — restart the agent session to pick it up"
+}
+
 cmd_status() {
     echo "engine: $engine ($CONFIG_FILE)"
     ids="$(discover_ids "$AGENT")"
@@ -410,6 +598,11 @@ cmd_doctor() {
         *":$HOME/.local/bin:"*) echo "ok: ~/.local/bin is on PATH" ;;
         *) echo "warn: ~/.local/bin is NOT on PATH — the installer puts rustok there; add it to your shell profile" ;;
     esac
+    if command -v jq >/dev/null 2>&1; then
+        echo "ok: jq present (used only by 'rustok connect')"
+    else
+        echo "info: jq not found — needed only by 'rustok connect' (dnf/apt install jq)"
+    fi
     # Running wallets.
     ids="$(discover_ids "")"
     # shellcheck disable=SC2086
@@ -448,6 +641,27 @@ if [ $# -gt 0 ]; then
             COMMAND="$1"
             shift
             ;;
+        connect)
+            COMMAND="connect"
+            shift
+            # the positional target names the agent CLIENT being registered
+            # with; only claude exists today (cursor/hermes = PR-2.3b)
+            case "${1:-}" in
+                claude) shift ;;
+                cursor | hermes)
+                    echo "rustok: connect $1 is coming in PR-2.3b — today only: rustok connect claude" 1>&2
+                    exit 2
+                    ;;
+                "" | -*)
+                    echo "rustok: connect needs a target agent client: rustok connect claude" 1>&2
+                    exit 2
+                    ;;
+                *)
+                    echo "rustok: unknown connect target '$1' (today only: rustok connect claude)" 1>&2
+                    exit 2
+                    ;;
+            esac
+            ;;
         help | --help | -h)
             usage
             exit 0
@@ -481,7 +695,10 @@ while [ $# -gt 0 ]; do
             shift 2
             ;;
         --force)
-            [ "$COMMAND" = "init" ] || die "--force is an init-only flag"
+            case "$COMMAND" in
+                init | connect) ;;
+                *) die "--force is an init/connect-only flag" ;;
+            esac
             FORCE=1
             shift
             ;;
@@ -499,6 +716,7 @@ case "$COMMAND" in
     status) cmd_status ;;
     doctor) cmd_doctor ;;
     init) cmd_init ;;
+    connect) cmd_connect ;;
     start) cmd_start ;;
     stop) cmd_stop ;;
 esac

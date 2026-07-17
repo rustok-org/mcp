@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`rustok connect claude`** — one-command MCP registration: builds the
+  `claude mcp add -s user rustok` invocation (both labels, per-agent volume,
+  keyring secret, RPC secrets, frozen `-e` config, image), with named
+  refusals for every broken precondition (no init, env-file-era volume →
+  migration path, already registered without `--force`, broken agent
+  config JSON, missing jq) and a volume-domain warning when containers
+  already share the keystore.
+- **Per-chain RPC secrets** — `connect` stores every `RUSTOK_RPC_URLS_<chain>`
+  as a podman secret `rustok-rpc-<agent>-<chain>` (atomic
+  `secret create --replace`; `secret rm` is banned — it succeeds silently
+  even on a held secret) and both the registration and `rustok start`
+  deliver the URL through the secret, closing the documented
+  inspect-visibility interim. Docker fallback keeps the honest literal
+  `-e` (documented second tier).
+
+### Changed
+- Registration existence is probed by reading `$HOME/.claude.json` (jq,
+  read-only; user-scope only) — never `claude mcp get`/`list`, which
+  health-check and thereby start a wallet container on the shared keystore.
+
 ## [0.7.1] — 2026-07-15
 
 ### Fixed
