@@ -500,11 +500,7 @@ cmd_connect() {
             fi
             ;;
     esac
-    case "$client" in
-        claude) cfg="$HOME/.claude.json" ;;
-        cursor) cfg="$HOME/.cursor/mcp.json" ;;
-        hermes) cfg="$HOME/.hermes/config.yaml" ;;
-    esac
+    cfg="$(client_cfg_for "$client")"
 
     # Differentiated init preflight: a volume without a stored secret is the
     # env-file era — the exact live state Blocker-1 found; a blank machine
@@ -1059,6 +1055,12 @@ PYEOF
     fi
     # Last: everything above still needed the engine pin.
     rm -rf "$CONFIG_DIR" 2>/dev/null || true
+    # This regex is as WIDE as the whole namespace the shim could ever create
+    # (per-agent `rustok-<name>` + the historical `rustok-wallet-tui`) — so an
+    # unrelated `rustok-*` volume (e.g. a dev of this very repo) would land in
+    # the list too. Mitigation (same prefix posture as the secret sweep): the
+    # FULL list is printed before the literal confirmation below, so a human
+    # sees every name before any deletion. Do not narrow blindly.
     un_vols="$("$engine" volume ls --format '{{.Name}}' 2>/dev/null | grep -E '^(rustok-wallet-tui|rustok-[A-Za-z0-9][A-Za-z0-9_-]*)$' || true)"
     if [ -z "$un_vols" ]; then
         echo "rustok: uninstall complete — no keystore volumes found"
