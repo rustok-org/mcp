@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`rustok update`** — pulls the current wallet image FIRST (a broken pull
+  stops the run before any config is touched), then re-registers every
+  rustok MCP entry across claude/cursor/hermes. Each client keeps its own
+  wallet: the agent is read back out of the entry's own `rustok.agent`
+  label (self-healing — no side-car state to go stale) and passes the same
+  charset gate as `--agent`. The replaced entry is printed per client; a
+  running wallet keeps the old image until its agent's next session start.
+  The shim itself does not self-update — re-run the installer.
+- **`rustok uninstall`** — data-safe teardown in reverse install order:
+  deregisters from all three clients (foreign config keys untouched;
+  hermes gets a timestamped backup), stops running wallets, removes the
+  `rustok-keyring-*`/`rustok-rpc-*` secrets (or the docker password
+  files), removes the installer's marked PATH block (`# >>> rustok
+  installer >>>` … `# <<< rustok installer <<<` — the 3.2 contract; no
+  markers, no touching a shell profile) and `~/.local/bin/rustok`.
+  **Keystore volumes are NEVER touched** without `--purge-keys` AND its
+  interactive `delete my keys` confirmation read from /dev/tty (an agent
+  or a pipe gets a named refusal) — the one gated road to the keys.
+- **Old-entry print on every replace** — the claude writer now prints the
+  previous entry on a successful `--force` replace too (it used to print
+  only when the re-add failed), and the hermes writer prints the replaced
+  `rustok` block before writing (it used to rely on the backup file
+  alone): one recovery path across all three writers, so a routine
+  `update` can never swallow a hand-tuned entry silently.
 - **`rustok connect cursor` / `rustok connect hermes`** — the remaining two
   clients get the one-command registration. Cursor: a jq write into
   `~/.cursor/mcp.json` (no registrar CLI exists; atomic tmp+mv, the old

@@ -85,9 +85,41 @@ case "$cmd" in
         exit $?
         ;;
     volume)
-        [ "$1" = "exists" ] || { echo "stub: unexpected volume sub: $1" 1>&2; exit 64; }
-        [ -f "${STUB_STATE:?}/volume-$2" ]
+        sub="$1"
+        shift
+        case "$sub" in
+            exists)
+                [ -f "${STUB_STATE:?}/volume-$1" ]
+                ;;
+            ls)
+                # Same --format contract as `secret ls`: bare names ONLY with
+                # '{{.Name}}' — real podman prints a DRIVER/NAME table without
+                # it, and diverging here would hide exactly that caller bug.
+                if [ "${1:-}" != "--format" ] || [ "${2:-}" != "{{.Name}}" ]; then
+                    echo "DRIVER      VOLUME NAME"
+                    exit 0
+                fi
+                for f in "${STUB_STATE:?}"/volume-*; do
+                    [ -f "$f" ] && basename "$f" | sed 's/^volume-//'
+                done
+                exit 0
+                ;;
+            rm)
+                [ "${1:-}" = "--" ] && shift
+                rm -f "${STUB_STATE:?}/volume-$1"
+                echo "$1"
+                ;;
+            *) echo "stub: unexpected volume sub: $sub" 1>&2 && exit 64 ;;
+        esac
         exit $?
+        ;;
+    pull)
+        if [ "${STUB_PULL_FAIL:-0}" = "1" ]; then
+            echo "Error: initializing source: pinging container registry (stub)" 1>&2
+            exit 125
+        fi
+        echo "stub-pulled $1"
+        exit 0
         ;;
     stop)
         if [ -n "${STUB_STATE:-}" ] && [ -f "$STUB_STATE/containers" ]; then

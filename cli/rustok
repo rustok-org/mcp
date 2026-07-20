@@ -48,6 +48,14 @@ Commands:
   stop           stop the running wallet container
   status         show the running wallet container(s)
   doctor         diagnose the setup (engine, config, PATH, leftovers)
+  update         pull the current wallet image and re-register every rustok
+                 MCP entry (each client keeps its own wallet, read from the
+                 entry itself; the old entry is printed before replacing);
+                 the shim itself does not self-update — re-run the installer
+  uninstall      data-safe teardown: deregister from agents, stop wallets,
+                 remove secrets, the installer PATH block and the shim.
+                 Keystore volumes (your keys) are NEVER touched without
+                 --purge-keys and its interactive confirmation
   help           show this help
   version        show the shim version
 
@@ -56,6 +64,10 @@ Options:
   --force          init: re-store the keyring password secret when it already
                    exists (the keystore volume is never touched);
                    connect: replace an existing MCP registration
+  --purge-keys     uninstall only: ALSO delete the keystore volumes after an
+                   interactive confirmation on your terminal — this destroys
+                   the keys; without your seed phrase backup the funds are
+                   unrecoverable
 
 Environment:
   RUSTOK_IMAGE       wallet image override
@@ -156,6 +168,19 @@ volume_for() {
 
 secret_for() { echo "rustok-keyring-$1"; }
 password_file_for() { echo "$CONFIG_DIR/keyring-pass-$1"; }
+
+valid_agent_name() {
+    # ONE charset gate for every road an agent name travels in on: the --agent
+    # option AND the rustok.agent label `update` reads back out of a client
+    # config. The name becomes a container label, a volume name and (unquoted)
+    # a run-argv token — anything outside this set could inject flags/args
+    # into `podman run`. (Threat model: pasted untrusted commands / a hand-
+    # edited registration.)
+    case "$1" in
+        [a-zA-Z0-9]*[!a-zA-Z0-9_-]* | [!a-zA-Z0-9]* | "") return 1 ;;
+    esac
+    return 0
+}
 
 image_ref() { echo "${RUSTOK_IMAGE:-$DEFAULT_IMAGE}"; }
 
@@ -606,6 +631,14 @@ connect_write_claude() {
         # remove→add is forced — and a failed add would otherwise leave the
         # wallet silently unregistered with no way back but memory.
         old_entry="$(jq -c '.mcpServers.rustok' "$cfg" 2>/dev/null || true)"
+        if [ -n "$old_entry" ] && [ "$old_entry" != "null" ]; then
+            # Print it on the SUCCESSFUL replace path too, not only on a
+            # failed add: `update` replaces routinely, and a hand-tuned entry
+            # must never vanish silently (one recovery path in all three
+            # writers — Gate-1 2.3c).
+            echo "rustok: replacing the previous entry (return path if needed):" 1>&2
+            printf '  %s\n' "$old_entry" 1>&2
+        fi
         claude mcp remove -s user rustok >/dev/null \
             || die "claude mcp remove failed — registration left unchanged"
     fi
@@ -678,6 +711,15 @@ except Exception as exc:
 servers = cfg.get("mcp_servers")
 if not isinstance(servers, dict):
     servers = {}
+old = servers.get("rustok")
+if old is not None:
+    # One recovery path across all three writers (Gate-1 2.3c): the replaced
+    # entry is printed, never swallowed — the backup file holds it too, but
+    # a routine `update` must SAY that something was overwritten.
+    sys.stderr.write("rustok: replacing the previous entry (return path if needed):\n")
+    for line in yaml.safe_dump(
+            {"rustok": old}, sort_keys=False, allow_unicode=True).splitlines():
+        sys.stderr.write("  %s\n" % line)
 dropped = "rustok-wallet" in servers
 servers.pop("rustok-wallet", None)
 servers["rustok"] = {"command": engine, "args": list(args), "enabled": True}
@@ -770,16 +812,287 @@ cmd_doctor() {
     return "$failed"
 }
 
+client_cfg_for() {
+    # The one map from a client name to its MCP config file — connect, update
+    # and uninstall must never disagree on where a registration lives.
+    case "$1" in
+        claude) echo "$HOME/.claude.json" ;;
+        cursor) echo "$HOME/.cursor/mcp.json" ;;
+        hermes) echo "$HOME/.hermes/config.yaml" ;;
+    esac
+}
+
+cmd_update() {
+    # Pull FIRST: a broken pull must stop the run before any registration is
+    # touched — a half-updated set of agent configs is worse than a stale one.
+    "$engine" pull "$(image_ref)" >/dev/null \
+        || die "image pull failed — no registration was touched (network? registry? try: rustok doctor)"
+    ids="$(discover_ids "")"
+    # shellcheck disable=SC2086
+    set -- $ids
+    if [ $# -gt 0 ]; then
+        echo "rustok: note: $# running wallet(s) ($(agent_list "$@")) keep the previous image until their agent's next session start (or: rustok stop)" 1>&2
+    fi
+    updated=0
+    upd_failed=0
+    for upd_client in claude cursor hermes; do
+        upd_cfg="$(client_cfg_for "$upd_client")"
+        [ -f "$upd_cfg" ] || continue
+        upd_agent=""
+        upd_probe=""
+        case "$upd_client" in
+            claude | cursor)
+                if ! command -v jq >/dev/null 2>&1; then
+                    echo "rustok: warn: cannot probe $upd_cfg without jq — skipped (install jq and re-run)" 1>&2
+                    continue
+                fi
+                jq -e '.mcpServers.rustok' "$upd_cfg" >/dev/null 2>&1 || continue
+                upd_agent="$(jq -r '.mcpServers.rustok.args // [] | map(select(type == "string" and startswith("rustok.agent="))) | first // empty' "$upd_cfg" 2>/dev/null | sed 's/^rustok\.agent=//')"
+                ;;
+            hermes)
+                if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import yaml' 2>/dev/null; then
+                    echo "rustok: warn: cannot probe $upd_cfg without python3+PyYAML — skipped" 1>&2
+                    continue
+                fi
+                upd_probe="$(python3 - "$upd_cfg" <<'PYEOF'
+import sys
+import yaml
+try:
+    cfg = yaml.safe_load(open(sys.argv[1]))
+    if not isinstance(cfg, dict):
+        raise ValueError("top level is not a mapping")
+except Exception:
+    print("UNREADABLE")
+    sys.exit(0)
+servers = cfg.get("mcp_servers")
+entry = servers.get("rustok") if isinstance(servers, dict) else None
+if not isinstance(entry, dict):
+    print("ABSENT")
+    sys.exit(0)
+for arg in entry.get("args") or []:
+    if isinstance(arg, str) and arg.startswith("rustok.agent="):
+        print("AGENT %s" % arg.split("=", 1)[1])
+        sys.exit(0)
+print("NOAGENT")
+PYEOF
+)"
+                case "$upd_probe" in
+                    ABSENT) continue ;;
+                    "AGENT "*) upd_agent="${upd_probe#AGENT }" ;;
+                    UNREADABLE)
+                        echo "rustok: $upd_client: unreadable YAML in $upd_cfg — fix it by hand, then: rustok connect hermes --force" 1>&2
+                        upd_failed=$((upd_failed + 1))
+                        continue
+                        ;;
+                esac
+                ;;
+        esac
+        if [ -z "$upd_agent" ]; then
+            echo "rustok: $upd_client: registration found but no rustok.agent label inside it — re-run: rustok connect $upd_client --force" 1>&2
+            upd_failed=$((upd_failed + 1))
+            continue
+        fi
+        if ! valid_agent_name "$upd_agent"; then
+            echo "rustok: $upd_client: invalid agent name in the registration — refused (fix it: rustok connect $upd_client --force)" 1>&2
+            upd_failed=$((upd_failed + 1))
+            continue
+        fi
+        # A subshell on purpose: cmd_connect die()s on its own errors, and one
+        # client's failure must not abort the others (summary + exit 1 below).
+        if (CONNECT_TARGET="$upd_client" && AGENT="$upd_agent" && FORCE=1 && cmd_connect); then
+            updated=$((updated + 1))
+        else
+            echo "rustok: $upd_client: re-registration FAILED — restore from the printed old entry if needed, or re-run: rustok connect $upd_client --force" 1>&2
+            upd_failed=$((upd_failed + 1))
+        fi
+    done
+    if [ "$updated" -eq 0 ] && [ "$upd_failed" -eq 0 ]; then
+        echo "rustok: nothing to update — no rustok registration found (first: rustok connect claude|cursor|hermes)"
+    else
+        upd_tail=""
+        [ "$upd_failed" -gt 0 ] && upd_tail=", $upd_failed FAILED"
+        echo "rustok: updated $updated client(s)$upd_tail"
+    fi
+    echo "rustok: the shim itself does not self-update — re-run the installer (docs/INSTALL.md)"
+    [ "$upd_failed" -eq 0 ] || exit 1
+}
+
+cmd_uninstall() {
+    # Data-safe teardown, the install in reverse: registrations, containers,
+    # secrets, PATH block, the shim itself. Keystore volumes = the keys =
+    # the money: NEVER touched here — only by the doubly-gated purge below.
+    for un_client in claude cursor hermes; do
+        un_cfg="$(client_cfg_for "$un_client")"
+        [ -f "$un_cfg" ] || continue
+        case "$un_client" in
+            claude)
+                command -v jq >/dev/null 2>&1 || {
+                    echo "rustok: warn: cannot probe $un_cfg without jq — if registered, remove it: claude mcp remove -s user rustok" 1>&2
+                    continue
+                }
+                jq -e '.mcpServers.rustok' "$un_cfg" >/dev/null 2>&1 || continue
+                if ! command -v claude >/dev/null 2>&1; then
+                    echo "rustok: warn: claude CLI not found — remove the entry yourself: claude mcp remove -s user rustok" 1>&2
+                elif claude mcp remove -s user rustok >/dev/null 2>&1; then
+                    echo "rustok: deregistered from claude"
+                else
+                    echo "rustok: warn: 'claude mcp remove' failed — remove by hand: claude mcp remove -s user rustok" 1>&2
+                fi
+                ;;
+            cursor)
+                command -v jq >/dev/null 2>&1 || {
+                    echo "rustok: warn: cannot edit $un_cfg without jq — remove .mcpServers.rustok by hand" 1>&2
+                    continue
+                }
+                jq -e '.mcpServers.rustok' "$un_cfg" >/dev/null 2>&1 || continue
+                un_tmp="$un_cfg.rustok-tmp"
+                if jq 'del(.mcpServers.rustok)' <"$un_cfg" >"$un_tmp" 2>/dev/null \
+                    && mv "$un_tmp" "$un_cfg"; then
+                    echo "rustok: deregistered from cursor"
+                else
+                    rm -f "$un_tmp"
+                    echo "rustok: warn: could not update $un_cfg — remove .mcpServers.rustok by hand" 1>&2
+                fi
+                ;;
+            hermes)
+                if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import yaml' 2>/dev/null; then
+                    echo "rustok: warn: cannot edit $un_cfg without python3+PyYAML — remove mcp_servers.rustok by hand" 1>&2
+                    continue
+                fi
+                un_hrc=0
+                python3 - "$un_cfg" >/dev/null 2>&1 <<'PYEOF' || un_hrc=$?
+import sys
+import yaml
+try:
+    cfg = yaml.safe_load(open(sys.argv[1]))
+    if not isinstance(cfg, dict):
+        raise ValueError("top level is not a mapping")
+except Exception:
+    sys.exit(3)
+servers = cfg.get("mcp_servers")
+sys.exit(0 if isinstance(servers, dict) and "rustok" in servers else 1)
+PYEOF
+                case "$un_hrc" in
+                    1) continue ;;
+                    3)
+                        echo "rustok: warn: unreadable YAML in $un_cfg — remove mcp_servers.rustok by hand" 1>&2
+                        continue
+                        ;;
+                esac
+                un_bak="$un_cfg.rustok-bak-$(date +%Y%m%d-%H%M%S)"
+                if ! cp "$un_cfg" "$un_bak" 2>/dev/null; then
+                    echo "rustok: warn: cannot back up $un_cfg — left untouched; remove mcp_servers.rustok by hand" 1>&2
+                    continue
+                fi
+                if python3 - "$un_cfg" <<'PYEOF'
+import os
+import sys
+import tempfile
+import yaml
+cfg_path = sys.argv[1]
+with open(cfg_path) as f:
+    cfg = yaml.safe_load(f) or {}
+servers = cfg.get("mcp_servers")
+if isinstance(servers, dict):
+    servers.pop("rustok", None)
+fd, tmp = tempfile.mkstemp(
+    dir=os.path.dirname(os.path.abspath(cfg_path)), prefix=".rustok-tmp-")
+with os.fdopen(fd, "w") as f:
+    yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
+os.replace(tmp, cfg_path)
+PYEOF
+                then
+                    echo "rustok: deregistered from hermes (backup: $un_bak) — restart Hermes to pick it up"
+                else
+                    echo "rustok: warn: could not update $un_cfg — backup untouched at $un_bak" 1>&2
+                fi
+                ;;
+        esac
+    done
+    ids="$(discover_ids "")"
+    # shellcheck disable=SC2086
+    set -- $ids
+    if [ $# -gt 0 ]; then
+        for un_id in "$@"; do
+            "$engine" stop "$un_id" >/dev/null 2>&1 || true
+        done
+        echo "rustok: stopped $# running wallet(s)"
+    fi
+    if [ "$engine" = "podman" ]; then
+        un_secrets="$("$engine" secret ls --format '{{.Name}}' 2>/dev/null | grep -E '^rustok-(keyring|rpc)-' || true)"
+        un_n=0
+        for un_s in $un_secrets; do
+            "$engine" secret rm "$un_s" >/dev/null 2>&1 && un_n=$((un_n + 1))
+        done
+        [ "$un_n" -gt 0 ] && echo "rustok: removed $un_n secret(s)"
+    else
+        rm -f "$CONFIG_DIR"/keyring-pass-* 2>/dev/null || true
+        echo "rustok: removed the stored password file(s)"
+    fi
+    # The 3.2 installer contract: its PATH edit lives between these exact
+    # markers, and ONLY a fully marked block is ever removed — no marker,
+    # no touching a shell profile.
+    for un_prof in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+        [ -f "$un_prof" ] || continue
+        if grep -q '^# >>> rustok installer >>>' "$un_prof" \
+            && grep -q '^# <<< rustok installer <<<' "$un_prof"; then
+            un_tmp="$un_prof.rustok-tmp"
+            if sed '/^# >>> rustok installer >>>$/,/^# <<< rustok installer <<<$/d' "$un_prof" >"$un_tmp" \
+                && mv "$un_tmp" "$un_prof"; then
+                echo "rustok: removed the installer PATH block from $un_prof"
+            else
+                rm -f "$un_tmp"
+            fi
+        fi
+    done
+    # Only the installed copy — a repo checkout being run in place stays.
+    if [ -f "$HOME/.local/bin/rustok" ]; then
+        rm -f "$HOME/.local/bin/rustok" && echo "rustok: removed ~/.local/bin/rustok"
+    fi
+    # Last: everything above still needed the engine pin.
+    rm -rf "$CONFIG_DIR" 2>/dev/null || true
+    un_vols="$("$engine" volume ls --format '{{.Name}}' 2>/dev/null | grep -E '^(rustok-wallet-tui|rustok-[A-Za-z0-9][A-Za-z0-9_-]*)$' || true)"
+    if [ -z "$un_vols" ]; then
+        echo "rustok: uninstall complete — no keystore volumes found"
+        return 0
+    fi
+    if [ "$PURGE" -eq 0 ]; then
+        echo "rustok: uninstall complete. keys intact: volume(s) $(printf '%s\n' "$un_vols" | tr '\n' ' ')— remove later: rustok uninstall --purge-keys"
+        return 0
+    fi
+    # --- purge-keys: the ONE gated road to a keystore volume -------------------
+    # Same Rule-of-two-windows gate as init: stdin must BE a terminal AND the
+    # confirmation is read from /dev/tty itself — an agent or a pipe can never
+    # answer this prompt.
+    if [ ! -t 0 ]; then
+        die "--purge-keys needs your own terminal — never run it through an agent or a pipe (it destroys keys)"
+    fi
+    if ! { exec 3</dev/tty; } 2>/dev/null; then
+        die "--purge-keys needs your own terminal (no /dev/tty here) — it destroys keys"
+    fi
+    printf 'rustok: deleting these volumes destroys the keys; without your seed phrase backup the funds are unrecoverable:\n' >/dev/tty
+    printf '%s\n' "$un_vols" | sed 's/^/  /' >/dev/tty
+    printf "type 'delete my keys' to confirm: " >/dev/tty
+    IFS= read -r un_confirm <&3 || un_confirm=""
+    exec 3<&-
+    [ "$un_confirm" = "delete my keys" ] || die "confirmation mismatch — volumes untouched"
+    for un_v in $un_vols; do
+        "$engine" volume rm -- "$un_v" >/dev/null \
+            && echo "rustok: removed keystore volume '$un_v'"
+    done
+}
+
 # --- entry -------------------------------------------------------------------
 
 COMMAND="console"
 AGENT=""
 FORCE=0
+PURGE=0
 CONNECT_TARGET=""
 
 if [ $# -gt 0 ]; then
     case "$1" in
-        console | status | doctor | init | start | stop)
+        console | status | doctor | init | start | stop | update | uninstall)
             COMMAND="$1"
             shift
             ;;
@@ -822,16 +1135,16 @@ fi
 while [ $# -gt 0 ]; do
     case "$1" in
         --agent)
-            [ $# -ge 2 ] || die "--agent needs a value (e.g. --agent claude)"
-            # Strict charset: the agent name becomes a container label, a volume
-            # name and (unquoted) a run-argv token. Anything outside this set —
-            # spaces, newlines, a leading dash, shell metacharacters — could
-            # inject flags/args into `podman run`, so it is a named refusal here,
-            # once, for every command. (Threat model: pasted untrusted commands.)
-            case "$2" in
-                [a-zA-Z0-9]*[!a-zA-Z0-9_-]* | [!a-zA-Z0-9]* | "") \
-                    die "--agent name '$2' is invalid — use letters, digits, '-' or '_', starting with a letter or digit (e.g. claude, hermes)" ;;
+            case "$COMMAND" in
+                update | uninstall) die "--agent is not an update/uninstall flag — update follows each registration's own agent label; uninstall covers every agent" ;;
             esac
+            [ $# -ge 2 ] || die "--agent needs a value (e.g. --agent claude)"
+            # Strict charset (valid_agent_name — the ONE gate shared with the
+            # label `update` reads back out of a client config): a name outside
+            # it could inject flags/args into `podman run`, so it is a named
+            # refusal here, once, for every command.
+            valid_agent_name "$2" \
+                || die "--agent name '$2' is invalid — use letters, digits, '-' or '_', starting with a letter or digit (e.g. claude, hermes)"
             AGENT="$2"
             shift 2
             ;;
@@ -841,6 +1154,14 @@ while [ $# -gt 0 ]; do
                 *) die "--force is an init/connect-only flag" ;;
             esac
             FORCE=1
+            shift
+            ;;
+        --purge-keys)
+            case "$COMMAND" in
+                uninstall) ;;
+                *) die "--purge-keys is an uninstall-only flag" ;;
+            esac
+            PURGE=1
             shift
             ;;
         *)
@@ -860,4 +1181,6 @@ case "$COMMAND" in
     connect) cmd_connect ;;
     start) cmd_start ;;
     stop) cmd_stop ;;
+    update) cmd_update ;;
+    uninstall) cmd_uninstall ;;
 esac
