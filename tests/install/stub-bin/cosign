@@ -1,0 +1,22 @@
+#!/bin/sh
+# Stub cosign for the installer tests. Logs argv so the test can assert the
+# verify was pinned to THIS repo's workflow identity + the GitHub OIDC issuer,
+# and by @sha256: digest — not a bare tag.
+set -eu
+
+[ -n "${STUB_LOG:-}" ] && printf 'cosign %s\n' "$*" >>"$STUB_LOG"
+
+case "${1:-}" in
+    verify)
+        if [ "${STUB_COSIGN_FAIL:-0}" = "1" ]; then
+            echo "Error: no signatures found" 1>&2
+            exit 10
+        fi
+        exit 0
+        ;;
+    version) echo "stub-cosign 0.0.0"; exit 0 ;;
+    *)
+        echo "stub: unexpected cosign verb: $*" 1>&2
+        exit 64
+        ;;
+esac

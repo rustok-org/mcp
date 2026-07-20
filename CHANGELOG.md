@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`scripts/install.sh`** — one-command installer (`curl … | sh`), a full
+  rewrite of the old command-printer. It installs the `rustok` SHIM, not the
+  wallet: verifies the wallet image's cosign signature against this repo's
+  publishing workflow FIRST (fail-closed — nothing lands on disk until the
+  image is proven), pulls it BY DIGEST (a mutable tag cannot be swapped in),
+  fetches the shim from a COMMIT-SHA-pinned raw URL over `--proto '=https'
+  --tlsv1.2`, installs it to `~/.local/bin` and adds the 2.3c-contract PATH
+  block (`RUSTOK_NO_MODIFY_PATH` opts out; idempotent). It NEVER touches a
+  secret, keystore or wallet init — creating the wallet stays a human step
+  (`rustok init`) run in your own terminal, never through the pipe. The
+  release-pinned digest and shim commit start as fail-closed placeholders,
+  filled at release time. Hermetic test suite (stub curl/engine/cosign, no
+  network) + a new CI job.
+
+### Changed
 - **`rustok update`** — pulls the current wallet image FIRST (a broken pull
   stops the run before any config is touched), then re-registers every
   rustok MCP entry across claude/cursor/hermes. Each client keeps its own

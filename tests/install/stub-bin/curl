@@ -1,0 +1,25 @@
+#!/bin/sh
+# Stub curl for the installer tests. Logs argv to $STUB_LOG, then — for the
+# ONE fetch the installer makes (the shim from a commit-pinned raw URL) —
+# writes a marker shim body to the -o target. No network anywhere.
+set -eu
+
+[ -n "${STUB_LOG:-}" ] && printf 'curl %s\n' "$*" >>"$STUB_LOG"
+
+if [ "${STUB_CURL_FAIL:-0}" = "1" ]; then
+    echo "curl: (22) stub forced failure" 1>&2
+    exit 22
+fi
+
+# Find the -o target (the installer writes the fetched shim there).
+out=""
+prev=""
+for a in "$@"; do
+    [ "$prev" = "-o" ] && out="$a"
+    prev="$a"
+done
+
+if [ -n "$out" ]; then
+    printf '%s\n' "#!/bin/sh" "# STUB-SHIM-BODY marker" "echo rustok-stub" >"$out"
+fi
+exit 0

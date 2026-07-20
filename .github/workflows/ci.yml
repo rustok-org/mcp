@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Run shellcheck
         run: |
-          FILES="scripts/*.sh cli/rustok tests/shim/run-tests.sh tests/shim/stub-bin/podman tests/shim/stub-bin/claude"
+          FILES="scripts/*.sh cli/rustok tests/shim/run-tests.sh tests/shim/stub-bin/podman tests/shim/stub-bin/claude tests/install/run-tests.sh tests/install/stub-bin/curl tests/install/stub-bin/podman tests/install/stub-bin/cosign"
           if command -v shellcheck >/dev/null 2>&1; then
             # shellcheck disable=SC2086
             shellcheck $FILES
@@ -61,3 +61,11 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Run the shim test suite (stub engine, no containers needed)
         run: sh tests/shim/run-tests.sh
+
+  install-tests:
+    name: Install Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Run the installer test suite (stub curl/engine/cosign, no network)
+        run: sh tests/install/run-tests.sh
