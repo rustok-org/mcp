@@ -41,6 +41,7 @@ fresh() {
     STUB_CLAUDE_ADD_FAIL=0
     STUB_CLAUDE_REMOVE_FAIL=0
     STUB_SECRET_LS_FAIL=0
+    STUB_PULL_FAIL=0
     TEST_PATH="$WORK/bin"
 }
 
@@ -58,6 +59,9 @@ seed_wallet() {
 
 run_shim() {
     # run_shim <args…> — capture stdout+stderr and exit code, stub-injected.
+    # stdin is ALWAYS /dev/null: the pipe/agent environment is the hermetic
+    # default (a dev's interactive terminal must never leak into a test —
+    # the purge-refusal test would otherwise hang waiting on a real tty).
     OUT="$(HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config" \
         PATH="$TEST_PATH" STUB_LOG="$WORK/log" STUB_STATE="$WORK/state" \
         STUB_CONTAINERS="$STUB_CONTAINERS" STUB_LEGACY="$STUB_LEGACY" \
@@ -65,7 +69,8 @@ run_shim() {
         STUB_CLAUDE_ADD_FAIL="$STUB_CLAUDE_ADD_FAIL" \
         STUB_CLAUDE_REMOVE_FAIL="$STUB_CLAUDE_REMOVE_FAIL" \
         STUB_SECRET_LS_FAIL="$STUB_SECRET_LS_FAIL" \
-        sh "$SHIM" "$@" 2>&1)" && RC=0 || RC=$?
+        STUB_PULL_FAIL="$STUB_PULL_FAIL" \
+        sh "$SHIM" "$@" </dev/null 2>&1)" && RC=0 || RC=$?
 }
 
 PY3="$(command -v python3)"
@@ -82,6 +87,24 @@ run_init_pty() {
         STUB_CONTAINERS="$STUB_CONTAINERS" STUB_LEGACY="$STUB_LEGACY" \
         STUB_INFO_FAIL="$STUB_INFO_FAIL" STUB_PS_FAIL="$STUB_PS_FAIL" \
         "$PY3" "$TESTS_DIR/pty-init.py" sh "$SHIM" init "$@" 2>&1)" && RC=0 || RC=$?
+}
+
+count_secrets() { set -- "$WORK/state"/secret-*; [ -e "$1" ] && echo $# || echo 0; }
+count_volumes() { set -- "$WORK/state"/volume-*; [ -e "$1" ] && echo $# || echo 0; }
+
+run_purge_pty() {
+    # run_purge_pty <confirmation-line> — drives `uninstall --purge-keys` on a
+    # real pty (the /dev/tty confirmation gate), feeding the one literal a
+    # human would type at the "confirm: " prompt.
+    OUT="$(printf '%s\n' "$1" | \
+        HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config" \
+        PATH="$TEST_PATH" STUB_LOG="$WORK/log" STUB_STATE="$WORK/state" \
+        STUB_CONTAINERS="$STUB_CONTAINERS" STUB_LEGACY="$STUB_LEGACY" \
+        STUB_INFO_FAIL="$STUB_INFO_FAIL" STUB_PS_FAIL="$STUB_PS_FAIL" \
+        STUB_CLAUDE_ADD_FAIL="$STUB_CLAUDE_ADD_FAIL" \
+        STUB_CLAUDE_REMOVE_FAIL="$STUB_CLAUDE_REMOVE_FAIL" \
+        STUB_PULL_FAIL="$STUB_PULL_FAIL" \
+        "$PY3" "$TESTS_DIR/pty-init.py" sh "$SHIM" uninstall --purge-keys 2>&1)" && RC=0 || RC=$?
 }
 
 ok() {
@@ -1020,6 +1043,302 @@ if assert_exit 1 && [ "$HAFTER_OK" = "1" ] \
     ok "connect hermes with an unwritable dir dies named, config intact"
 else not_ok "connect hermes with an unwritable dir dies named, config intact"; fi
 
+# --- update: pull first, then re-register every one of OUR registrations ---------
+
+plant_all_three() {
+    # A machine with all three clients registered; every entry carries a marker
+    # value so the old-entry print is assertable per client, and its own
+    # rustok.agent label so extraction (not the default) is what update proves.
+    seed_wallet
+    printf '%s' pw >"$WORK/state/secret-rustok-keyring-cursor"
+    : >"$WORK/state/volume-rustok-cursor"
+    printf '%s' pw >"$WORK/state/secret-rustok-keyring-hermes"
+    : >"$WORK/state/volume-rustok-hermes"
+    printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","--label","rustok.agent=claude","CLAUDEOLD"]},"keep":{"command":"stay"}}}' >"$WORK/home/.claude.json"
+    mkdir -p "$WORK/home/.cursor"
+    printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","--label","rustok.agent=cursor","CURSOROLD"]},"other":{"command":"keepme"}}}' >"$WORK/home/.cursor/mcp.json"
+    mkdir -p "$WORK/home/.hermes"
+    cat >"$WORK/home/.hermes/config.yaml" <<'YEOF'
+model: test-model
+mcp_servers:
+  rustok:
+    command: podman
+    args: [run, --label, rustok.agent=hermes, HERMESOLD]
+    enabled: true
+  other-srv:
+    command: foo
+YEOF
+}
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+plant_all_three
+run_shim update
+CJSON="$(jq -cS '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
+CEXP='{"args":["run","-i","--rm","--init","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=env,target=RUSTOK_KEYRING_PASSWORD","ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"],"command":"podman"}'
+HCHECK="$("$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF'
+import sys, yaml
+c = yaml.safe_load(open(sys.argv[1]))
+r = c["mcp_servers"]["rustok"]
+assert r["command"] == "podman" and r["args"][0] == "run", r
+assert "rustok.agent=hermes" in r["args"] and "rustok-hermes:/data" in r["args"], r
+assert r["enabled"] is True, r
+assert c["mcp_servers"]["other-srv"]["command"] == "foo"
+assert c["model"] == "test-model"
+print("HOK")
+PEOF
+)" || HCHECK="HFAIL"
+PULL_BEFORE_ADD=0
+awk '/^podman pull /{p=NR} /^claude mcp add /{a=NR} END{exit !(p && a && p<a)}' "$WORK/log" && PULL_BEFORE_ADD=1
+if assert_exit 0 && [ "$CJSON" = "$CEXP" ] && [ "$HCHECK" = "HOK" ] \
+    && grep -q '^podman pull ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1' "$WORK/log" \
+    && [ "$PULL_BEFORE_ADD" = "1" ] \
+    && grep -q '^claude mcp add -s user rustok -- podman run .* rustok.agent=claude .* rustok-wallet-tui:/data ' "$WORK/log" \
+    && assert_has "CLAUDEOLD" && assert_has "CURSOROLD" && assert_has "HERMESOLD" \
+    && assert_has "updated 3 client(s)" && assert_has "re-run the installer"; then
+    ok "update: pull first, all three re-registered with their own agents, old entries printed"
+else RC="$RC cjson=$CJSON hcheck=$HCHECK" && not_ok "update: pull first, all three re-registered with their own agents, old entries printed"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+mkdir -p "$WORK/home/.cursor"
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","--label","rustok.agent=claude","OVERRIDE"]}}}' >"$WORK/home/.cursor/mcp.json"
+run_shim update
+CJSON="$(jq -cS '.mcpServers.rustok.args' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
+if assert_exit 0 && assert_has "updated 1 client(s)" \
+    && printf '%s' "$CJSON" | grep -q '"rustok.agent=claude"' \
+    && printf '%s' "$CJSON" | grep -q '"rustok-wallet-tui:/data"'; then
+    ok "update preserves a cross-wired agent override read from the entry itself (claude volume on the cursor client)"
+else RC="$RC cjson=$CJSON"; not_ok "update preserves a cross-wired agent override read from the entry itself (claude volume on the cursor client)"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+plant_all_three
+cp "$WORK/home/.claude.json" "$WORK/cb"
+cp "$WORK/home/.cursor/mcp.json" "$WORK/mb"
+cp "$WORK/home/.hermes/config.yaml" "$WORK/hb"
+STUB_PULL_FAIL=1
+run_shim update
+if assert_exit 1 && assert_has "pull failed" \
+    && cmp -s "$WORK/home/.claude.json" "$WORK/cb" \
+    && cmp -s "$WORK/home/.cursor/mcp.json" "$WORK/mb" \
+    && cmp -s "$WORK/home/.hermes/config.yaml" "$WORK/hb" \
+    && ! grep -q '^claude mcp' "$WORK/log"; then
+    ok "update with a failing pull dies named BEFORE touching any registration"
+else not_ok "update with a failing pull dies named BEFORE touching any registration"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+run_shim update
+if assert_exit 0 && assert_has "nothing to update"; then
+    ok "update with no registrations anywhere: honest no-op, exit 0"
+else not_ok "update with no registrations anywhere: honest no-op, exit 0"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+seed_hermes
+"$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF'
+import sys, yaml
+p = sys.argv[1]
+c = yaml.safe_load(open(p))
+c["mcp_servers"]["rustok"] = {"command": "podman",
+    "args": ["run", "--label", "rustok.agent=hermes", "HERMESOLD"], "enabled": True}
+yaml.safe_dump(c, open(p, "w"), sort_keys=False)
+PEOF
+mkdir -p "$WORK/home/.cursor"
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","NOAGENTMARK"]}}}' >"$WORK/home/.cursor/mcp.json"
+cp "$WORK/home/.cursor/mcp.json" "$WORK/mb"
+run_shim update
+HOK=0
+"$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF' && HOK=1
+import sys, yaml
+c = yaml.safe_load(open(sys.argv[1]))
+assert "rustok-hermes:/data" in c["mcp_servers"]["rustok"]["args"]
+PEOF
+if assert_exit 1 && assert_has "no rustok.agent" \
+    && cmp -s "$WORK/home/.cursor/mcp.json" "$WORK/mb" \
+    && [ "$HOK" = "1" ]; then
+    ok "update: an entry without an agent label fails NAMED for that client only — the rest still update"
+else not_ok "update: an entry without an agent label fails NAMED for that client only — the rest still update"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+mkdir -p "$WORK/home/.cursor"
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","--label","rustok.agent=e;vil"]}}}' >"$WORK/home/.cursor/mcp.json"
+cp "$WORK/home/.cursor/mcp.json" "$WORK/mb"
+run_shim update
+if assert_exit 1 && assert_has "invalid agent name" \
+    && cmp -s "$WORK/home/.cursor/mcp.json" "$WORK/mb" \
+    && ! grep -q 'e;vil' "$WORK/log"; then
+    ok "update: a poisoned agent name in a registration is refused named — never reaches an engine argv"
+else not_ok "update: a poisoned agent name in a registration is refused named — never reaches an engine argv"; fi
+
+fresh
+run_shim update --agent claude
+if assert_exit 1 && assert_has "agent is not a"; then
+    ok "update --agent: named refusal (update follows each registration's own agent)"
+else not_ok "update --agent: named refusal (update follows each registration's own agent)"; fi
+
+# --- old-entry print on replace: ONE recovery path across all three writers ------
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["CLAUDEOLD"]}}}' >"$WORK/home/.claude.json"
+run_shim connect claude --force
+if assert_exit 0 && assert_has "replacing the previous entry" && assert_has "CLAUDEOLD"; then
+    ok "connect claude --force prints the old entry on a SUCCESSFUL replace (not only on a failed add)"
+else not_ok "connect claude --force prints the old entry on a SUCCESSFUL replace (not only on a failed add)"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+seed_hermes
+"$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF'
+import sys, yaml
+p = sys.argv[1]
+c = yaml.safe_load(open(p))
+c["mcp_servers"]["rustok"] = {"command": "old", "args": ["HERMESOLD"], "enabled": True}
+yaml.safe_dump(c, open(p, "w"), sort_keys=False)
+PEOF
+run_shim connect hermes --force
+if assert_exit 0 && assert_has "replacing the previous entry" && assert_has "HERMESOLD"; then
+    ok "connect hermes --force prints the old entry on replace (Gate-1 finding: parity with claude/cursor)"
+else not_ok "connect hermes --force prints the old entry on replace (Gate-1 finding: parity with claude/cursor)"; fi
+
+# --- uninstall: data-safe teardown; keystore volumes only behind the double gate --
+
+plant_uninstall_world() {
+    plant_all_three
+    printf '%s' "https://rpc.example/with-key" >"$WORK/state/secret-rustok-rpc-claude-1"
+    STUB_CONTAINERS="cafe01;rustok=wallet;rustok.agent=claude;volume=rustok-wallet-tui;image=stub-img"
+    mkdir -p "$WORK/home/.local/bin"
+    printf '#!/bin/sh\n' >"$WORK/home/.local/bin/rustok"
+    cat >"$WORK/home/.bashrc" <<'BEOF'
+alias keepme1='true'
+# >>> rustok installer >>>
+export PATH="$HOME/.local/bin:$PATH"
+# <<< rustok installer <<<
+alias keepme2='true'
+BEOF
+}
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+plant_uninstall_world
+run_shim uninstall
+CKEEP="$(jq -r '.mcpServers.keep.command' "$WORK/home/.claude.json" 2>/dev/null || echo none)"
+CGONE="$(jq -r '.mcpServers | has("rustok")' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo err)"
+COTHER="$(jq -r '.mcpServers.other.command' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
+HOK=0
+"$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF' && HOK=1
+import sys, yaml
+c = yaml.safe_load(open(sys.argv[1]))
+assert "rustok" not in c["mcp_servers"], c
+assert c["mcp_servers"]["other-srv"]["command"] == "foo"
+assert c["model"] == "test-model"
+PEOF
+SECRETS_LEFT="$(count_secrets)"
+VOLUMES_LEFT="$(count_volumes)"
+if assert_exit 0 \
+    && grep -q '^claude mcp remove -s user rustok' "$WORK/log" \
+    && [ "$CKEEP" = "stay" ] && [ "$CGONE" = "false" ] && [ "$COTHER" = "keepme" ] \
+    && [ "$HOK" = "1" ] \
+    && grep -q '^podman stop cafe01' "$WORK/log" \
+    && [ "$SECRETS_LEFT" = "0" ] && [ "$VOLUMES_LEFT" = "3" ] \
+    && assert_has "keys intact" \
+    && grep -q "keepme1" "$WORK/home/.bashrc" && grep -q "keepme2" "$WORK/home/.bashrc" \
+    && ! grep -q "rustok installer" "$WORK/home/.bashrc" \
+    && [ ! -f "$WORK/home/.local/bin/rustok" ] \
+    && [ ! -d "$WORK/home/.config/rustok" ]; then
+    ok "uninstall: deregisters all three (foreign keys intact), stops wallets, removes secrets+PATH-block+shim+config — volumes UNTOUCHED, keys-intact printed"
+else RC="$RC ckeep=$CKEEP cgone=$CGONE hok=$HOK sl=$SECRETS_LEFT vl=$VOLUMES_LEFT"; not_ok "uninstall: deregisters all three (foreign keys intact), stops wallets, removes secrets+PATH-block+shim+config — volumes UNTOUCHED, keys-intact printed"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+plant_uninstall_world
+run_shim uninstall --purge-keys
+VOLUMES_LEFT="$(count_volumes)"
+if assert_exit 1 && assert_has "terminal" && [ "$VOLUMES_LEFT" = "3" ]; then
+    ok "uninstall --purge-keys through a pipe: named refusal, volumes intact (Rule of two windows)"
+else RC="$RC vl=$VOLUMES_LEFT"; not_ok "uninstall --purge-keys through a pipe: named refusal, volumes intact (Rule of two windows)"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+plant_uninstall_world
+run_purge_pty "not the literal"
+VOLUMES_LEFT="$(count_volumes)"
+if assert_exit 1 && assert_has "confirmation mismatch" && [ "$VOLUMES_LEFT" = "3" ]; then
+    ok "uninstall --purge-keys with a wrong confirmation: named refusal, volumes intact"
+else RC="$RC vl=$VOLUMES_LEFT"; not_ok "uninstall --purge-keys with a wrong confirmation: named refusal, volumes intact"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+plant_uninstall_world
+run_purge_pty "delete my keys"
+VOLUMES_LEFT="$(count_volumes)"
+if assert_exit 0 && [ "$VOLUMES_LEFT" = "0" ] \
+    && grep -q '^podman volume rm' "$WORK/log" \
+    && assert_has "destroys the keys"; then
+    ok "uninstall --purge-keys with the exact literal removes the keystore volumes (the ONE gated path)"
+else RC="$RC vl=$VOLUMES_LEFT"; not_ok "uninstall --purge-keys with the exact literal removes the keystore volumes (the ONE gated path)"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+plant_uninstall_world
+# A twice-pasted installer block: two starts before one end. sed's range does
+# not re-arm, so a blind delete would eat the user line between the starts.
+cat >"$WORK/home/.bashrc" <<'BEOF'
+alias keepme1='true'
+# >>> rustok installer >>>
+export PATH="$HOME/.local/bin:$PATH"
+alias between='survives'
+# >>> rustok installer >>>
+export PATH="$HOME/.local/bin:$PATH"
+# <<< rustok installer <<<
+alias keepme2='true'
+BEOF
+run_shim uninstall
+if assert_exit 0 && assert_has "expected exactly one pair" \
+    && grep -q "alias between='survives'" "$WORK/home/.bashrc" \
+    && grep -q "rustok installer" "$WORK/home/.bashrc"; then
+    ok "uninstall refuses to edit a profile with duplicate installer markers — no silent data loss between the starts"
+else not_ok "uninstall refuses to edit a profile with duplicate installer markers — no silent data loss between the starts"; fi
+
+fresh
+run_shim status --purge-keys
+if assert_exit 1 && assert_has "purge-keys is an uninstall-only flag"; then
+    ok "--purge-keys outside uninstall: named refusal"
+else not_ok "--purge-keys outside uninstall: named refusal"; fi
+
+fresh
+run_shim uninstall --agent claude
+if assert_exit 1 && assert_has "agent is not a"; then
+    ok "uninstall --agent: named refusal (uninstall covers every agent)"
+else not_ok "uninstall --agent: named refusal (uninstall covers every agent)"; fi
+
 # --- docker parity: init stores a 0600 file, not a podman secret -----------------
 
 fresh
@@ -1040,12 +1359,20 @@ else not_ok "docker init: 0600 password file, byte-exact, no secret store, argv 
 # --- static invariant: init/start never destroy keystore volumes ------------------
 
 N=$((N + 1))
-if sed 's/^[[:space:]]*#.*//' "$SHIM" | grep -qE 'volume (rm|prune)|system prune'; then
-    FAIL=$((FAIL + 1))
-    echo "not ok $N - shim code never removes volumes (keystore data-safety)"
-else
+# PR-2.3c evolved the absolute ban: `volume rm` is allowed EXACTLY once, inside
+# cmd_uninstall's doubly-gated purge block. A second call-site, or any prune,
+# stays forbidden — the gate must remain the ONLY road to a keystore volume.
+STRIPPED="$(sed 's/^[[:space:]]*#.*//' "$SHIM")"
+VRM_TOTAL="$(printf '%s\n' "$STRIPPED" | grep -cE 'volume rm')"
+VRM_IN_UNINSTALL="$(printf '%s\n' "$STRIPPED" | awk '/^cmd_uninstall\(\)/,/^}/' | grep -cE 'volume rm')"
+if [ "$VRM_TOTAL" = "1" ] && [ "$VRM_IN_UNINSTALL" = "1" ] \
+    && ! printf '%s\n' "$STRIPPED" | grep -qE 'volume prune|system prune'; then
     PASS=$((PASS + 1))
-    echo "ok $N - shim code never removes volumes (keystore data-safety)"
+    echo "ok $N - volume rm appears exactly once, inside cmd_uninstall's gated purge block (no prune anywhere)"
+else
+    FAIL=$((FAIL + 1))
+    echo "not ok $N - volume rm appears exactly once, inside cmd_uninstall's gated purge block (no prune anywhere)"
+    echo "    total=$VRM_TOTAL in_uninstall=$VRM_IN_UNINSTALL"
 fi
 
 # --- static invariant: the shim never uses --name ------------------------------
