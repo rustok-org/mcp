@@ -33,7 +33,14 @@ SHIM_COMMIT="0000000000000000000000000000000000000000"
 IMAGE_REPO="ghcr.io/rustok-org/rustok-wallet-tui"
 RAW_BASE="https://raw.githubusercontent.com/rustok-org/mcp"
 # The one identity cosign pins to: the workflow that builds AND signs the image.
-COSIGN_IDENTITY="https://github.com/rustok-org/mcp/.github/workflows/wallet-publish.yml@refs/tags/v${WALLET_VERSION}"
+# The ref MUST match the ref the publish ran on. wallet-publish.yml is
+# workflow_dispatch, and its own self-verify pins `@${github.ref}` — so signer
+# and verifier agree only if both use the SAME ref. Pinned to refs/heads/main:
+# that is the default ref a workflow_dispatch runs on, so the RELEASE PROCESS
+# (4.2) dispatches wallet-publish from main. If a future release instead tags
+# the commit and dispatches FROM that tag, this must change to
+# @refs/tags/v<version> — it is a FIELD change, not a value the release fills.
+COSIGN_IDENTITY="https://github.com/rustok-org/mcp/.github/workflows/wallet-publish.yml@refs/heads/main"
 COSIGN_ISSUER="https://token.actions.githubusercontent.com"
 
 INSTALL_DIR="$HOME/.local/bin"

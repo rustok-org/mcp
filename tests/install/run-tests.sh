@@ -69,6 +69,7 @@ SHIMOK=0
     && grep -q "STUB-SHIM-BODY" "$WORK/home/.local/bin/rustok" && SHIMOK=1
 if assert_exit 0 && [ "$SHIMOK" = "1" ] \
     && log_has 'cosign verify' && log_has 'wallet-publish.yml' \
+    && log_has 'certificate-identity.*wallet-publish.yml@refs/heads/main' \
     && log_has 'token.actions.githubusercontent.com' \
     && log_has 'podman pull .*@sha256:' \
     && grep -q '^# >>> rustok installer >>>$' "$WORK/home/.bashrc" \
