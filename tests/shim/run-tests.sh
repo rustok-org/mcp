@@ -813,6 +813,21 @@ else RC="$RC json=$CJSON"; not_ok "connect cursor: entry byte-exact (default age
 fresh
 plant_claude_stub
 plant_jq
+seed_wallet
+export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
+export RUSTOK_ALLOWED_CHAINS="1"
+run_shim connect cursor --agent claude
+unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
+OJSON="$(jq -cS '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
+OEXP='{"args":["run","-i","--rm","--init","--label","rustok=wallet","--label","rustok.agent=claude","-v","rustok-wallet-tui:/data","--secret","rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD","--secret","rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"],"command":"podman"}'
+if assert_exit 0 && [ "$OJSON" = "$OEXP" ] \
+    && [ "$(cat "$WORK/state/secret-rustok-rpc-claude-1")" = "https://rpc.example/with-key" ]; then
+    ok "connect cursor --agent claude: explicit override drives label/volume/secrets (one resolve line for all clients)"
+else RC="$RC json=$OJSON"; not_ok "connect cursor --agent claude: explicit override drives label/volume/secrets (one resolve line for all clients)"; fi
+
+fresh
+plant_claude_stub
+plant_jq
 seed_cursor
 mkdir -p "$WORK/home/.cursor"
 printf '%s' '{"mcpServers":{"other":{"command":"keepme"}}}' >"$WORK/home/.cursor/mcp.json"
