@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`rustok connect cursor` / `rustok connect hermes`** — the remaining two
+  clients get the one-command registration. Cursor: a jq write into
+  `~/.cursor/mcp.json` (no registrar CLI exists; atomic tmp+mv, the old
+  entry printed back as the return path). Hermes: a python3+PyYAML
+  round-trip into `~/.hermes/config.yaml` (`mcp_servers.rustok` with
+  `enabled: true` and a REAL args list; backup + atomic write) that also
+  replaces the Stage-0-era `rustok-wallet` entry (the args-as-JSON-string
+  bug) and hints at removing the obsolete wrapper script. The wallet
+  defaults to the client's own (`--agent` overrides) — every agent gets
+  its own keystore.
 - **`rustok connect claude`** — one-command MCP registration: builds the
   `claude mcp add -s user rustok` invocation (both labels, per-agent volume,
   keyring secret, RPC secrets, frozen `-e` config, image), with named
