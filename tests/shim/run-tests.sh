@@ -1304,6 +1304,30 @@ if assert_exit 0 && [ "$VOLUMES_LEFT" = "0" ] \
 else RC="$RC vl=$VOLUMES_LEFT"; not_ok "uninstall --purge-keys with the exact literal removes the keystore volumes (the ONE gated path)"; fi
 
 fresh
+plant_claude_stub
+plant_jq
+plant_python3
+plant_uninstall_world
+# A twice-pasted installer block: two starts before one end. sed's range does
+# not re-arm, so a blind delete would eat the user line between the starts.
+cat >"$WORK/home/.bashrc" <<'BEOF'
+alias keepme1='true'
+# >>> rustok installer >>>
+export PATH="$HOME/.local/bin:$PATH"
+alias between='survives'
+# >>> rustok installer >>>
+export PATH="$HOME/.local/bin:$PATH"
+# <<< rustok installer <<<
+alias keepme2='true'
+BEOF
+run_shim uninstall
+if assert_exit 0 && assert_has "expected exactly one pair" \
+    && grep -q "alias between='survives'" "$WORK/home/.bashrc" \
+    && grep -q "rustok installer" "$WORK/home/.bashrc"; then
+    ok "uninstall refuses to edit a profile with duplicate installer markers — no silent data loss between the starts"
+else not_ok "uninstall refuses to edit a profile with duplicate installer markers — no silent data loss between the starts"; fi
+
+fresh
 run_shim status --purge-keys
 if assert_exit 1 && assert_has "purge-keys is an uninstall-only flag"; then
     ok "--purge-keys outside uninstall: named refusal"

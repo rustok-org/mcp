@@ -1034,15 +1034,23 @@ PYEOF
     # no touching a shell profile.
     for un_prof in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
         [ -f "$un_prof" ] || continue
-        if grep -q '^# >>> rustok installer >>>' "$un_prof" \
-            && grep -q '^# <<< rustok installer <<<' "$un_prof"; then
-            un_tmp="$un_prof.rustok-tmp"
-            if sed '/^# >>> rustok installer >>>$/,/^# <<< rustok installer <<<$/d' "$un_prof" >"$un_tmp" \
-                && mv "$un_tmp" "$un_prof"; then
-                echo "rustok: removed the installer PATH block from $un_prof"
-            else
-                rm -f "$un_tmp"
-            fi
+        un_starts="$(grep -c '^# >>> rustok installer >>>$' "$un_prof")" || true
+        un_ends="$(grep -c '^# <<< rustok installer <<<$' "$un_prof")" || true
+        [ "$un_starts" = "0" ] && [ "$un_ends" = "0" ] && continue
+        # EXACTLY one marker pair or hands off: sed range addressing does not
+        # re-arm on a duplicated start marker — a twice-pasted block would
+        # swallow unrelated user lines sitting between the two starts
+        # (security pass 2.3c).
+        if [ "$un_starts" != "1" ] || [ "$un_ends" != "1" ]; then
+            echo "rustok: warn: $un_prof has $un_starts start/$un_ends end installer markers (expected exactly one pair) — left untouched, remove the block by hand" 1>&2
+            continue
+        fi
+        un_tmp="$un_prof.rustok-tmp"
+        if sed '/^# >>> rustok installer >>>$/,/^# <<< rustok installer <<<$/d' "$un_prof" >"$un_tmp" \
+            && mv "$un_tmp" "$un_prof"; then
+            echo "rustok: removed the installer PATH block from $un_prof"
+        else
+            rm -f "$un_tmp"
         fi
     done
     # Only the installed copy — a repo checkout being run in place stays.
@@ -1062,8 +1070,12 @@ PYEOF
     fi
     # --- purge-keys: the ONE gated road to a keystore volume -------------------
     # Same Rule-of-two-windows gate as init: stdin must BE a terminal AND the
-    # confirmation is read from /dev/tty itself — an agent or a pipe can never
-    # answer this prompt.
+    # confirmation is read from /dev/tty itself. Honest contract (security
+    # pass 2.3c): this stops pipes, blind -y automation and an agent invoking
+    # rustok as a tool — it can NOT stop a process that allocates its own pty
+    # (script(1), pty.spawn) or one with shell access, which needs no shim at
+    # all to reach `podman volume rm` directly. The gate guards the shim's own
+    # road; the engine itself is the platform's trust boundary.
     if [ ! -t 0 ]; then
         die "--purge-keys needs your own terminal — never run it through an agent or a pipe (it destroys keys)"
     fi

@@ -22,10 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `rustok-keyring-*`/`rustok-rpc-*` secrets (or the docker password
   files), removes the installer's marked PATH block (`# >>> rustok
   installer >>>` … `# <<< rustok installer <<<` — the 3.2 contract; no
-  markers, no touching a shell profile) and `~/.local/bin/rustok`.
-  **Keystore volumes are NEVER touched** without `--purge-keys` AND its
-  interactive `delete my keys` confirmation read from /dev/tty (an agent
-  or a pipe gets a named refusal) — the one gated road to the keys.
+  markers, no touching a shell profile; a profile with duplicate markers
+  is left untouched with a named warning, never blind-deleted) and
+  `~/.local/bin/rustok`. **Keystore volumes are NEVER touched** without
+  `--purge-keys` AND its interactive `delete my keys` confirmation read
+  from /dev/tty (a pipe or blind automation gets a named refusal) — the
+  one gated road through the shim to the keys.
 - **Old-entry print on every replace** — the claude writer now prints the
   previous entry on a successful `--force` replace too (it used to print
   only when the re-add failed), and the hermes writer prints the replaced
