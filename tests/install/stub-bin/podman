@@ -1,0 +1,21 @@
+#!/bin/sh
+# Stub container engine for the installer tests: only the verbs install.sh uses
+# (pull). Logs argv so the test can assert a pull BY DIGEST, not by tag.
+set -eu
+
+[ -n "${STUB_LOG:-}" ] && printf '%s %s\n' "${0##*/}" "$*" >>"$STUB_LOG"
+
+case "${1:-}" in
+    pull)
+        if [ "${STUB_PULL_FAIL:-0}" = "1" ]; then
+            echo "Error: pulling image: stub forced failure" 1>&2
+            exit 125
+        fi
+        echo "stub-pulled $2"
+        exit 0
+        ;;
+    *)
+        echo "stub: unexpected engine verb: $*" 1>&2
+        exit 64
+        ;;
+esac
