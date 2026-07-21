@@ -19,13 +19,13 @@
 # POSIX sh on purpose (see epic decision #3): no arrays, no bashisms.
 set -eu
 
-VERSION="0.2.0"
+VERSION="0.3.0"
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rustok"
 CONFIG_FILE="$CONFIG_DIR/config"
 # The shipped wallet image; RUSTOK_IMAGE overrides (a digest-pinned ref comes
 # with the installer stage of the epic).
-DEFAULT_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"
+DEFAULT_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0"
 
 usage() {
     cat <<'EOF'
