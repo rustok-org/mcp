@@ -245,7 +245,7 @@ read -r -s -p "Keyring password: " pw && printf '%s' "$pw" | podman secret creat
 podman run -it --rm \
   -v rustok-wallet-tui:/data \
   --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1 create-wallet
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0 create-wallet
 ```
 
 **Docker** (no secret store without swarm) — keep the password in a `0600` file
@@ -261,7 +261,7 @@ docker run -it --rm \
   -v rustok-wallet-tui:/data \
   -v ~/.rustok-keyring-pass:/run/keyring-pass:ro \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1 create-wallet
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0 create-wallet
 ```
 
 Either way, `create-wallet` prints the **12-word recovery phrase** and the
@@ -285,7 +285,7 @@ this config file**. With podman the secret above does the delivery:
                "--secret", "rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1=https://ethereum-rpc.publicnode.com",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"]
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0"]
     }
   }
 }
@@ -302,7 +302,7 @@ With **docker**, swap the `--secret` argument pair for the `0600`-file mount:
          "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass",
          "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
          "-e", "RUSTOK_RPC_URLS_1=https://ethereum-rpc.publicnode.com",
-         "ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"]
+         "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0"]
 ```
 
 > **An RPC URL that embeds a provider key** (an Alchemy URL) is a credential too
@@ -337,7 +337,7 @@ Give it a distinct volume and sub-label, and its own secret:
          "--label", "rustok=wallet", "--label", "rustok.agent=hermes",
          "-v", "rustok-hermes:/data",                // its own wallet volume
          "--secret", "rustok-keyring-hermes,type=env,target=RUSTOK_KEYRING_PASSWORD", …,
-         "ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1"]
+         "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0"]
 ```
 
 `create-wallet` that volume once (as above, with `-v rustok-hermes:/data` and its
@@ -348,7 +348,7 @@ own secret), and open its console with `--filter label=rustok.agent=hermes`.
 Pull the new tag, restart the agent, keep the volume:
 
 ```bash
-docker pull ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1
+docker pull ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0
 # the agent-launched container is --rm (it disappears when the agent session ends);
 # just restart the agent with the new tag in its MCP config, same -v … :/data volume
 ```

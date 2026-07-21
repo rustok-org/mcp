@@ -16,9 +16,15 @@ name: Wallet Image Publish
 # (which pins that one identity) rejects it for every user. Do NOT sign from the
 # laptop: a local run cannot reproduce the workflow's keyless OIDC identity, and a
 # second signer (a personal Sigstore account) would force verify to trust two
-# identities. Instead, sign in CI — re-run this workflow so its cosign step signs
-# the pushed digest (the build step no-ops on an already-present image). One
-# identity end to end.
+# identities.
+#
+# The recovery is a re-run of THIS workflow with `allow_existing_tag: true` — and
+# be precise about what that does: it does NOT bless the bytes the laptop pushed.
+# It rebuilds from this workflow's own checkout and REPLACES the tag with the
+# result, which is then signed. Laptop-pushed bytes are discarded, never adopted;
+# there is no path by which unsigned bytes acquire this identity retroactively.
+# Same mechanism covers a plain retry (build pushed the tags, the cosign step
+# failed) — without the opt-in, the tag guard below stops the re-run.
 
 on:
   workflow_dispatch:
@@ -27,6 +33,11 @@ on:
         description: "Wallet image version — digits only, no leading v (e.g. 0.5.0); must match pyproject.toml"
         required: true
         type: string
+      allow_existing_tag:
+        description: "Republish over an EXISTING v<version> tag — rebuilds and REPLACES it. Only for break-glass or a failed-signing retry."
+        required: false
+        default: false
+        type: boolean
 
 env:
   REGISTRY: ghcr.io
@@ -59,6 +70,45 @@ jobs:
             echo "::error::input version '$INPUT_VERSION' does not match pyproject.toml version '$MANIFEST_VERSION'"
             exit 1
           fi
+
+      # A published version tag is a promise about specific bytes. This workflow
+      # pushes three tags (v<version>, v<major>.<minor>, v<major>) and, before
+      # this guard, would happily repoint ALL of them at a fresh build — so
+      # dispatching an already-released number silently rewrote what that release
+      # means. Only the FULL version tag is checked: the floating v<major> and
+      # v<major>.<minor> are meant to move, and guarding them would refuse every
+      # release from here on (v0 has existed since 0.5.0).
+      - name: Refuse to overwrite a published version tag
+        if: ${{ !inputs.allow_existing_tag }}
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          IMAGE: ${{ env.IMAGE_NAME }}
+        run: |
+          # Deliberately the tags LIST, not a manifest HEAD: a manifest request
+          # answers 404 for a tag that exists when the Accept header does not
+          # name its media type — i.e. a published tag can masquerade as free and
+          # the guard would wave the overwrite through. The list endpoint is
+          # media-type agnostic. (Verified against this very registry: v0 and
+          # v0.7 exist, yet a manifest request with a narrow Accept returns 404.)
+          TOKEN=$(curl -fsSL "https://ghcr.io/token?scope=repository:${IMAGE}:pull&service=ghcr.io" | jq -r .token)
+          PAGE=1000
+          TAGS=$(curl -fsSL -H "Authorization: Bearer $TOKEN" \
+            "https://ghcr.io/v2/${IMAGE}/tags/list?n=${PAGE}") \
+            || { echo "::error::could not list tags for ${IMAGE} — refusing to publish blind"; exit 1; }
+          # Fail closed on a truncated page. GHCR paginates (verified: ?n=3
+          # returns the first three tags plus `Link: …rel="next"`), and it cuts
+          # the TAIL — which is exactly where new tags live. A silently truncated
+          # list would omit the very tag we are asking about and report it free.
+          COUNT=$(printf '%s' "$TAGS" | jq '.tags // [] | length')
+          if [ "$COUNT" -ge "$PAGE" ]; then
+            echo "::error::tag list came back at the page limit ($COUNT) and may be truncated — the tail is where new tags are, so this check cannot be trusted. Raise n or follow the Link header."
+            exit 1
+          fi
+          if printf '%s' "$TAGS" | jq -e --arg t "v${INPUT_VERSION}" '.tags // [] | index($t)' >/dev/null; then
+            echo "::error::v${INPUT_VERSION} is already published — republishing would rebuild it and move v${INPUT_VERSION} (and the floating tags) to different bytes. Release a new version, or re-run with allow_existing_tag if you are deliberately replacing it (break-glass / signing retry)."
+            exit 1
+          fi
+          echo "v${INPUT_VERSION} is unpublished — proceeding."
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0

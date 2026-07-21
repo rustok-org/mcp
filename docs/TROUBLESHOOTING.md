@@ -77,6 +77,33 @@ string surgery. Install what it names (`dnf install jq` / `apt install jq`;
 Hermes itself ships python3 + PyYAML). No other rustok command needs them —
 `rustok doctor` reports both as informational.
 
+## On docker: the wallet never unlocks, as if no password reached it
+
+The `_FILE` password delivery docker uses needs a wallet image that understands
+it — **0.8.0 or newer**. The image published as `v0.7.1` was built a day before
+that support landed, so on docker it starts without a password and never unlocks.
+Podman is unaffected (its secret arrives as a plain environment variable).
+
+Check which image is actually running:
+
+```bash
+rustok status      # the IMAGE column shows the tag in use
+```
+
+If it is older than `v0.8.0`, **re-run the installer** — do not stop at
+`rustok update`:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.0/scripts/install.sh | sh
+```
+
+The image version is chosen by the **shim**, and the shim does not update itself.
+An old shim keeps pulling its own old tag *and* re-stamps that tag into your
+agent's config on every `rustok update` — so editing the config by hand does not
+survive either. Reinstalling is the only path that moves you forward, and it is
+the one that verifies the signature.
+
 ## "backend not ready" / the agent can't reach the wallet
 
 - `rustok status` — is a wallet actually running? The MCP client starts it when

@@ -26,7 +26,7 @@ set -eu
 # to their exact bytes. Both start as fail-closed placeholders — an unfilled
 # release cannot pull or fetch anything (the all-zero refs 404 / have no
 # signature), it fails loudly instead of installing something unverified.
-WALLET_VERSION="0.7.1"
+WALLET_VERSION="0.8.0"
 WALLET_DIGEST="sha256:0000000000000000000000000000000000000000000000000000000000000000"
 SHIM_COMMIT="0000000000000000000000000000000000000000"
 

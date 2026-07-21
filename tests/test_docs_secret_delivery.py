@@ -12,13 +12,38 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 
-# Every doc that shows how to deliver the keyring password.
+# The skill package as SHIPPED — ClawHub scans the whole directory, so the guard
+# must watch the same unit that leaves the building, not a hand-kept list of
+# markdown files. That mismatch was not theoretical: `scripts/health-check.sh`
+# carried `-e RUSTOK_KEYRING_PASSWORD \` — a pattern already in FORBIDDEN below —
+# and lived under a green suite for months purely because nobody had listed it
+# here. It surfaced as a High "Credential Access" finding in ClawHub's audit, not
+# in our own CI. Globbing the package means the next file added to it is covered
+# the day it appears.
+SKILL_PACKAGE = REPO_ROOT / "skills" / "rustok-wallet-tui"
+
+# DELIBERATE BOUNDARY — docs and shipped examples, never implementation.
+# Do NOT extend this to `scripts/` or `cli/`: `scripts/rustok-wallet-entrypoint.sh`
+# legitimately contains `RUSTOK_KEYRING_PASSWORD="$(cat "$RUSTOK_KEYRING_PASSWORD_FILE")"`
+# — that IS the _FILE reader this guard exists to promote, and it matches the
+# first FORBIDDEN pattern verbatim. Adding it here turns a correct file red, and
+# the only way back to green is weakening a pattern — which is exactly the move
+# this repo forbids. The invariant is "no doc or shipped example TEACHES a
+# plaintext recipe", not "no file anywhere mentions the variable".
+
+
+def _shipped_package_files() -> list[Path]:
+    return sorted(path for path in SKILL_PACKAGE.rglob("*") if path.is_file())
+
+
+# Every doc that shows how to deliver the keyring password, plus the whole
+# shipped skill package (SKILL.md and claw.json live inside it).
 DOC_PATHS = [
     REPO_ROOT / "README.md",
     REPO_ROOT / "docs" / "INSTALL.md",
     REPO_ROOT / "docs" / "TROUBLESHOOTING.md",
     REPO_ROOT / "docs" / "CONFIGURATION.md",
-    REPO_ROOT / "skills" / "rustok-wallet-tui" / "SKILL.md",
+    *_shipped_package_files(),
 ]
 
 # Patterns that reintroduce plaintext password delivery.

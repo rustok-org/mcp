@@ -57,8 +57,38 @@ shellcheck scripts/*.sh
 
 ## Release Checklist
 
-- [ ] Version bumped in `CHANGELOG.md`
-- [ ] `pyproject.toml` version matches release tag
-- [ ] Docker image builds and runs
-- [ ] Checksums generated for all artifacts
-- [ ] GHCR tags: semver only, no `latest`
+The order below is not style — it is the only order that assembles. The image
+digest does not exist until the publish runs, the publish requires the bumped
+version already on `main`, and the git tag must land on the commit that carries
+the filled pins, because users fetch `install.sh` **by tag**. A tag cut before
+the pins are filled is dead permanently.
+
+**1 — prep (PR):**
+- [ ] Version bumped in every point (`tests/test_version_consistency.py` enforces
+      the set: `pyproject.toml`, skill frontmatter, `claw.json`,
+      `WALLET_VERSION`, the `DEFAULT_IMAGE` tag)
+- [ ] `CHANGELOG.md` describes the release — including anything user-facing that
+      landed since the last tag, not only the last PR
+- [ ] Docs carry no stale image tag
+
+**2 — publish (ops, from `main`):**
+- [ ] `gh workflow run wallet-publish.yml --ref main -f version=<X.Y.Z>` —
+      **`--ref main`**, because `install.sh` pins the cosign identity to
+      `@refs/heads/main`; a dispatch from a tag makes `cosign verify` reject the
+      honest image for every user
+- [ ] Never dispatch an already-published version (the workflow now refuses;
+      `allow_existing_tag` is break-glass only — it rebuilds and replaces)
+- [ ] `cosign verify` passes and a `.sig` tag appeared in GHCR
+
+**3 — pin (PR):**
+- [ ] `WALLET_DIGEST` = the digest just published; `SHIM_COMMIT` = the merge
+      commit from step 1 (it carries the bumped `DEFAULT_IMAGE`)
+- [ ] No fail-closed placeholders left in `scripts/install.sh`
+
+**4 — tag & publish (ops):**
+- [ ] Tag `wallet-tui-v<X.Y.Z>` on the step-3 merge commit — **last**
+- [ ] `sha256` of `install.sh` at that tag published in the release notes
+- [ ] Release notes state compatibility and migration (the shim chooses the image
+      version; an old shim keeps users on an old image whatever `update` prints)
+- [ ] Listings refreshed (ClawHub — then re-check its audit page, Smithery,
+      MCP registry); GHCR tags semver only, no `latest`
