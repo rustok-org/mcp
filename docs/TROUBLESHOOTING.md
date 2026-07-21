@@ -1,33 +1,99 @@
 # Troubleshooting
 
-## "no wallet keystore … create one first"
+**Start here:** `rustok doctor`. It checks the container engine is installed *and
+responding*, that `~/.local/bin` is on your `PATH`, whether the optional tools
+`rustok connect` needs are present, which wallets are running, and whether an old
+fixed-name container is still lying around.
 
-The wallet hasn't been created in this volume yet. Run onboarding once (podman shown;
-the docker `_FILE` variant is in [INSTALL](INSTALL.md#2-create-your-wallet-one-time)):
+## `rustok: command not found`
 
-```bash
-read -r -s -p "Keyring password: " pw && printf '%s' "$pw" | podman secret create rustok-keyring-claude - && unset pw
+The shim is installed to `~/.local/bin`, which your current shell may not have on
+`PATH` yet.
 
-podman run -it --rm -v rustok-wallet-tui:/data \
-  --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.7.1 create-wallet
+- Open a new shell, or `. ~/.bashrc` (`~/.zshrc`, `~/.profile`).
+- Installed with `RUSTOK_NO_MODIFY_PATH` set? Then nothing was added on purpose —
+  add `export PATH="$HOME/.local/bin:$PATH"` yourself.
+- Otherwise run `~/.local/bin/rustok doctor` directly; it will tell you the same.
+
+## The installer says cosign is required
+
+```
+cosign is required to verify the wallet image signature — install it: …
 ```
 
-Back up the printed 12 words and approval PIN, then start the agent again.
+The installer verifies the image's signature *before* writing anything to disk,
+so [cosign](https://docs.sigstore.dev/cosign/installation) is a hard requirement
+rather than an optional extra. No other rustok command uses it.
+
+## `cosign could NOT verify …` — the installer refuses to install
+
+Working as intended: the image did not verify against this repository's
+publishing workflow, and nothing was written to disk. Causes, in order of
+likelihood:
+
+- **the release has not published its signed image yet** — check the release
+  notes for the tag you are installing from;
+- you edited the pinned digest or identity in a local copy of `install.sh`;
+- something is actually wrong with the image. Do not work around it by skipping
+  verification — that is the one guarantee the pipe-to-shell install rests on.
+
+## `neither podman nor docker found`
+
+Install one — podman is recommended (rootless, and it ships the secret store the
+wallet uses for the keyring password):
+<https://podman.io/getting-started/installation>.
+
+## "no wallet keystore … create one first"
+
+The wallet has not been created for this agent yet:
+
+```bash
+rustok init                  # or: rustok init --agent hermes
+```
+
+It prints the 12-word recovery phrase and the approval PIN exactly once — run it
+in your own terminal, never through an agent. Back both up, then start the agent
+again.
+
+## `multiple wallets running: claude, hermes — use --agent <name>`
+
+More than one wallet is up, so a bare command would have to guess which one you
+mean — it refuses instead. Name it:
+
+```bash
+rustok console --agent claude
+rustok stop --agent hermes
+```
+
+If the list contains `(unlabeled)`, that wallet predates the label model: add
+`--label rustok.agent=<name>` to its launch config (see
+[INSTALL](INSTALL.md#running-a-second-agent)), or re-register it with
+`rustok connect <client> --force`.
+
+## `connect needs jq` / `connect hermes needs python3 with PyYAML`
+
+`rustok connect` edits your agent's config file and refuses to do that with
+string surgery. Install what it names (`dnf install jq` / `apt install jq`;
+Hermes itself ships python3 + PyYAML). No other rustok command needs them —
+`rustok doctor` reports both as informational.
 
 ## "backend not ready" / the agent can't reach the wallet
 
-- Confirm the engine is running and the image is pulled.
-- Confirm the password actually reaches the container — podman
-  `--secret …,type=env,target=RUSTOK_KEYRING_PASSWORD`, docker
-  `RUSTOK_KEYRING_PASSWORD_FILE` + file mount — and that it matches the one used at
-  `create-wallet` (a wrong password fails the unlock).
-- Confirm the same `-v rustok-wallet-tui:/data` volume is mounted as at onboarding.
+- `rustok status` — is a wallet actually running? The MCP client starts it when
+  the agent session starts.
+- `rustok doctor` — is the engine responding at all?
+- Was the password stored with a **different** wallet than the one mounted? A
+  wrong password fails the unlock. Re-store it with `rustok init --force`
+  (keys untouched).
+- Hand-rolled setup: confirm the same `-v rustok-wallet-tui:/data` volume is
+  mounted as at onboarding, and that the password reaches the container
+  (podman `--secret …,type=env,target=RUSTOK_KEYRING_PASSWORD`, docker
+  `RUSTOK_KEYRING_PASSWORD_FILE` + file mount).
 
 ## "RUSTOK_KEYRING_PASSWORD_FILE does not point to a readable regular file" / "… is empty"
 
-The named errors of the `_FILE` delivery — the container refuses to start instead of
-hanging on a missing password:
+The named errors of the `_FILE` delivery — the container refuses to start instead
+of hanging on a missing password:
 
 - **Wrong path**: the value of `RUSTOK_KEYRING_PASSWORD_FILE` must match the mount
   target (podman secret default: `/run/secrets/<secret-name>`).
@@ -45,63 +111,69 @@ or recover from the 12-word phrase into a fresh wallet.
 
 ## Forgot the approval PIN
 
-The PIN is printed only during `create-wallet`. If you lost it, run:
+The PIN is printed only when the wallet is created. If you lost it, reset it in
+the running wallet (this needs the keyring password and an interactive TTY):
 
 ```bash
 docker exec -it "$(docker ps -q --filter label=rustok=wallet --filter label=rustok.agent=claude)" core-server set-pin
 ```
 
-This requires the keyring password and an interactive TTY.
-
 ## "container name already in use" / cannot create container
 
 You launched the wallet with a fixed `--name`. The agent-launched container must
-**not** use `--name` — a fixed name collides the moment a health probe or a second
+**not** use one — a fixed name collides the moment a health probe or a second
 `mcp list` starts another instance. Use `--label rustok=wallet --label
-rustok.agent=<agent>` instead (as in [INSTALL](INSTALL.md#3-connect-an-agent-stdio));
-the container then runs under an auto-generated name and stays discoverable by label.
-A leftover named container from an older setup: `docker rm -f rustok-wallet-tui`.
+rustok.agent=<agent>` instead (as in
+[INSTALL](INSTALL.md#appendix-installing-without-the-shim)); the container then
+runs under an auto-generated name and stays discoverable by label. A leftover
+named container from an older setup: `docker rm -f rustok-wallet-tui`
+(`rustok doctor` warns when it sees one).
 
 ## The console command prints "'docker exec' requires at least 2 arguments"
 
-The label-discovery one-liner substituted an **empty** container id, so `docker
-exec -it "" …` has nothing to run in. Two causes:
+The by-hand label-discovery one-liner substituted an **empty** container id, so
+`docker exec -it "" …` has nothing to run in. `rustok console` handles both
+causes for you; by hand, they are:
 
-- **The wallet isn't running.** The agent-launched container only exists while the
-  agent session is live. Start (or restart) the agent session, then open the
-  console. Check with `docker ps --filter label=rustok=wallet` — an empty list
-  means no wallet is up.
-- **Two containers share the same `rustok.agent` label** (a duplicate launch). The
-  same `docker ps --filter label=rustok=wallet` shows both; stop the extra one, or
-  give each agent a distinct `rustok.agent=<name>` (see
+- **The wallet isn't running.** The agent-launched container only exists while
+  the agent session is live. Check with `rustok status` (or
+  `docker ps --filter label=rustok=wallet`) — an empty list means no wallet is up.
+- **Two containers share the same `rustok.agent` label** (a duplicate launch).
+  Stop the extra one, or give each agent a distinct `rustok.agent=<name>` (see
   [Running a second agent](INSTALL.md#running-a-second-agent)).
 
-## After an upgrade the wallet looks empty / the agent still runs the old version
+## After an update the wallet looks empty / the agent still runs the old version
 
-The wallet lives in the volume, not in the image: start the new image with the **same**
-`-v rustok-wallet-tui:/data` and your address, keys and PIN come back. A different
-volume name is a different (empty) wallet. If the agent still behaves like the old
-build, the image tag in its MCP config is stale — the agent spawns the container itself.
-See [Upgrading the wallet image](INSTALL.md#upgrading-the-wallet-image).
+The wallet lives in the volume, not in the image: the same volume brings your
+address, keys and PIN back. A different volume name is a different (empty)
+wallet.
 
-A transaction the agent parked but nobody approved does **not** survive a restart (the
-pending queue is in the container's memory). Nothing was signed or sent — ask the agent
-to propose it again.
+- A wallet that was **running** during `rustok update` keeps the previous image
+  until its agent's next session (or until `rustok stop`) — restart the agent.
+- Hand-rolled setup: the image tag in the agent's MCP config is stale — the agent
+  spawns the container itself. `rustok connect <client> --force` rewrites it.
+- A transaction the agent parked but nobody approved does **not** survive a
+  restart (the pending queue is in the container's memory). Nothing was signed or
+  sent — ask the agent to propose it again.
+
+> Note on trust: `rustok update` **pulls by tag** and
+> **does not re-run the cosign verification** — the signature check belongs to
+> `install.sh`, so it covers installation, not the whole lifecycle. Re-running
+> the installer for a new release gives you the verified path again.
 
 ## Empty balances / positions for a chain
 
 That chain has no RPC configured. Set `RUSTOK_RPC_URLS_<chain>` (or
-`RUSTOK_ALCHEMY_API_KEY`) and include the chain in `RUSTOK_ALLOWED_CHAINS`.
-Example: `-e RUSTOK_ALLOWED_CHAINS=1 -e RUSTOK_RPC_URLS_1=https://…`.
+`RUSTOK_ALCHEMY_API_KEY`) and include the chain in `RUSTOK_ALLOWED_CHAINS`, then
+re-run `rustok connect <client> --force` so the registration picks it up.
 
 ## Tools not appearing (Claude Desktop / Cursor)
 
 1. Fully restart the client (quit, not just close the window).
-2. Check the MCP config path:
-   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-   - Linux: `~/.config/Claude/claude_desktop_config.json`
-   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-3. Validate the JSON, and confirm `docker` is on PATH for the client.
+2. Confirm the registration landed: `rustok status` after starting a session, and
+   check the client's own MCP list.
+3. Hand-written config? Validate the JSON, and confirm the engine binary is on
+   `PATH` for the client.
 4. The client must grant `read_wallet` / `preview_tx` / `execute_tx` for the
    corresponding tools to be listed/callable.
 

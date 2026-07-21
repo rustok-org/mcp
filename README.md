@@ -17,13 +17,24 @@ Rustok ships **two wallet products** — pick the trust model you want:
 
 ## Install (rustok-wallet-tui, self-custody)
 
-The wallet ships as one self-contained Docker image (Core + Gateway + MCP over
-**stdio** + the human-approval console); keys live only in a local Docker volume
-and never leave your machine. Follow the [Installation Guide](docs/INSTALL.md):
-run `create-wallet` once, then add it as a stdio MCP server in Claude Desktop /
-Cursor. Transactions that move funds are approved by a human in a second
-terminal by opening `rustok-console` against the running wallet container
-(see [Opening the approval console](docs/INSTALL.md#opening-the-approval-console)).
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.0/scripts/install.sh | sh
+
+rustok init             # creates the wallet — prints the 12 words + PIN once
+rustok connect claude   # registers it with your agent (or: cursor / hermes)
+```
+
+The installer verifies the wallet image's cosign signature **before** anything
+touches disk, pulls it by digest, and installs the `rustok` command — it never
+touches a secret, a keystore or your wallet. Requires podman (or docker) and
+cosign; you can read the script before running it. Full walkthrough, including
+the by-hand setup without the shim: [Installation Guide](docs/INSTALL.md).
+
+The wallet is one self-contained image (Core + Gateway + MCP over **stdio** + the
+human-approval console); keys live only in a local container volume and never
+leave your machine. Transactions that move funds are approved by a human in a
+second terminal with `rustok console` — the agent cannot drive it.
 
 ## Install as an agent skill
 

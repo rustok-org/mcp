@@ -22,12 +22,24 @@ DOC_PATHS = [
 ]
 
 # Patterns that reintroduce plaintext password delivery.
+#
+# The last two close a hole this guard carried until PR-4.1: passing the variable
+# through from the caller's environment (`-e RUSTOK_KEYRING_PASSWORD`, no value)
+# kept the password out of argv but still landed it in the container's
+# `inspect` Config.Env — the same leak class as the retired `--env-file`, only
+# quieter, and none of the value-shaped patterns above matched it. Both forms
+# discriminate against the legitimate recipes: the trailing ` \` excludes the
+# `_FILE=` shell lines, and the closing quote after `PASSWORD` excludes both
+# `…_PASSWORD_FILE=…` and `target=RUSTOK_KEYRING_PASSWORD` (verified against
+# every occurrence in the five docs).
 FORBIDDEN = [
     'RUSTOK_KEYRING_PASSWORD="',  # inline value in a shell example
     '"RUSTOK_KEYRING_PASSWORD": "',  # value inside an MCP-config env block
     "RUSTOK_KEYRING_PASSWORD=%s",  # the legacy env-file printf recipe
     '"--env-file"',  # env-file in MCP-config args
     "--env-file ~/",  # env-file in a runnable shell example
+    "-e RUSTOK_KEYRING_PASSWORD \\",  # env passthrough in a shell example
+    '"RUSTOK_KEYRING_PASSWORD"',  # env passthrough in MCP-config args
 ]
 
 
