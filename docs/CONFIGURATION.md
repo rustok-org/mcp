@@ -34,8 +34,14 @@ otherwise that chain is skipped (no balances/positions for it).
 The wallet core listens for human approvals on a UNIX socket at
 `/run/wallet/approve.sock` inside the container. The directory is created by the
 image — it is not a volume and not a user setting. To review and approve or deny
-a pending transaction, open the console in a separate terminal. The container
-runs under an auto-generated name (labels, not `--name`), so find it by label:
+a pending transaction, open the console in a separate terminal:
+
+```bash
+rustok console
+```
+
+Without the shim: the container runs under an auto-generated name (labels, not
+`--name`), so find it by label.
 
 ```bash
 docker exec -it "$(docker ps -q --filter label=rustok=wallet --filter label=rustok.agent=claude)" rustok-console
