@@ -1,13 +1,10 @@
 ---
 name: rustok-wallet-tui
-description: Self-custody Ethereum agent wallet. Runs entirely on your machine as one Docker image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain requires your approval in a separate terminal console, never inside the agent chat; message signing is not console-gated. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
+description: Self-custody Ethereum agent wallet. Installs with one command and runs entirely on your machine as a single container image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain requires your approval in a separate terminal console, never inside the agent chat; message signing is not console-gated. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
 version: 0.8.0
 metadata:
   openclaw:
     emoji: "🦀"
-    requires:
-      bins:
-        - docker
     homepage: https://github.com/rustok-org/mcp
 ---
 
