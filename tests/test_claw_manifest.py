@@ -7,6 +7,7 @@ mixed up again.
 """
 
 import json
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -59,3 +60,25 @@ def test_claw_manifest_version_matches_pyproject() -> None:
     with (REPO_ROOT / "pyproject.toml").open("rb") as fh:
         pyproject = tomllib.load(fh)
     assert claw["version"] == pyproject["project"]["version"]
+
+
+def test_claw_and_skill_descriptions_stay_identical() -> None:
+    """The storefront copy is written twice — it must not drift.
+
+    `claw.json` feeds the ClawHub listing and the SKILL.md frontmatter feeds the
+    agent's own view of the skill; both are the same sentence about what this
+    wallet does and does not protect. Nothing forced them to agree until now, so
+    editing one and forgetting the other would ship a listing that promises
+    something the skill itself does not say.
+    """
+    claw_description = _load_claw()["description"]
+    # Read the frontmatter line directly rather than through a YAML parser:
+    # PyYAML is only present here transitively and is not a declared dependency.
+    skill_text = (CLAW_PATH.parent / "SKILL.md").read_text()
+    match = re.search(r"^description: (.+)$", skill_text, re.MULTILINE)
+    assert match, "SKILL.md frontmatter has no description line"
+    skill_description = match.group(1)
+    assert claw_description == skill_description, (
+        "claw.json and SKILL.md describe the skill differently — the storefront "
+        "and the agent must be told the same thing"
+    )
