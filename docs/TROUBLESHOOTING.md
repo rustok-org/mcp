@@ -41,12 +41,27 @@ read the message before assuming the worst:
 
 **The check could not complete** (most common, and not an attack):
 
+- **`no signatures found` on cosign 2.x — check this first.** Our images are
+  signed with cosign 3, which stores the signature as an **OCI referrer**;
+  cosign 2.x only looks for a `.sig` tag, finds nothing, and reports it exactly
+  like a stripped signature. It is not a downgrade in your setup and not a
+  problem with the image — 2.x simply cannot see it. Two ways forward, both
+  fine: **upgrade to cosign 3+** and re-run, or **remove cosign** and re-run —
+  provenance is optional, and the install proceeds by digest, which is what
+  fixes the bytes you receive either way. (Removing your verifier to get past a
+  check sounds wrong, which is why it is spelled out: here the check is the
+  optional layer, not the guarantee.)
 - **no network path to the Sigstore transparency log** — keyless verification is
   an online check, so an offline machine, a proxy or a firewall lands here;
-- a **rate limit** from the log, or a transient Sigstore outage;
-- an **outdated cosign** that cannot read the current signature format.
+- a **rate limit** from the log, or a transient Sigstore outage.
 
 Retry later, or install by digest and check provenance afterwards.
+
+Why the installer will not just skip a failed check: cosign 2.x cannot tell our
+signature-in-a-referrer apart from a signature someone **stripped**. Both look
+like `no signatures found`. Treating that as "could not complete" and carrying
+on would hand an attacker a one-step bypass, so this branch stays fail-closed
+and the choice stays yours.
 
 **The signature genuinely did not match:**
 
