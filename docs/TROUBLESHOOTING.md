@@ -15,27 +15,49 @@ The shim is installed to `~/.local/bin`, which your current shell may not have o
   add `export PATH="$HOME/.local/bin:$PATH"` yourself.
 - Otherwise run `~/.local/bin/rustok doctor` directly; it will tell you the same.
 
-## The installer says cosign is required
+## The installer says it is skipping the signature check
 
 ```
-cosign is required to verify the wallet image signature — install it: …
+rustok-install: cosign is not installed (optional …) — skipping the signature check.
+rustok-install: cosign is installed but will not run (…) — skipping the signature check.
 ```
 
-The installer verifies the image's signature *before* writing anything to disk,
-so [cosign](https://docs.sigstore.dev/cosign/installation) is a hard requirement
-rather than an optional extra. No other rustok command uses it.
+**Not an error, and not something you have to fix before installing.** cosign
+proves *who built* the image (provenance). What you actually get is fixed by the
+`@sha256:` digest pinned inside the installer — those bytes or nothing. So a
+missing cosign, or one that is present but cannot execute (no `+x` bit, wrong
+architecture, missing libc, a truncated download), downgrades the run to
+"installed by digest, provenance unchecked" and says so out loud.
+
+To check provenance later, install a working
+[cosign](https://docs.sigstore.dev/cosign/installation) and run the command the
+installer printed. No other rustok command uses it.
 
 ## `cosign could NOT verify …` — the installer refuses to install
 
-Working as intended: the image did not verify against this repository's
-publishing workflow, and nothing was written to disk. Causes, in order of
-likelihood:
+The install stopped and nothing was written to disk. This branch only happens
+when cosign **ran** and came back unhappy, which has two very different causes —
+read the message before assuming the worst:
+
+**The check could not complete** (most common, and not an attack):
+
+- **no network path to the Sigstore transparency log** — keyless verification is
+  an online check, so an offline machine, a proxy or a firewall lands here;
+- a **rate limit** from the log, or a transient Sigstore outage;
+- an **outdated cosign** that cannot read the current signature format.
+
+Retry later, or install by digest and check provenance afterwards.
+
+**The signature genuinely did not match:**
 
 - **the release has not published its signed image yet** — check the release
   notes for the tag you are installing from;
 - you edited the pinned digest or identity in a local copy of `install.sh`;
-- something is actually wrong with the image. Do not work around it by skipping
-  verification — that is the one guarantee the pipe-to-shell install rests on.
+- something is actually wrong with the image.
+
+In either case, do not "fix" it by deleting cosign so the installer skips the
+check — if the signature is being served and disagrees, that is exactly the
+signal worth stopping for.
 
 ## `neither podman nor docker found`
 
@@ -95,7 +117,7 @@ If it is older than `v0.8.0`, **re-run the installer** — do not stop at
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.0/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.1/scripts/install.sh | sh
 ```
 
 The image version is chosen by the **shim**, and the shim does not update itself.
