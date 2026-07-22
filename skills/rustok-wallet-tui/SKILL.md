@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet-tui
 description: Self-custody Ethereum agent wallet. Installs with one command and runs entirely on your machine as a single container image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain requires your approval in a separate terminal console, never inside the agent chat; message signing is not console-gated. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.8.0
+version: 0.8.1
 metadata:
   openclaw:
     emoji: "🦀"
@@ -52,7 +52,7 @@ Three commands, in a **terminal the agent cannot see** — the full guide is
 ```bash
 # 1. install the `rustok` command (verifies the image signature, then installs)
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.0/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.1/scripts/install.sh | sh
 
 # 2. create the wallet — prints the 12-word phrase and the approval PIN ONCE
 rustok init

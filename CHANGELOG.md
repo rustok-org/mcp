@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] — 2026-07-22
+
+### Fixed
+- **cosign is no longer a hard prerequisite of the one-command install.** The
+  first live install hit a wall the release had not anticipated: `install.sh`
+  refused to run without `cosign`, which Fedora does not carry in its
+  repositories — so "one command" became "first go and find a verification tool
+  somewhere". Integrity never depended on it: the image is pulled **by digest**
+  (content-addressed — those bytes or nothing) and the script itself ships from
+  an immutable tag. cosign proves *provenance* (built by this repo's workflow),
+  which is a layer worth having and a poor gate. The installer now branches
+  three ways, and never silently: cosign missing **or unable to run** → warns,
+  names the digest, prints the command to check provenance later, and continues;
+  cosign works and the signature verifies → says so and continues; cosign works
+  and the signature does **not** verify → still refuses, fail-closed.
+- **A broken cosign is no longer reported as a tampered image.** Branching on
+  `command -v` answered "is there a file called cosign", not "can it run" — and
+  answered it differently per shell (for a present-but-non-executable file
+  `/bin/sh` says no, `bash` says yes). A cosign that exists but cannot execute
+  (no `+x`, wrong architecture, missing libc, truncated download) therefore
+  reached `cosign verify`, whose non-zero exit is indistinguishable from a bad
+  signature, and the user was told their image was tampered with. The installer
+  now probes with `cosign version` first and treats "cannot run" as "no cosign".
+- **The refusal message stopped over-claiming.** Keyless verification reaches the
+  Sigstore transparency log over the network, so a failed check may equally mean
+  no connectivity, a rate limit or an outdated cosign. The message now names both
+  possibilities instead of announcing sabotage; the behaviour stays fail-closed.
+
+### Changed
+- `docs/INSTALL.md` and `docs/TROUBLESHOOTING.md` describe cosign as an optional
+  provenance layer rather than a requirement, and spell out what the digest
+  guarantees without it. Platform support is stated honestly: `linux/amd64`,
+  Windows via WSL2, no native Windows installer, macOS/arm64 not published.
+
 ## [0.8.0] — 2026-07-21
 
 ### Added

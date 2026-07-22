@@ -31,12 +31,30 @@ fresh() {
     STUB_CURL_FAIL=0
     STUB_PULL_FAIL=0
     STUB_COSIGN_FAIL=0
+    STUB_COSIGN_BROKEN=0
     NO_MODIFY=""
     TEST_PATH="$WORK/bin"
+    RUN_SHELL="sh"
 }
 
 plant_podman() { ln -s "$TESTS_DIR/stub-bin/podman" "$WORK/bin/podman"; }
 plant_docker() { ln -s "$TESTS_DIR/stub-bin/podman" "$WORK/bin/docker"; }
+
+# cosign is planted by fresh(); these two take it away in the two ways the real
+# world does. They are NOT interchangeable, and the difference is the whole
+# reason this branch exists:
+#   unplant_cosign  -> not in PATH at all.
+#   unexec_cosign   -> in PATH, real file, no +x. Under `sh` (POSIX mode)
+#                      `command -v` reports FALSE, under `bash` TRUE — so this
+#                      one is only meaningful with RUN_SHELL=bash, and it is the
+#                      literal state of the machine that triggered this fix.
+unplant_cosign() { rm -f "$WORK/bin/cosign"; }
+unexec_cosign() {
+    rm -f "$WORK/bin/cosign"
+    printf '#!/bin/sh\necho unreachable\n' >"$WORK/bin/cosign"
+    chmod 644 "$WORK/bin/cosign"
+    ln -s "$(command -v bash)" "$WORK/bin/bash" 2>/dev/null || true
+}
 
 run_install() {
     # SHELL fixed to bash so the profile target is deterministic (-> .bashrc).
@@ -44,8 +62,9 @@ run_install() {
         STUB_LOG="$WORK/log" \
         STUB_CURL_FAIL="$STUB_CURL_FAIL" STUB_PULL_FAIL="$STUB_PULL_FAIL" \
         STUB_COSIGN_FAIL="$STUB_COSIGN_FAIL" \
+        STUB_COSIGN_BROKEN="$STUB_COSIGN_BROKEN" \
         RUSTOK_NO_MODIFY_PATH="$NO_MODIFY" \
-        sh "$INSTALL" </dev/null 2>&1)" && RC=0 || RC=$?
+        "$RUN_SHELL" "$INSTALL" </dev/null 2>&1)" && RC=0 || RC=$?
 }
 
 ok() { N=$((N + 1)); PASS=$((PASS + 1)); echo "ok $N - $1"; }
@@ -57,7 +76,10 @@ not_ok() {
 }
 assert_exit() { [ "$RC" -eq "$1" ]; }
 assert_has() { case "$OUT" in *"$1"*) return 0 ;; *) return 1 ;; esac; }
+assert_lacks() { case "$OUT" in *"$1"*) return 1 ;; *) return 0 ;; esac; }
 log_has() { grep -q "$1" "$WORK/log"; }
+log_lacks() { ! grep -q "$1" "$WORK/log"; }
+shim_installed() { [ -f "$WORK/home/.local/bin/rustok" ] && [ -x "$WORK/home/.local/bin/rustok" ]; }
 
 # --- happy path ---------------------------------------------------------------
 
@@ -89,6 +111,7 @@ if assert_exit 0 \
 else not_ok "install: shim fetched over --proto=https --tlsv1.2 from a commit-SHA-pinned raw URL (not a mutable tag)"; fi
 
 # --- fail-closed: a bad signature installs NOTHING ----------------------------
+# A WORKING cosign whose verify says no. The only branch that may refuse.
 
 fresh
 plant_podman
@@ -99,6 +122,61 @@ if assert_exit 1 && assert_has "signature" \
     && [ ! -e "$WORK/home/.bashrc" ]; then
     ok "install: a failed cosign verify aborts BEFORE writing the shim or the PATH block (fail-closed)"
 else not_ok "install: a failed cosign verify aborts BEFORE writing the shim or the PATH block (fail-closed)"; fi
+
+# The refusal must stay fail-closed but stop CLAIMING sabotage: keyless verify
+# reaches Rekor over the network, so a non-zero exit is "signature did not match
+# OR the check could not finish". Naming only tampering turns an outage into an
+# accusation — the same wall we are tearing down, one step later.
+if assert_exit 1 && assert_has "signature" && assert_has "transparency log"; then
+    ok "install: the refusal names BOTH causes (bad signature / check could not complete), not tampering alone"
+else not_ok "install: the refusal names BOTH causes (bad signature / check could not complete), not tampering alone"; fi
+
+# --- cosign ABSENT: provenance is skipped, the install still happens ----------
+
+fresh
+plant_podman
+unplant_cosign
+run_install
+if assert_exit 0 && shim_installed \
+    && assert_has "digest" \
+    && assert_lacks "tampered" \
+    && log_has 'podman pull .*@sha256:' \
+    && grep -q '^# >>> rustok installer >>>$' "$WORK/home/.bashrc"; then
+    ok "install: no cosign at all -> warns about provenance, still installs by digest (cosign is not a wall)"
+else not_ok "install: no cosign at all -> warns about provenance, still installs by digest (cosign is not a wall)"; fi
+
+# --- cosign PRESENT but NOT RUNNABLE (wrong arch / missing libc) --------------
+# Executable, so `command -v` says yes in every shell — only running it tells
+# the truth. Without the `version` probe this lands in verify and dies with
+# "tampered" on a perfectly good image.
+
+fresh
+plant_podman
+STUB_COSIGN_BROKEN=1
+run_install
+if assert_exit 0 && shim_installed \
+    && assert_lacks "tampered" \
+    && log_has 'cosign version' \
+    && log_lacks 'cosign verify' \
+    && log_has 'podman pull .*@sha256:'; then
+    ok "install: cosign present but unrunnable -> probed, treated as absent, installs by digest (never called a tamper)"
+else not_ok "install: cosign present but unrunnable -> probed, treated as absent, installs by digest (never called a tamper)"; fi
+
+# --- cosign PRESENT but not +x, run under bash -------------------------------
+# The literal machine state that triggered this fix. Under `sh` the file reads
+# as absent; under `bash` `command -v` returns TRUE and the exec fails with 126.
+# Both must end in the same place: installed, no accusation.
+
+fresh
+plant_podman
+unexec_cosign
+RUN_SHELL="bash"
+run_install
+if assert_exit 0 && shim_installed \
+    && assert_lacks "tampered" \
+    && log_has 'podman pull .*@sha256:'; then
+    ok "install: cosign present without +x under bash -> installs by digest instead of crying tamper (the reported incident)"
+else not_ok "install: cosign present without +x under bash -> installs by digest instead of crying tamper (the reported incident)"; fi
 
 # --- fail-closed: a failed pull installs nothing ------------------------------
 

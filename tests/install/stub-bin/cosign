@@ -6,6 +6,16 @@ set -eu
 
 [ -n "${STUB_LOG:-}" ] && printf 'cosign %s\n' "$*" >>"$STUB_LOG"
 
+# An EXECUTABLE but non-functional cosign: wrong arch, missing libc, truncated
+# download. The kernel/loader refuses it -> 126 on EVERY verb, `version`
+# included. Deliberately a separate knob from STUB_COSIGN_FAIL: that one must
+# keep `version` green so the works+fail case still proves the die. Merging them
+# would silently move the fail-closed test into the "cannot run" branch.
+if [ "${STUB_COSIGN_BROKEN:-0}" = "1" ]; then
+    echo "stub: cannot execute binary file: Exec format error" 1>&2
+    exit 126
+fi
+
 case "${1:-}" in
     verify)
         if [ "${STUB_COSIGN_FAIL:-0}" = "1" ]; then

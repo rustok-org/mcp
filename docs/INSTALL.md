@@ -11,22 +11,32 @@ One command installs it; `rustok` does the rest.
 ## Prerequisites
 
 - **Podman** (recommended — rootless, ships a secret store) or **Docker**.
-- **cosign** — the installer refuses to install anything it cannot verify, so
-  this one is required, not optional:
-  [installation](https://docs.sigstore.dev/cosign/installation). Nothing else in
-  the wallet uses it.
 - **curl**.
+- **cosign — optional.** It is a *provenance* tool: it proves the image was
+  built by this repository's workflow. It is **not** what makes the download
+  trustworthy — the installer pulls **by digest**, so you get exactly the bytes
+  pinned in the script or nothing at all. If cosign is present and working the
+  installer verifies the signature; if it is missing (or installed but unable to
+  run) the installer says so, skips that check and continues. A signature that
+  is present but *does not verify* still stops the install.
+  [installation](https://docs.sigstore.dev/cosign/installation) — nothing else
+  in the wallet uses it.
 - **`jq`** — needed only by `rustok connect claude` / `connect cursor`;
   **`python3` + PyYAML** — needed only by `rustok connect hermes`.
   `rustok doctor` tells you which of these you are missing.
 - An Ethereum RPC URL (an Alchemy key URL is recommended; a public RPC works for
   testing).
 
+**Platforms.** The published image is `linux/amd64`, and the installer is POSIX
+`sh`. Linux is the tested path. On **Windows, install inside WSL2** and treat it
+as a Linux machine — there is no native Windows installer, and we are not going
+to pretend otherwise. macOS and `arm64` are not published yet.
+
 ## 1. Install
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.0/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.1/scripts/install.sh | sh
 ```
 
 ### Inspect it before you run it
@@ -37,7 +47,7 @@ exactly what runs.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.0/scripts/install.sh -o install.sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.1/scripts/install.sh -o install.sh
 less install.sh      # ~150 lines of POSIX sh
 sh install.sh
 ```
@@ -54,11 +64,16 @@ check the bytes instead of reading them.
 
 ### What the installer does — and what it deliberately does not
 
-1. **Verifies the wallet image's cosign signature first**, against this
-   repository's publishing workflow. This happens *before* anything is written
-   to disk: an unsigned or tampered image is refused, not downloaded.
+1. **Checks provenance first, when it can.** If cosign is available and runnable
+   it verifies the image's signature against this repository's publishing
+   workflow *before* anything is written to disk — a wrong-identity image is
+   refused, not downloaded. If cosign is missing or cannot run, the installer
+   prints that plainly and carries on: provenance is a layer on top, not the
+   thing that keeps you safe. What it will never do is fail *quietly* — a cosign
+   that runs and disagrees aborts the install.
 2. Pulls the image **by digest** (`@sha256:…`), so a mutable tag cannot be
-   repointed at different bytes underneath you.
+   repointed at different bytes underneath you. This — not cosign — is what
+   guarantees you get the exact image this release pinned.
 3. Fetches the `rustok` shim from a **commit-pinned** URL over
    `--proto '=https' --tlsv1.2` and installs it to `~/.local/bin`.
 4. Adds `~/.local/bin` to your `PATH` in one marked block of your shell profile.

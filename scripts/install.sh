@@ -4,9 +4,12 @@
 #   curl --proto '=https' --tlsv1.2 -fsSL \
 #     https://raw.githubusercontent.com/rustok-org/mcp/vX.Y.Z/scripts/install.sh | sh
 #
-# What it does: pulls the wallet image BY DIGEST, verifies its cosign signature
-# against THIS repo's publishing workflow (a mutable tag cannot be swapped in),
-# installs the `rustok` shim into ~/.local/bin, and adds it to PATH.
+# What it does: pulls the wallet image BY DIGEST (content-addressed — you get
+# exactly those bytes or nothing), installs the `rustok` shim into ~/.local/bin,
+# and adds it to PATH. If cosign is available it ALSO verifies the image's
+# signature against THIS repo's publishing workflow — an optional provenance
+# layer, never a prerequisite: integrity comes from the digest, cosign proves
+# who built it. A signature that fails to verify still refuses to install.
 #
 # What it deliberately does NOT do (epic invariant #1): it never touches a
 # secret, a keystore volume or your wallet. Creating the wallet — the 12-word
@@ -26,7 +29,7 @@ set -eu
 # to their exact bytes. Both start as fail-closed placeholders — an unfilled
 # release cannot pull or fetch anything (the all-zero refs 404 / have no
 # signature), it fails loudly instead of installing something unverified.
-WALLET_VERSION="0.8.0"
+WALLET_VERSION="0.8.1"
 WALLET_DIGEST="sha256:5225bdb1e9ea27e329aead0b6ceec156172174545d3eaddeb18bde5313670d74"
 SHIM_COMMIT="bdcb118ca0f6287e17f65186b96357e5aa7e7bed"
 
@@ -57,6 +60,32 @@ detect_engine() {
     else
         die "neither podman nor docker found — install podman (recommended): https://podman.io/getting-started/installation"
     fi
+}
+
+cosign_state() {
+    # Answers "can cosign RUN here", not "is there a file called cosign in
+    # PATH" — `command -v` answers the second question, and answers it
+    # differently per shell: for a present-but-non-executable file /bin/sh in
+    # POSIX mode reports FALSE while bash reports TRUE. A cosign that exists but
+    # cannot execute (no +x, wrong architecture, missing libc, truncated
+    # download) would then reach `cosign verify`, whose non-zero exit is
+    # indistinguishable from a bad signature — and we would accuse a healthy
+    # image of being tampered with when the only broken thing is the verifier.
+    # `version` is the probe: offline, cheap, and it fails exactly when the
+    # binary cannot run.
+    command -v cosign >/dev/null 2>&1 || { echo absent; return 0; }
+    cosign version >/dev/null 2>&1 || { echo broken; return 0; }
+    echo works
+}
+
+skip_provenance() {
+    # $1 — the honest reason, $2 — the image ref. Never phrased as a security
+    # event: nothing here says anything about the image, only about the tool.
+    say "$1 — skipping the signature check."
+    say "this is not an error: the image is pinned by digest ($WALLET_DIGEST),"
+    say "so you get exactly those bytes or nothing. cosign proves WHO built them (provenance),"
+    say "which you can check any time later, once cosign works:"
+    say "  cosign verify $2 --certificate-identity $COSIGN_IDENTITY --certificate-oidc-issuer $COSIGN_ISSUER"
 }
 
 profile_file() {
@@ -103,27 +132,44 @@ add_to_path() {
 
 main() {
     engine="$(detect_engine)"
-    command -v cosign >/dev/null 2>&1 \
-        || die "cosign is required to verify the wallet image signature — install it: https://docs.sigstore.dev/cosign/installation (no other step needs it)"
     command -v curl >/dev/null 2>&1 \
         || die "curl is required to fetch the shim — install it (dnf/apt install curl)"
 
     image="${IMAGE_REPO}@${WALLET_DIGEST}"
 
-    # 1) Verify the signature FIRST (cheapest gate, downloads no image bytes):
-    #    an unsigned or wrong-identity image is rejected before anything lands
-    #    on disk. Ratified order (decision #2): nothing is written until the
-    #    image is proven to come from this repo's signing workflow.
-    say "verifying the wallet image signature ($WALLET_VERSION)…"
-    cosign verify "$image" \
-        --certificate-identity "$COSIGN_IDENTITY" \
-        --certificate-oidc-issuer "$COSIGN_ISSUER" >/dev/null 2>&1 \
-        || die "cosign could NOT verify $image against this repo's publishing workflow — refusing to install (an unsigned or tampered image, or a release that has not run its signed publish yet)"
+    # 1) Provenance FIRST when it is possible at all (cheapest gate, downloads
+    #    no image bytes): a wrong-identity image is rejected before anything
+    #    lands on disk. Ratified order (decision #2) is unchanged — what changed
+    #    (Р-7а) is that a MISSING or UNRUNNABLE cosign no longer stops the
+    #    install. Integrity does not depend on it: the pull below is by digest.
+    #    Only a working cosign that says "no" refuses, and it refuses hard.
+    case "$(cosign_state)" in
+        works)
+            say "verifying the wallet image signature ($WALLET_VERSION)…"
+            cosign verify "$image" \
+                --certificate-identity "$COSIGN_IDENTITY" \
+                --certificate-oidc-issuer "$COSIGN_ISSUER" >/dev/null 2>&1 \
+                || die "cosign could NOT verify $image against this repo's publishing workflow — refusing to install.
+  Either the signature does not match (an unsigned or tampered image, or a release whose signed
+  publish has not run yet), OR the check could not complete — keyless verification reaches the
+  Sigstore transparency log over the network, so no connectivity, a rate limit or an outdated
+  cosign fail here too. Nothing has been installed. Retry later, or see docs/TROUBLESHOOTING.md."
+            say "signature verified — built by this repo's publishing workflow."
+            ;;
+        broken)
+            skip_provenance "cosign is installed but will not run (no execute bit, wrong architecture, missing libc or a truncated download)" "$image"
+            ;;
+        *)
+            skip_provenance "cosign is not installed (optional — it is a provenance tool, not a prerequisite)" "$image"
+            ;;
+    esac
 
-    # 2) Pull the verified image by digest.
-    say "pulling the verified image…"
+    # 2) Pull by digest. NOT called "the verified image" — two of the three
+    #    branches above skipped verification, and the pull is what the digest
+    #    guarantees, not what cosign did.
+    say "pulling the image by digest…"
     "$engine" pull "$image" >/dev/null \
-        || die "'$engine' failed to pull the verified image — check the daemon/machine and your network"
+        || die "'$engine' failed to pull the image — check the daemon/machine and your network"
 
     # 3) Fetch the shim from a COMMIT-pinned raw URL (immutable; a force-pushed
     #    tag cannot swap it) over a hardened TLS channel, then install atomically.
@@ -144,7 +190,7 @@ main() {
     # 5) Next steps — the installer's job ends here; the wallet is the human's.
     say "done. Before running, you can inspect this script and the shim you just installed."
     say "next (in YOUR terminal, never through an agent): rustok init   — creates the wallet and prints your 12-word phrase + PIN once"
-    say "to roll back to a previous version, re-run the installer from that version's tag: $RAW_BASE/v<older>/scripts/install.sh"
+    say "to roll back to a previous version, re-run the installer from that version's tag: $RAW_BASE/wallet-tui-v<older>/scripts/install.sh"
 }
 
 main "$@"
