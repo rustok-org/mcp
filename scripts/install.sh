@@ -153,7 +153,12 @@ main() {
   Either the signature does not match (an unsigned or tampered image, or a release whose signed
   publish has not run yet), OR the check could not complete — keyless verification reaches the
   Sigstore transparency log over the network, so no connectivity, a rate limit or an outdated
-  cosign fail here too. Nothing has been installed. Retry later, or see docs/TROUBLESHOOTING.md."
+  cosign fail here too.
+  On 'no signatures found', check your version first: cosign 2.x cannot SEE our signatures at all
+  (they are stored as OCI referrers, and 2.x looks for a .sig tag). Two ways forward, both fine:
+  upgrade to cosign 3+ and re-run, or remove cosign and re-run — provenance is optional, the
+  install then proceeds by digest, which is what fixes the bytes you get either way.
+  Nothing has been installed. See docs/TROUBLESHOOTING.md."
             say "signature verified — built by this repo's publishing workflow."
             ;;
         broken)

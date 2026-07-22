@@ -131,6 +131,15 @@ if assert_exit 1 && assert_has "signature" && assert_has "transparency log"; the
     ok "install: the refusal names BOTH causes (bad signature / check could not complete), not tampering alone"
 else not_ok "install: the refusal names BOTH causes (bad signature / check could not complete), not tampering alone"; fi
 
+# cosign 2.x cannot see our signatures at all (they are OCI referrers; 2.x looks
+# for a .sig tag), so a whole class of users lands in this branch through no
+# fault of the image. Being told the cause without being told the way out reads
+# as "you are stuck" — and the second way out (remove the optional tool) is
+# counter-intuitive enough that it has to be spelled out.
+if assert_exit 1 && assert_has "cosign 3+" && assert_has "remove cosign"; then
+    ok "install: the refusal names both ways forward (upgrade to cosign 3+, or remove cosign and install by digest)"
+else not_ok "install: the refusal names both ways forward (upgrade to cosign 3+, or remove cosign and install by digest)"; fi
+
 # --- cosign ABSENT: provenance is skipped, the install still happens ----------
 
 fresh

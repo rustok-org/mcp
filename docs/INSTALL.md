@@ -18,7 +18,10 @@ One command installs it; `rustok` does the rest.
   pinned in the script or nothing at all. If cosign is present and working the
   installer verifies the signature; if it is missing (or installed but unable to
   run) the installer says so, skips that check and continues. A signature that
-  is present but *does not verify* still stops the install.
+  is present but *does not verify* still stops the install. If you do install
+  it, use **cosign 3 or newer**: our signatures are stored as OCI referrers, and
+  cosign 2.x cannot see them at all — it reports `no signatures found`, which
+  the installer must treat as a refusal.
   [installation](https://docs.sigstore.dev/cosign/installation) — nothing else
   in the wallet uses it.
 - **`jq`** — needed only by `rustok connect claude` / `connect cursor`;
