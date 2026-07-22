@@ -106,6 +106,13 @@ case "$cmd" in
                 ;;
             rm)
                 [ "${1:-}" = "--" ] && shift
+                # A volume the engine refuses to drop (still in use by a
+                # container the caller believes it stopped) — the case that
+                # decides whether "your keys are gone" is a claim or a fact.
+                if [ -n "${STUB_VOLUME_RM_FAIL:-}" ] && [ "$1" = "$STUB_VOLUME_RM_FAIL" ]; then
+                    echo "Error: volume $1 is in use (stub)" 1>&2
+                    exit 2
+                fi
                 rm -f "${STUB_STATE:?}/volume-$1"
                 echo "$1"
                 ;;
@@ -122,6 +129,10 @@ case "$cmd" in
         exit 0
         ;;
     stop)
+        if [ -n "${STUB_STOP_FAIL:-}" ] && [ "$1" = "$STUB_STOP_FAIL" ]; then
+            echo "Error: no such container $1 (stub)" 1>&2
+            exit 1
+        fi
         if [ -n "${STUB_STATE:-}" ] && [ -f "$STUB_STATE/containers" ]; then
             grep -v "^$1;" "$STUB_STATE/containers" >"$STUB_STATE/containers.new" || true
             mv "$STUB_STATE/containers.new" "$STUB_STATE/containers"

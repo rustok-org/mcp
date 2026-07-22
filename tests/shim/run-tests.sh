@@ -42,6 +42,8 @@ fresh() {
     STUB_CLAUDE_REMOVE_FAIL=0
     STUB_SECRET_LS_FAIL=0
     STUB_PULL_FAIL=0
+    STUB_STOP_FAIL=""
+    STUB_VOLUME_RM_FAIL=""
     TEST_PATH="$WORK/bin"
 }
 
@@ -70,6 +72,7 @@ run_shim() {
         STUB_CLAUDE_REMOVE_FAIL="$STUB_CLAUDE_REMOVE_FAIL" \
         STUB_SECRET_LS_FAIL="$STUB_SECRET_LS_FAIL" \
         STUB_PULL_FAIL="$STUB_PULL_FAIL" \
+        STUB_STOP_FAIL="$STUB_STOP_FAIL" STUB_VOLUME_RM_FAIL="$STUB_VOLUME_RM_FAIL" \
         sh "$SHIM" "$@" </dev/null 2>&1)" && RC=0 || RC=$?
 }
 
@@ -104,6 +107,7 @@ run_purge_pty() {
         STUB_CLAUDE_ADD_FAIL="$STUB_CLAUDE_ADD_FAIL" \
         STUB_CLAUDE_REMOVE_FAIL="$STUB_CLAUDE_REMOVE_FAIL" \
         STUB_PULL_FAIL="$STUB_PULL_FAIL" \
+        STUB_STOP_FAIL="$STUB_STOP_FAIL" STUB_VOLUME_RM_FAIL="$STUB_VOLUME_RM_FAIL" \
         "$PY3" "$TESTS_DIR/pty-init.py" sh "$SHIM" uninstall --purge-keys 2>&1)" && RC=0 || RC=$?
 }
 
@@ -123,6 +127,7 @@ not_ok() {
 
 assert_exit() { [ "$RC" -eq "$1" ]; }
 assert_has() { case "$OUT" in *"$1"*) return 0 ;; *) return 1 ;; esac; }
+assert_lacks() { case "$OUT" in *"$1"*) return 1 ;; *) return 0 ;; esac; }
 assert_not_has() { ! assert_has "$1"; }
 
 # --- basics -------------------------------------------------------------------
@@ -150,12 +155,16 @@ else not_ok "unknown command exits 2"; fi
 
 # --- engine resolution / stickiness (epic М-3) ---------------------------------
 
+# Diagnostics no longer pin (they are read-only now — see the doctor/status
+# cases below), so stickiness is asserted through a command that legitimately
+# changes state.
 fresh
-run_shim status
-if assert_exit 0 && assert_has "engine: podman" \
+seed_wallet
+run_shim start
+if [ -f "$WORK/home/.config/rustok/config" ] \
     && [ "$(cat "$WORK/home/.config/rustok/config")" = "engine=podman" ]; then
-    ok "first run pins engine=podman in the config"
-else not_ok "first run pins engine=podman in the config"; fi
+    ok "first state-changing run pins engine=podman in the config"
+else not_ok "first state-changing run pins engine=podman in the config"; fi
 
 fresh
 mkdir -p "$WORK/home/.config/rustok"
@@ -247,7 +256,7 @@ else not_ok "status lists every running wallet with its agent"; fi
 
 fresh
 run_shim status
-if assert_exit 0 && assert_has "no wallet running"; then
+if assert_exit 0 && assert_has "no wallet exists yet"; then
     ok "status with no wallet says so"
 else not_ok "status with no wallet says so"; fi
 
@@ -511,7 +520,7 @@ export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
 export RUSTOK_ALLOWED_CHAINS="1"
 run_shim connect claude
 unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
-EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --init --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 -e RUSTOK_ALLOWED_CHAINS=1 ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1"
+EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --init --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 -e RUSTOK_ALLOWED_CHAINS=1 ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2"
 if assert_exit 0 \
     && [ "$(grep '^claude mcp add' "$WORK/log")" = "$EXPECTED" ] \
     && [ "$(cat "$WORK/state/secret-rustok-rpc-claude-1")" = "https://rpc.example/with-key" ]; then
@@ -719,7 +728,7 @@ export RUSTOK_NETWORK_MODE="live"
 export RUSTOK_ALLOWED_CHAINS="1,8453"
 run_shim connect claude
 unset RUSTOK_RPC_URLS_1 RUSTOK_RPC_URLS_8453 RUSTOK_ALLOWED_CHAINS RUSTOK_CHAIN_LABELS RUSTOK_NETWORK_MODE
-EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --init --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 --secret rustok-rpc-claude-8453,type=env,target=RUSTOK_RPC_URLS_8453 -e RUSTOK_ALLOWED_CHAINS=1,8453 -e RUSTOK_CHAIN_LABELS=mainnet,base -e RUSTOK_NETWORK_MODE=live ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1"
+EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --init --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 --secret rustok-rpc-claude-8453,type=env,target=RUSTOK_RPC_URLS_8453 -e RUSTOK_ALLOWED_CHAINS=1,8453 -e RUSTOK_CHAIN_LABELS=mainnet,base -e RUSTOK_NETWORK_MODE=live ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2"
 if assert_exit 0 && [ "$(grep '^claude mcp add' "$WORK/log")" = "$EXPECTED" ]; then
     ok "connect with two chains and three literals: full argv byte-exact in sorted order"
 else not_ok "connect with two chains and three literals: full argv byte-exact in sorted order"; fi
@@ -827,7 +836,7 @@ export RUSTOK_ALLOWED_CHAINS="1"
 run_shim connect cursor
 unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
 CJSON="$(jq -cS '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
-CEXP='{"args":["run","-i","--rm","--init","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=env,target=RUSTOK_KEYRING_PASSWORD","--secret","rustok-rpc-cursor-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1"],"command":"podman"}'
+CEXP='{"args":["run","-i","--rm","--init","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=env,target=RUSTOK_KEYRING_PASSWORD","--secret","rustok-rpc-cursor-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2"],"command":"podman"}'
 if assert_exit 0 && [ "$CJSON" = "$CEXP" ] \
     && [ "$(cat "$WORK/state/secret-rustok-rpc-cursor-1")" = "https://rpc.example/with-key" ]; then
     ok "connect cursor: entry byte-exact (default agent=cursor, own volume, leading-dash args survive)"
@@ -842,7 +851,7 @@ export RUSTOK_ALLOWED_CHAINS="1"
 run_shim connect cursor --agent claude
 unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
 OJSON="$(jq -cS '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
-OEXP='{"args":["run","-i","--rm","--init","--label","rustok=wallet","--label","rustok.agent=claude","-v","rustok-wallet-tui:/data","--secret","rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD","--secret","rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1"],"command":"podman"}'
+OEXP='{"args":["run","-i","--rm","--init","--label","rustok=wallet","--label","rustok.agent=claude","-v","rustok-wallet-tui:/data","--secret","rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD","--secret","rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2"],"command":"podman"}'
 if assert_exit 0 && [ "$OJSON" = "$OEXP" ] \
     && [ "$(cat "$WORK/state/secret-rustok-rpc-claude-1")" = "https://rpc.example/with-key" ]; then
     ok "connect cursor --agent claude: explicit override drives label/volume/secrets (one resolve line for all clients)"
@@ -1077,7 +1086,7 @@ plant_python3
 plant_all_three
 run_shim update
 CJSON="$(jq -cS '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
-CEXP='{"args":["run","-i","--rm","--init","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=env,target=RUSTOK_KEYRING_PASSWORD","ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1"],"command":"podman"}'
+CEXP='{"args":["run","-i","--rm","--init","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=env,target=RUSTOK_KEYRING_PASSWORD","ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2"],"command":"podman"}'
 HCHECK="$("$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF'
 import sys, yaml
 c = yaml.safe_load(open(sys.argv[1]))
@@ -1093,7 +1102,7 @@ PEOF
 PULL_BEFORE_ADD=0
 awk '/^podman pull /{p=NR} /^claude mcp add /{a=NR} END{exit !(p && a && p<a)}' "$WORK/log" && PULL_BEFORE_ADD=1
 if assert_exit 0 && [ "$CJSON" = "$CEXP" ] && [ "$HCHECK" = "HOK" ] \
-    && grep -q '^podman pull ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1' "$WORK/log" \
+    && grep -q '^podman pull ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2' "$WORK/log" \
     && [ "$PULL_BEFORE_ADD" = "1" ] \
     && grep -q '^claude mcp add -s user rustok -- podman run .* rustok.agent=claude .* rustok-wallet-tui:/data ' "$WORK/log" \
     && assert_has "CLAUDEOLD" && assert_has "CURSOROLD" && assert_has "HERMESOLD" \
@@ -1268,6 +1277,19 @@ if assert_exit 0 \
     ok "uninstall: deregisters all three (foreign keys intact), stops wallets, removes secrets+PATH-block+shim+config — volumes UNTOUCHED, keys-intact printed"
 else RC="$RC ckeep=$CKEEP cgone=$CGONE hok=$HOK sl=$SECRETS_LEFT vl=$VOLUMES_LEFT"; not_ok "uninstall: deregisters all three (foreign keys intact), stops wallets, removes secrets+PATH-block+shim+config — volumes UNTOUCHED, keys-intact printed"; fi
 
+# A refusal is only a refusal if nothing happened yet. Exit 1 + "terminal" +
+# intact volumes were ALL true while the gate still sat at the end of the
+# function: the shim, the PATH block and every registration had already been
+# destroyed by the time the user was told no. These assertions are what
+# distinguishes "refused" from "refused, too late".
+untouched_install() {
+    [ -f "$WORK/home/.local/bin/rustok" ] \
+        && grep -q '^# >>> rustok installer >>>$' "$WORK/home/.bashrc" \
+        && ! grep -q 'mcp remove' "$WORK/log" \
+        && ! grep -qE '^podman stop' "$WORK/log" \
+        && ! grep -q 'secret rm' "$WORK/log"
+}
+
 fresh
 plant_claude_stub
 plant_jq
@@ -1275,7 +1297,7 @@ plant_python3
 plant_uninstall_world
 run_shim uninstall --purge-keys
 VOLUMES_LEFT="$(count_volumes)"
-if assert_exit 1 && assert_has "terminal" && [ "$VOLUMES_LEFT" = "3" ]; then
+if assert_exit 1 && assert_has "terminal" && [ "$VOLUMES_LEFT" = "3" ] && untouched_install; then
     ok "uninstall --purge-keys through a pipe: named refusal, volumes intact (Rule of two windows)"
 else RC="$RC vl=$VOLUMES_LEFT"; not_ok "uninstall --purge-keys through a pipe: named refusal, volumes intact (Rule of two windows)"; fi
 
@@ -1286,7 +1308,7 @@ plant_python3
 plant_uninstall_world
 run_purge_pty "not the literal"
 VOLUMES_LEFT="$(count_volumes)"
-if assert_exit 1 && assert_has "confirmation mismatch" && [ "$VOLUMES_LEFT" = "3" ]; then
+if assert_exit 1 && assert_has "confirmation mismatch" && [ "$VOLUMES_LEFT" = "3" ] && untouched_install; then
     ok "uninstall --purge-keys with a wrong confirmation: named refusal, volumes intact"
 else RC="$RC vl=$VOLUMES_LEFT"; not_ok "uninstall --purge-keys with a wrong confirmation: named refusal, volumes intact"; fi
 
@@ -1388,6 +1410,142 @@ else
 fi
 
 # --- summary -------------------------------------------------------------------
+
+# --- a teardown that reports success must have done the work ------------------
+# `uninstall` is where a user decides a machine is clean. Two of its steps used
+# `cmd || true` / `cmd && echo`, so a refusal from the engine was swallowed and
+# the reassuring line printed anyway.
+
+fresh
+STUB_CONTAINERS="cafe01;rustok=wallet;rustok.agent=claude;image=i"
+STUB_STOP_FAIL=cafe01
+run_shim uninstall
+if [ "$RC" -ne 0 ] && assert_has "could not stop" && ! assert_has "stopped 1 running"; then
+    ok "uninstall: a wallet the engine refused to stop is named, not counted as stopped"
+else not_ok "uninstall: a wallet the engine refused to stop is named, not counted as stopped"; fi
+
+fresh
+seed_wallet
+: >"$WORK/state/volume-rustok-cursor"
+STUB_VOLUME_RM_FAIL=rustok-cursor
+run_purge_pty "delete my keys"
+if [ "$RC" -ne 0 ] && assert_has "rustok-cursor" && assert_has "could not remove" \
+    && [ -e "$WORK/state/volume-rustok-cursor" ]; then
+    ok "uninstall --purge-keys: a keystore volume that survived is named and the command fails"
+else not_ok "uninstall --purge-keys: a keystore volume that survived is named and the command fails"; fi
+
+# --- diagnostics do not write --------------------------------------------------
+# A user runs doctor to look, not to change. It was creating the engine config.
+
+fresh
+run_shim doctor
+if assert_exit 0 && [ ! -e "$WORK/home/.config/rustok/config" ]; then
+    ok "doctor: read-only — it does not create the engine config as a side effect"
+else not_ok "doctor: read-only — it does not create the engine config as a side effect"; fi
+
+fresh
+run_shim status
+if assert_exit 0 && [ ! -e "$WORK/home/.config/rustok/config" ]; then
+    ok "status: read-only — it does not create the engine config as a side effect"
+else not_ok "status: read-only — it does not create the engine config as a side effect"; fi
+
+# --- a fresh machine is told what to do next ----------------------------------
+# Six green oks and "no wallet running" left a first-time user with no idea the
+# wallet had never been created at all.
+
+fresh
+run_shim doctor
+if assert_exit 0 && assert_has "rustok init"; then
+    ok "doctor: with no wallet ever created, it points at 'rustok init'"
+else not_ok "doctor: with no wallet ever created, it points at 'rustok init'"; fi
+
+fresh
+run_shim status
+if assert_exit 0 && assert_has "rustok init"; then
+    ok "status: with no wallet ever created, it says so and points at 'rustok init'"
+else not_ok "status: with no wallet ever created, it says so and points at 'rustok init'"; fi
+
+fresh
+seed_wallet
+run_shim status
+if assert_exit 0 && assert_lacks "rustok init"; then
+    ok "status: with a wallet that exists but is not running, it does NOT send the user back to init"
+else not_ok "status: with a wallet that exists but is not running, it does NOT send the user back to init"; fi
+
+# --- the docker password mount survives a path with a space -------------------
+
+fresh
+plant_docker_stub
+remove_podman_stub
+mkdir -p "$WORK/space dir/.config/rustok"
+printf '%s' pw >"$WORK/space dir/.config/rustok/keyring-pass-claude"
+: >"$WORK/state/volume-rustok-wallet-tui"
+OUT="$(HOME="$WORK/space dir" XDG_CONFIG_HOME="$WORK/space dir/.config" \
+    PATH="$TEST_PATH" STUB_LOG="$WORK/log" STUB_STATE="$WORK/state" \
+    sh "$SHIM" start </dev/null 2>&1)" && RC=0 || RC=$?
+if grep -q 'keyring-pass-claude:/run/keyring-pass:ro' "$WORK/log"; then
+    ok "docker fallback: the password mount stays one argv token when the profile path contains a space"
+else not_ok "docker fallback: the password mount stays one argv token when the profile path contains a space"; fi
+
+# --- the RPC name-forward says what it costs, before it happens ---------------
+# Pre-connect, the URL is forwarded by NAME: out of argv and history, but the
+# engine records the resolved value in the container's metadata. --help promised
+# it stayed out of `inspect`; on this path it does not.
+
+fresh
+seed_wallet
+OUT="$(HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config" \
+    PATH="$TEST_PATH" STUB_LOG="$WORK/log" STUB_STATE="$WORK/state" \
+    RUSTOK_RPC_URLS_1="https://rpc.example/key-ABC" \
+    sh "$SHIM" start </dev/null 2>&1)" && RC=0 || RC=$?
+if assert_has "inspect" && assert_has "connect" \
+    && ! grep -q 'key-ABC' "$WORK/log"; then
+    ok "start: forwarding an RPC URL by name warns that the engine records it in inspect — and the value still never reaches argv"
+else not_ok "start: forwarding an RPC URL by name warns that the engine records it in inspect — and the value still never reaches argv"; fi
+
+# The warning must never become an argument: wallet_run_args emits argv on
+# stdout, so anything printed there lands in `podman run`.
+if grep -qE 'run .*-e RUSTOK_RPC_URLS_1' "$WORK/log" \
+    && ! grep -qi 'run .*inspect' "$WORK/log"; then
+    ok "start: the warning goes to stderr — argv still carries only -e NAME, no prose"
+else not_ok "start: the warning goes to stderr — argv still carries only -e NAME, no prose"; fi
+
+# --- help promises only what the code does ------------------------------------
+
+N=$((N + 1))
+HELP_FLAT="$(sh "$SHIM" help 2>&1 | tr '\n' ' ' | tr -s ' ')"
+case "$HELP_FLAT" in
+    *"stays out of argv, agent configs and \`podman inspect\`"*) HELP_OVERCLAIM=1 ;;
+    *) HELP_OVERCLAIM=0 ;;
+esac
+if [ "$HELP_OVERCLAIM" = "0" ] && printf '%s' "$HELP_FLAT" | grep -q 'inspect'; then
+    PASS=$((PASS + 1))
+    echo "ok $N - help: names inspect as a place the URL CAN appear, instead of promising it never does"
+else
+    FAIL=$((FAIL + 1))
+    echo "not ok $N - help: names inspect as a place the URL CAN appear, instead of promising it never does"
+fi
+
+N=$((N + 1))
+if sh "$SHIM" help 2>&1 | grep -q 'leftovers'; then
+    FAIL=$((FAIL + 1))
+    echo "not ok $N - help: does not advertise a 'leftovers' sweep the code does not perform"
+else
+    PASS=$((PASS + 1))
+    echo "ok $N - help: does not advertise a 'leftovers' sweep the code does not perform"
+fi
+
+# --- update says what it is NOT doing, while it does it -----------------------
+# `update` pulls by mutable tag and does not re-run the signature check the
+# installer does. The docs said so; the command itself said nothing at the one
+# moment the guarantee drops.
+
+fresh
+seed_wallet
+run_shim update
+if assert_exit 0 && assert_has "does not re-verify" && assert_has "installer"; then
+    ok "update: warns at pull time that it pulls by tag and skips the signature check"
+else not_ok "update: warns at pull time that it pulls by tag and skips the signature check"; fi
 
 echo "# $PASS passed, $FAIL failed, $N total"
 [ "$FAIL" -eq 0 ]

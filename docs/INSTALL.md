@@ -39,7 +39,7 @@ to pretend otherwise. macOS and `arm64` are not published yet.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.1/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.2/scripts/install.sh | sh
 ```
 
 ### Inspect it before you run it
@@ -50,7 +50,7 @@ exactly what runs.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.1/scripts/install.sh -o install.sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.2/scripts/install.sh -o install.sh
 less install.sh      # ~150 lines of POSIX sh
 sh install.sh
 ```

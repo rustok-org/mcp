@@ -42,7 +42,7 @@ DOC_PATHS = [
 # ships this product (wallet-tui-v0.5.0 … v0.7.1). The bare `v0.1.x` namespace
 # belongs to the old rustok-mcp python package — reusing it would put two
 # unrelated things in one tag namespace.
-INSTALL_TAG = "wallet-tui-v0.8.1"
+INSTALL_TAG = "wallet-tui-v0.8.2"
 INSTALL_URL = f"https://raw.githubusercontent.com/rustok-org/mcp/{INSTALL_TAG}/scripts/install.sh"
 
 # Any ref in an installer raw-URL, so a drifted tag is caught wherever it hides.
