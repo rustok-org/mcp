@@ -40,8 +40,12 @@ true: keys stay local, and **on-chain sends** are human-gated in the console.
 
 ## Prerequisites
 
-- **Podman** (recommended) or **Docker**, plus **cosign** (the installer verifies
-  the image signature before writing anything to disk).
+- **Podman** (recommended) or **Docker**. **cosign is optional** — the installer
+  pulls the image **by digest** (you get exactly those bytes or nothing), and
+  uses cosign, when it is present and runnable, to verify *who built* it
+  (provenance). A missing or broken cosign is reported and skipped, not treated
+  as a failure; a working cosign that disagrees still stops the install. Use
+  cosign 3+ if you install it — 2.x cannot read our signatures.
 - An Ethereum RPC URL (an Alchemy key URL is best; a public RPC works for testing).
 
 ## One-time onboarding (the user does this in their own terminal, once)
@@ -50,7 +54,8 @@ Three commands, in a **terminal the agent cannot see** — the full guide is
 [docs/INSTALL.md](https://github.com/rustok-org/mcp/blob/main/docs/INSTALL.md):
 
 ```bash
-# 1. install the `rustok` command (verifies the image signature, then installs)
+# 1. install the `rustok` command (pulls the image by digest; verifies the
+#    signature too when cosign is available)
 curl --proto '=https' --tlsv1.2 -fsSL \
   https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.1/scripts/install.sh | sh
 
@@ -98,7 +103,7 @@ podman run -i --rm --init \
   --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1
 ```
 
 ```bash
@@ -113,7 +118,7 @@ docker run -i --rm --init \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1
 ```
 
 > Legacy `--env-file` delivery still works but is deprecated: the value lands in
@@ -162,7 +167,7 @@ password is delivered by the podman secret (or the docker `_FILE` mount) above,
                "--secret", "rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0"],
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1"],
       "env": {
         "RUSTOK_RPC_URLS_1": "https://your-rpc"
       }
