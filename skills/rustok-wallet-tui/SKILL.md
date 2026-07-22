@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet-tui
 description: Self-custody Ethereum agent wallet. Installs with one command and runs entirely on your machine as a single container image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain requires your approval in a separate terminal console, never inside the agent chat; message signing is not console-gated. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.8.1
+version: 0.8.2
 metadata:
   openclaw:
     emoji: "🦀"
@@ -57,7 +57,7 @@ Three commands, in a **terminal the agent cannot see** — the full guide is
 # 1. install the `rustok` command (pulls the image by digest; verifies the
 #    signature too when cosign is available)
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.1/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.2/scripts/install.sh | sh
 
 # 2. create the wallet — prints the 12-word phrase and the approval PIN ONCE
 rustok init
@@ -103,7 +103,7 @@ podman run -i --rm --init \
   --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2
 ```
 
 ```bash
@@ -118,7 +118,7 @@ docker run -i --rm --init \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2
 ```
 
 > Legacy `--env-file` delivery still works but is deprecated: the value lands in
@@ -167,7 +167,7 @@ password is delivered by the podman secret (or the docker `_FILE` mount) above,
                "--secret", "rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1"],
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2"],
       "env": {
         "RUSTOK_RPC_URLS_1": "https://your-rpc"
       }

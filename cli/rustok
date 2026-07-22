@@ -19,13 +19,13 @@
 # POSIX sh on purpose (see epic decision #3): no arrays, no bashisms.
 set -eu
 
-VERSION="0.3.0"
+VERSION="0.3.1"
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rustok"
 CONFIG_FILE="$CONFIG_DIR/config"
 # The shipped wallet image; RUSTOK_IMAGE overrides (a digest-pinned ref comes
 # with the installer stage of the epic).
-DEFAULT_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui:v0.8.1"
+DEFAULT_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2"
 
 usage() {
     cat <<'EOF'
@@ -47,7 +47,7 @@ Commands:
   start          start the wallet container in the background
   stop           stop the running wallet container
   status         show the running wallet container(s)
-  doctor         diagnose the setup (engine, config, PATH, leftovers)
+  doctor         diagnose the setup (engine, config, PATH, stray containers)
   update         pull the current wallet image and re-register every rustok
                  MCP entry (each client keeps its own wallet, read from the
                  entry itself; the old entry is printed before replacing);
@@ -71,12 +71,23 @@ Options:
 
 Environment:
   RUSTOK_IMAGE       wallet image override
-  RUSTOK_RPC_URLS_*  chain RPC URLs. `connect` stores each one as a per-agent
-                     podman secret (rustok-rpc-<agent>-<chain>) and both the
-                     registration and `start` deliver through that secret —
-                     a keyed URL stays out of argv, agent configs and
-                     `podman inspect`. Other RUSTOK_* config is frozen into
-                     the registration as literal values at connect time.
+  RUSTOK_RPC_URLS_*  chain RPC URLs. Where the value ends up depends on how
+                     the wallet was set up — a keyed URL is a billing secret,
+                     so the three cases are spelled out:
+                       * after `connect` on podman — stored as a per-agent
+                         secret (rustok-rpc-<agent>-<chain>) and delivered
+                         through it: out of argv, out of the agent config and
+                         out of `podman inspect`;
+                       * before `connect`, or any exported RUSTOK_RPC_URLS_*
+                         on podman — forwarded by NAME: out of argv and shell
+                         history, but the engine records the resolved value in
+                         the container metadata, so it IS readable via
+                         `podman inspect` by anything running as you;
+                       * docker fallback — a literal -e value, likewise
+                         visible in `docker inspect`.
+                     `start` warns when it takes the second road. Other
+                     RUSTOK_* config is frozen into the registration as
+                     literal values at connect time.
 EOF
 }
 
@@ -111,8 +122,12 @@ resolve_engine() {
     else
         die "neither podman nor docker found — install podman (recommended): https://podman.io/getting-started/installation"
     fi
-    mkdir -p "$CONFIG_DIR"
-    printf 'engine=%s\n' "$engine" >"$CONFIG_FILE"
+    # Diagnostics look, they do not change: `doctor` and `status` used to
+    # create the engine config as a side effect of being run.
+    if [ "${ENGINE_PERSIST:-1}" = "1" ]; then
+        mkdir -p "$CONFIG_DIR"
+        printf 'engine=%s\n' "$engine" >"$CONFIG_FILE"
+    fi
 }
 
 # --- discovery ---------------------------------------------------------------
@@ -193,14 +208,13 @@ secret_present() {
     fi
 }
 
-password_args_for() {
-    # The engine-run fragment delivering the password — value never in argv.
-    if [ "$engine" = "podman" ]; then
-        echo "--secret $(secret_for "$1"),type=env,target=RUSTOK_KEYRING_PASSWORD"
-    else
-        echo "-v $(password_file_for "$1"):/run/keyring-pass:ro -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass"
-    fi
-}
+# The password delivery args are appended INLINE at each call site rather than
+# emitted as a word-split fragment. The docker branch embeds a real filesystem
+# path, and a fragment is re-split on spaces: a $HOME or $XDG_CONFIG_HOME
+# containing one tore the mount into three argv tokens — silently corrupting
+# `init`, `start`, and worst of all `connect`, which freezes the broken argv
+# into the client's MCP config for good. Quoting only works where the words are
+# built, so that is where it happens.
 
 rustok_env_names() {
     # RUSTOK_* config vars forwarded to `start` BY NAME (`-e NAME` inherits the
@@ -356,11 +370,15 @@ cmd_init() {
     # Onboarding prints the 12 words + PIN ONCE, on the inherited tty — the
     # shim adds no capture, no tee, no log around it.
     echo "rustok: creating the wallet — back up the 12 words and the PIN it prints:"
-    # shellcheck disable=SC2046  # password_args_for emits a word-split fragment
-    "$engine" run -it --rm \
-        -v "$volume:/data" \
-        $(password_args_for "$agent") \
-        "$(image_ref)" create-wallet
+    set -- run -it --rm -v "$volume:/data"
+    if [ "$engine" = "podman" ]; then
+        set -- "$@" --secret "$(secret_for "$agent"),type=env,target=RUSTOK_KEYRING_PASSWORD"
+    else
+        set -- "$@" -v "$(password_file_for "$agent"):/run/keyring-pass:ro" \
+            -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass
+    fi
+    set -- "$@" "$(image_ref)" create-wallet
+    "$engine" "$@"
     echo "rustok: wallet created for agent '$agent' — next: rustok start (or connect your agent), then fund the address"
 }
 
@@ -381,6 +399,17 @@ wallet_run_args() {
                     | grep -qx "rustok-rpc-$agent-${name#RUSTOK_RPC_URLS_}"; then
                     continue
                 fi
+                # Say it at the moment the guarantee drops, not in a doc page.
+                # STDERR on purpose: this function emits argv on stdout, so a
+                # word printed there would become an argument to the engine.
+                if [ "$engine" = "podman" ]; then
+                    echo "rustok: warn: $name is forwarded by name — podman records its value in 'podman inspect'. Run 'rustok connect' to store it as a secret instead." 1>&2
+                else
+                    # Do not send a docker user to `connect` for a secret: on
+                    # docker `connect` freezes a literal -e instead. Advice that
+                    # cannot work is the same overclaim in a helpful voice.
+                    echo "rustok: warn: $name is forwarded by name — docker records its value in 'docker inspect'. Docker has no secret store; this is the documented second tier (podman keeps keyed URLs out of inspect)." 1>&2
+                fi
                 ;;
         esac
         set -- "$@" -e "$name"
@@ -388,7 +417,13 @@ wallet_run_args() {
     # shellcheck disable=SC2046
     set -- "$@" $(printf '%s\n' "$rpc_secrets" | rpc_secret_args "$agent")
     # shellcheck disable=SC2046
-    set -- "$@" $(password_args_for "$agent") "$(image_ref)"
+    if [ "$engine" = "podman" ]; then
+        set -- "$@" --secret "$(secret_for "$agent"),type=env,target=RUSTOK_KEYRING_PASSWORD"
+    else
+        set -- "$@" -v "$(password_file_for "$agent"):/run/keyring-pass:ro" \
+            -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass
+    fi
+    set -- "$@" "$(image_ref)"
     printf '%s\n' "$@"
 }
 
@@ -587,9 +622,15 @@ PYEOF
     # hand-off could not survive.
     reg_rpc_secrets="$(rpc_secret_names "$agent")"
     # shellcheck disable=SC2046  # fragment helpers emit word-split args
-    set -- run -i --rm --init \
-        $(label_volume_args "$agent") $(password_args_for "$agent") \
-        $(printf '%s\n' "$reg_rpc_secrets" | rpc_secret_args "$agent")
+    set -- run -i --rm --init $(label_volume_args "$agent")
+    if [ "$engine" = "podman" ]; then
+        set -- "$@" --secret "$(secret_for "$agent"),type=env,target=RUSTOK_KEYRING_PASSWORD"
+    else
+        set -- "$@" -v "$(password_file_for "$agent"):/run/keyring-pass:ro" \
+            -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass
+    fi
+    # shellcheck disable=SC2046  # rpc_secret_args emits a word-split fragment
+    set -- "$@" $(printf '%s\n' "$reg_rpc_secrets" | rpc_secret_args "$agent")
     # Non-secret RUSTOK_* config is FROZEN as literal -e values: the agent
     # client launches this command from ITS environment, not your shell —
     # a name-only -e would inherit nothing. Change a value → re-run connect.
@@ -747,7 +788,11 @@ cmd_status() {
     # shellcheck disable=SC2086
     set -- $ids
     if [ $# -eq 0 ]; then
-        echo "no wallet running — the agent session starts it"
+        if [ -z "$("$engine" volume ls --format '{{.Name}}' 2>/dev/null | grep -E '^rustok-' || true)" ]; then
+            echo "no wallet exists yet — create one in your own terminal: rustok init"
+        else
+            echo "no wallet running — the agent session starts it"
+        fi
         return 0
     fi
     printf '%-12s %-14s %s\n' "AGENT" "CONTAINER" "IMAGE"
@@ -759,8 +804,11 @@ cmd_status() {
 
 cmd_doctor() {
     failed=0
-    # resolve_engine has already pinned the choice by the time we are here.
-    echo "ok: engine '$engine' (pinned in $CONFIG_FILE)"
+    if [ -f "$CONFIG_FILE" ]; then
+        echo "ok: engine '$engine' (pinned in $CONFIG_FILE)"
+    else
+        echo "ok: engine '$engine' (not pinned yet — the first command that changes anything pins it)"
+    fi
     if ! "$engine" info >/dev/null 2>&1; then
         echo "fail: '$engine' is installed but not usable — is the service/machine running?"
         failed=1
@@ -787,7 +835,11 @@ cmd_doctor() {
     # shellcheck disable=SC2086
     set -- $ids
     if [ $# -eq 0 ]; then
-        echo "info: no wallet running (the agent session starts it)"
+        if [ -z "$("$engine" volume ls --format '{{.Name}}' 2>/dev/null | grep -E '^rustok-' || true)" ]; then
+            echo "info: no wallet exists yet — create one in your own terminal: rustok init"
+        else
+            echo "info: a wallet exists but none is running (the agent session starts it)"
+        fi
     else
         echo "ok: $# wallet(s) running: $(agent_list "$@")"
         unlabeled=0
@@ -821,6 +873,11 @@ client_cfg_for() {
 cmd_update() {
     # Pull FIRST: a broken pull must stop the run before any registration is
     # touched — a half-updated set of agent configs is worse than a stale one.
+    # Told at the moment the guarantee drops, not only in a doc page: this pull
+    # resolves a MUTABLE tag and runs no signature check. The installer is the
+    # verified road; `update` deliberately is not, and saying so here is the
+    # difference between a documented limitation and a silent one.
+    echo "rustok: note: update pulls by tag and does not re-verify the image signature — the installer is the verified path (docs/INSTALL.md)" 1>&2
     "$engine" pull "$(image_ref)" >/dev/null \
         || die "image pull failed — no registration was touched (network? registry? try: rustok doctor)"
     ids="$(discover_ids "")"
@@ -917,6 +974,34 @@ cmd_uninstall() {
     # Data-safe teardown, the install in reverse: registrations, containers,
     # secrets, PATH block, the shim itself. Keystore volumes = the keys =
     # the money: NEVER touched here — only by the doubly-gated purge below.
+    un_rc=0
+    # The volume list is read BEFORE anything is dismantled: the non-purge exit
+    # reports it, and the purge gate must show it while there is still an
+    # installation to keep.
+    un_vols="$("$engine" volume ls --format '{{.Name}}' 2>/dev/null | grep -E '^(rustok-wallet-tui|rustok-[A-Za-z0-9][A-Za-z0-9_-]*)$' || true)"
+    # --- the purge gate runs FIRST, before a single mutation ------------------
+    # It used to sit at the end. Everything above it — deregistrations, stopping
+    # wallets, secrets, the PATH block, the shim itself — had already happened
+    # by the time a piped `uninstall --purge-keys` was refused. The keys were
+    # saved, and the user was left without the command that manages them. A gate
+    # that fires after the damage is not a gate.
+    if [ "$PURGE" -eq 1 ]; then
+        [ -t 0 ] \
+            || die "--purge-keys needs your own terminal — never run it through an agent or a pipe (it destroys keys)"
+        { exec 3</dev/tty; } 2>/dev/null \
+            || die "--purge-keys needs your own terminal (no /dev/tty here) — it destroys keys"
+        if [ -n "$un_vols" ]; then
+            printf 'rustok: deleting these volumes destroys the keys; without your seed phrase backup the funds are unrecoverable:\n' >/dev/tty
+            printf '%s\n' "$un_vols" | sed 's/^/  /' >/dev/tty
+            printf "type 'delete my keys' to confirm: " >/dev/tty
+            IFS= read -r un_confirm <&3 || un_confirm=""
+            exec 3<&-
+            [ "$un_confirm" = "delete my keys" ] || die "confirmation mismatch — nothing has been touched"
+        else
+            exec 3<&-
+            echo "rustok: --purge-keys: no keystore volumes found — nothing to purge"
+        fi
+    fi
     for un_client in claude cursor hermes; do
         un_cfg="$(client_cfg_for "$un_client")"
         [ -f "$un_cfg" ] || continue
@@ -1009,10 +1094,23 @@ PYEOF
     # shellcheck disable=SC2086
     set -- $ids
     if [ $# -gt 0 ]; then
+        # Count what actually stopped. `stop … || true` plus an unconditional
+        # tally reported a teardown that had not happened — and a wallet still
+        # holding its volume open is exactly what makes a later purge fail.
+        un_stopped=0
+        un_unstopped=""
         for un_id in "$@"; do
-            "$engine" stop "$un_id" >/dev/null 2>&1 || true
+            if "$engine" stop "$un_id" >/dev/null 2>&1; then
+                un_stopped=$((un_stopped + 1))
+            else
+                un_unstopped="$un_unstopped $(printf '%.12s' "$un_id")"
+            fi
         done
-        echo "rustok: stopped $# running wallet(s)"
+        [ "$un_stopped" -gt 0 ] && echo "rustok: stopped $un_stopped running wallet(s)"
+        if [ -n "$un_unstopped" ]; then
+            echo "rustok: could not stop:$un_unstopped — still running (their volumes stay in use)" 1>&2
+            un_rc=1
+        fi
     fi
     if [ "$engine" = "podman" ]; then
         un_secrets="$("$engine" secret ls --format '{{.Name}}' 2>/dev/null | grep -E '^rustok-(keyring|rpc)-' || true)"
@@ -1022,8 +1120,15 @@ PYEOF
         done
         [ "$un_n" -gt 0 ] && echo "rustok: removed $un_n secret(s)"
     else
-        rm -f "$CONFIG_DIR"/keyring-pass-* 2>/dev/null || true
-        echo "rustok: removed the stored password file(s)"
+        if ls "$CONFIG_DIR"/keyring-pass-* >/dev/null 2>&1; then
+            rm -f "$CONFIG_DIR"/keyring-pass-* 2>/dev/null || true
+            if ls "$CONFIG_DIR"/keyring-pass-* >/dev/null 2>&1; then
+                echo "rustok: warn: some stored password file(s) remain in $CONFIG_DIR — remove them yourself" 1>&2
+                un_rc=1
+            else
+                echo "rustok: removed the stored password file(s)"
+            fi
+        fi
     fi
     # The 3.2 installer contract: its PATH edit lives between these exact
     # markers, and ONLY a fully marked block is ever removed — no marker,
@@ -1055,45 +1160,33 @@ PYEOF
     fi
     # Last: everything above still needed the engine pin.
     rm -rf "$CONFIG_DIR" 2>/dev/null || true
-    # This regex is as WIDE as the whole namespace the shim could ever create
-    # (per-agent `rustok-<name>` + the historical `rustok-wallet-tui`) — so an
-    # unrelated `rustok-*` volume (e.g. a dev of this very repo) would land in
-    # the list too. Mitigation (same prefix posture as the secret sweep): the
-    # FULL list is printed before the literal confirmation below, so a human
-    # sees every name before any deletion. Do not narrow blindly.
-    un_vols="$("$engine" volume ls --format '{{.Name}}' 2>/dev/null | grep -E '^(rustok-wallet-tui|rustok-[A-Za-z0-9][A-Za-z0-9_-]*)$' || true)"
     if [ -z "$un_vols" ]; then
         echo "rustok: uninstall complete — no keystore volumes found"
-        return 0
+        return "$un_rc"
     fi
     if [ "$PURGE" -eq 0 ]; then
         echo "rustok: uninstall complete. keys intact: volume(s) $(printf '%s\n' "$un_vols" | tr '\n' ' ')— remove later: rustok uninstall --purge-keys"
-        return 0
+        return "$un_rc"
     fi
-    # --- purge-keys: the ONE gated road to a keystore volume -------------------
-    # Same Rule-of-two-windows gate as init: stdin must BE a terminal AND the
-    # confirmation is read from /dev/tty itself. Honest contract (security
-    # pass 2.3c): this stops pipes, blind -y automation and an agent invoking
-    # rustok as a tool — it can NOT stop a process that allocates its own pty
-    # (script(1), pty.spawn) or one with shell access, which needs no shim at
-    # all to reach `podman volume rm` directly. The gate guards the shim's own
-    # road; the engine itself is the platform's trust boundary.
-    if [ ! -t 0 ]; then
-        die "--purge-keys needs your own terminal — never run it through an agent or a pipe (it destroys keys)"
-    fi
-    if ! { exec 3</dev/tty; } 2>/dev/null; then
-        die "--purge-keys needs your own terminal (no /dev/tty here) — it destroys keys"
-    fi
-    printf 'rustok: deleting these volumes destroys the keys; without your seed phrase backup the funds are unrecoverable:\n' >/dev/tty
-    printf '%s\n' "$un_vols" | sed 's/^/  /' >/dev/tty
-    printf "type 'delete my keys' to confirm: " >/dev/tty
-    IFS= read -r un_confirm <&3 || un_confirm=""
-    exec 3<&-
-    [ "$un_confirm" = "delete my keys" ] || die "confirmation mismatch — volumes untouched"
+    # Deletion stays LAST — the data-safe order is unchanged; only the gate
+    # moved. The list was shown and confirmed before anything was dismantled;
+    # a volume that disappeared in between is reported by the loop below.
+    un_kept=""
     for un_v in $un_vols; do
-        "$engine" volume rm -- "$un_v" >/dev/null \
-            && echo "rustok: removed keystore volume '$un_v'"
+        if "$engine" volume rm -- "$un_v" >/dev/null 2>&1; then
+            echo "rustok: removed keystore volume '$un_v'"
+        else
+            echo "rustok: could not remove keystore volume '$un_v' — the keys in it are NOT destroyed" 1>&2
+            un_kept="$un_kept $un_v"
+        fi
     done
+    if [ -n "$un_kept" ]; then
+        # The one command whose entire job is to answer "are my keys gone?"
+        # must never answer it with silence and exit 0.
+        echo "rustok: purge INCOMPLETE — these volumes still hold keys:$un_kept" 1>&2
+        return 1
+    fi
+    return "$un_rc"
 }
 
 # --- entry -------------------------------------------------------------------
@@ -1185,6 +1278,10 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+case "$COMMAND" in
+    status | doctor) ENGINE_PERSIST=0 ;;
+    *) ENGINE_PERSIST=1 ;;
+esac
 resolve_engine
 
 case "$COMMAND" in
