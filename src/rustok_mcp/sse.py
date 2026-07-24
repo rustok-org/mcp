@@ -86,11 +86,13 @@ async def mcp_message(request: Request, body: JsonRpcRequest) -> _MessageRespons
     session.last_seen = time.monotonic()
     protocol: McpProtocol = request.app.state.protocol
 
-    # Intercept initialize to store client capabilities (only on first initialize).
-    # Capabilities are the rustok-specific list; the standard MCP capabilities
-    # object is ignored (SSE stays gated until a list is granted).
-    if body.method == "initialize" and not session.capabilities:
+    # Intercept initialize to store client capabilities (only on the FIRST
+    # initialize — an explicit flag, not the falsy empty set: a standard MCP
+    # client whose capabilities object parses to empty must not get a second
+    # shot at granting itself a wider set).
+    if body.method == "initialize" and not session.initialized:
         session.capabilities = extract_rustok_capabilities(body.params)
+        session.initialized = True
 
     context = {"capabilities": session.capabilities}
     response = await protocol.handle(body, context)

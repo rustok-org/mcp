@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **A client can no longer expand its own capabilities via `initialize`.**
+  The rustok capability list now *intersects* with the transport-seeded
+  ceiling instead of replacing it: an operator launching the wallet with
+  `RUSTOK_MCP_CAPABILITIES=read_wallet` gets a session the agent cannot talk
+  out of (audit B1). With no seeded ceiling the granted set fails closed to
+  empty — the server seeds, the client only narrows.
+- **The capability ceiling now also follows the wallet core's policy mode.**
+  `initialize` reads `policy_mode` from the core (via WalletContext, core
+  increment 1): `read_only` leaves read + preview tools, `supervised` /
+  `autonomous` keep the full set while the core itself parks or denies
+  writes. When the core is unreachable the transport ceiling applies alone,
+  with a warning — MCP-side filtering is advisory; enforcement lives in the
+  core.
+- **A second `initialize` on the same SSE session can no longer change its
+  capabilities.** The guard was the falsy empty set, so a standard MCP
+  capabilities *object* (which parses to empty) left the session open to a
+  second, wider grant. The session now tracks `initialized` explicitly.
+
+### Changed
+- **`sign_message` schema matches its documented contract.** The `sign_type`
+  enum listed `eip712` while the tool description said EIP-712 is not
+  supported; the enum is now `["eip191"]`.
+
 ## [0.8.1] — 2026-07-22
 
 ### Fixed

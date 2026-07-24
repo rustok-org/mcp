@@ -40,6 +40,7 @@ class Session:
     capabilities: set[Capability] = field(default_factory=set)
     queue: asyncio.Queue[str] | None = field(default=None)
     last_seen: float = field(default_factory=time.monotonic)
+    initialized: bool = False
 
 
 def parse_capabilities(values: Iterable[str]) -> set[Capability]:
@@ -106,3 +107,19 @@ def has_capability(tool_name: str, capabilities: set[Capability]) -> bool:
     if required is None:
         return False
     return required in capabilities
+
+
+def ceiling_for_policy_mode(mode: str | None) -> set[Capability] | None:
+    """Map the core's policy mode (`policy_mode` in WalletContext) to a ceiling.
+
+    Increment-1 semantics: ``read_only`` leaves read + preview; ``supervised``
+    and ``autonomous`` keep the full set (the core parks/denies writes
+    itself). Returns ``None`` when the mode is unknown or unavailable — the
+    caller then falls back to the transport-seeded ceiling alone, because
+    MCP-side filtering is advisory; enforcement lives in the core.
+    """
+    if mode == "read_only":
+        return {Capability.READ_WALLET, Capability.PREVIEW_TX}
+    if mode in ("supervised", "autonomous"):
+        return set(Capability)
+    return None
