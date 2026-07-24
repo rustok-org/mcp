@@ -201,9 +201,7 @@ async def test_initialize_read_only_mode_hides_write_tools() -> None:
     mock_client.wallet_context = AsyncMock(return_value={"policy_mode": "read_only"})
     protocol, _registry = create_protocol_and_registry(mock_client)
     context: dict[str, Any] = {"capabilities": set(Capability)}
-    await protocol.handle(
-        JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize"), context
-    )
+    await protocol.handle(JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize"), context)
     response = await protocol.handle(
         JsonRpcRequest(jsonrpc="2.0", id=2, method="tools/list"), context
     )
@@ -221,9 +219,7 @@ async def test_initialize_supervised_mode_keeps_the_full_ceiling() -> None:
     mock_client.wallet_context = AsyncMock(return_value={"policy_mode": "supervised"})
     protocol, _registry = create_protocol_and_registry(mock_client)
     context: dict[str, Any] = {"capabilities": set(Capability)}
-    await protocol.handle(
-        JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize"), context
-    )
+    await protocol.handle(JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize"), context)
     assert context["capabilities"] == set(Capability)
 
 
@@ -233,9 +229,7 @@ async def test_initialize_gateway_error_falls_back_to_seeded() -> None:
     mock_client.wallet_context = AsyncMock(side_effect=McpError(-32013, "core unavailable"))
     protocol, _registry = create_protocol_and_registry(mock_client)
     context: dict[str, Any] = {"capabilities": set(Capability)}
-    await protocol.handle(
-        JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize"), context
-    )
+    await protocol.handle(JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize"), context)
     assert context["capabilities"] == set(Capability)
 
 

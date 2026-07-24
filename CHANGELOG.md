@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ceiling instead of replacing it: an operator launching the wallet with
   `RUSTOK_MCP_CAPABILITIES=read_wallet` gets a session the agent cannot talk
   out of (audit B1). With no seeded ceiling the granted set fails closed to
-  empty — the server seeds, the client only narrows.
+  empty — the server seeds, the client only narrows. The same env ceiling
+  now also seeds SSE sessions (they keep the gated-until-granted contract
+  only when it is unset).
 - **The capability ceiling now also follows the wallet core's policy mode.**
   `initialize` reads `policy_mode` from the core (via WalletContext, core
   increment 1): `read_only` leaves read + preview tools, `supervised` /

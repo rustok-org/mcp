@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException, Request
 from httpx import AsyncClient
 
-from rustok_mcp.capabilities import Session
+from rustok_mcp.capabilities import Capability, Session
 from rustok_mcp.config import clear_settings_cache
 from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.protocol import JsonRpcRequest
@@ -141,6 +141,43 @@ async def test_sse_message_roundtrip() -> None:
     # The REAL SSE path shares the XOR guard: "error": null next to a result
     # is what a strict client rejects (the 2026-07-15 outage).
     assert "error" not in data
+
+
+async def test_sse_session_seeded_from_operator_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RUSTOK_MCP_CAPABILITIES seeds the SSE session too (audit B1): the
+    first initialize may only narrow it, never widen."""
+    monkeypatch.setenv("RUSTOK_MCP_CAPABILITIES", "read_wallet")
+    clear_settings_cache()
+    session = None
+    try:
+        before = set(_sessions)
+        mock_request = MagicMock(spec=Request)
+        mock_request.query_params = {}
+        await mcp_sse(mock_request)
+        new_ids = set(_sessions) - before
+        assert len(new_ids) == 1
+        session = _sessions[new_ids.pop()]
+        assert session.capabilities == {Capability.READ_WALLET}
+        assert session.initialized, "a seeded session is initialized at birth"
+
+        # A client asking for more than the seed narrows to the seed — and
+        # the stored ceiling is not overwritten.
+        protocol, _registry = create_protocol_and_registry()
+        post_request = MagicMock(spec=Request)
+        post_request.query_params = {"session_id": session.session_id}
+        post_request.app.state.protocol = protocol
+        wider = JsonRpcRequest(
+            jsonrpc="2.0",
+            id=1,
+            method="initialize",
+            params={"capabilities": ["read_wallet", "execute_tx"]},
+        )
+        await mcp_message(post_request, wider)
+        assert session.capabilities == {Capability.READ_WALLET}
+    finally:
+        clear_settings_cache()
+        if session is not None:
+            _sessions.pop(session.session_id, None)
 
 
 async def test_second_initialize_cannot_change_session_capabilities() -> None:
