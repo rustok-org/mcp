@@ -11,7 +11,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from rustok_mcp.auth import require_auth
-from rustok_mcp.capabilities import Session, extract_rustok_capabilities
+from rustok_mcp.capabilities import (
+    Session,
+    extract_rustok_capabilities,
+    resolve_sse_capabilities,
+)
+from rustok_mcp.config import get_settings
 from rustok_mcp.protocol import JsonRpcRequest, McpProtocol
 
 # require_auth gates every route on this router (/sse and /message). /health
@@ -45,6 +50,13 @@ async def mcp_sse(request: Request) -> StreamingResponse:
 
     session_id = str(uuid.uuid4())
     session = Session(session_id=session_id, queue=asyncio.Queue())
+    # Operator ceiling (audit B1): an explicit RUSTOK_MCP_CAPABILITIES seeds
+    # the SSE session too — the first initialize may then only narrow it.
+    # Unset keeps the historical SSE contract: gated until granted.
+    seeded = resolve_sse_capabilities(get_settings().capabilities)
+    if seeded is not None:
+        session.capabilities = seeded
+        session.initialized = True
     _sessions[session_id] = session
 
     async def event_stream() -> AsyncGenerator[str, None]:
@@ -86,11 +98,13 @@ async def mcp_message(request: Request, body: JsonRpcRequest) -> _MessageRespons
     session.last_seen = time.monotonic()
     protocol: McpProtocol = request.app.state.protocol
 
-    # Intercept initialize to store client capabilities (only on first initialize).
-    # Capabilities are the rustok-specific list; the standard MCP capabilities
-    # object is ignored (SSE stays gated until a list is granted).
-    if body.method == "initialize" and not session.capabilities:
+    # Intercept initialize to store client capabilities (only on the FIRST
+    # initialize — an explicit flag, not the falsy empty set: a standard MCP
+    # client whose capabilities object parses to empty must not get a second
+    # shot at granting itself a wider set).
+    if body.method == "initialize" and not session.initialized:
         session.capabilities = extract_rustok_capabilities(body.params)
+        session.initialized = True
 
     context = {"capabilities": session.capabilities}
     response = await protocol.handle(body, context)

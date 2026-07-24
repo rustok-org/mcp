@@ -9,7 +9,7 @@ import pytest
 from rustok_mcp.capabilities import Capability
 from rustok_mcp.gateway import GatewayClient
 from rustok_mcp.handlers import create_protocol_and_registry
-from rustok_mcp.protocol import JsonRpcRequest
+from rustok_mcp.protocol import JsonRpcRequest, McpError
 
 
 async def test_initialize_handler() -> None:
@@ -106,8 +106,8 @@ async def test_initialize_includes_welcome_instructions() -> None:
     assert "preview" in instructions.lower()
 
 
-async def test_initialize_stores_capabilities() -> None:
-    """initialize parses and stores client capabilities in context."""
+async def test_initialize_without_seed_fails_closed() -> None:
+    """No seeded ceiling means the client cannot grant itself anything (B1)."""
     protocol, _registry = create_protocol_and_registry()
     context: dict[str, set[str]] = {}
     request = JsonRpcRequest(
@@ -119,7 +119,23 @@ async def test_initialize_stores_capabilities() -> None:
     response = await protocol.handle(request, context)
 
     assert response is not None
-    assert context["capabilities"] == {Capability.READ_WALLET, Capability.PREVIEW_TX}
+    # Fail-closed: the server seeds the ceiling, the client only narrows it —
+    # with no seed there is nothing to narrow, so nothing is granted.
+    assert context["capabilities"] == set()
+
+
+async def test_initialize_client_cannot_expand_beyond_seed() -> None:
+    """Audit B1 regression: a client list may only NARROW the seeded ceiling."""
+    protocol, _registry = create_protocol_and_registry()
+    context: dict[str, Any] = {"capabilities": {Capability.READ_WALLET}}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=1,
+        method="initialize",
+        params={"capabilities": ["read_wallet", "preview_tx", "execute_tx"]},
+    )
+    await protocol.handle(request, context)
+    assert context["capabilities"] == {Capability.READ_WALLET}
 
 
 async def test_initialize_keeps_seeded_default_for_object() -> None:
@@ -166,6 +182,63 @@ async def test_initialize_empty_context_defaults_to_empty_set() -> None:
     request = JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize")
     await protocol.handle(request, context)
     assert context["capabilities"] == set()
+
+
+async def test_initialize_read_only_mode_ceiling_intersects() -> None:
+    """The core's policy mode narrows the seeded ceiling (increment 1)."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.wallet_context = AsyncMock(return_value={"policy_mode": "read_only"})
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context: dict[str, Any] = {"capabilities": set(Capability)}
+    request = JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize")
+    await protocol.handle(request, context)
+    assert context["capabilities"] == {Capability.READ_WALLET, Capability.PREVIEW_TX}
+
+
+async def test_initialize_read_only_mode_hides_write_tools() -> None:
+    """In read_only mode tools/list hides execute/sign but keeps read+preview."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.wallet_context = AsyncMock(return_value={"policy_mode": "read_only"})
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context: dict[str, Any] = {"capabilities": set(Capability)}
+    await protocol.handle(JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize"), context)
+    response = await protocol.handle(
+        JsonRpcRequest(jsonrpc="2.0", id=2, method="tools/list"), context
+    )
+    assert response is not None
+    names = [t["name"] for t in response.result["tools"]]
+    assert "preview_transaction" in names
+    assert "get_wallet_context" in names
+    assert "execute_transaction" not in names
+    assert "sign_message" not in names
+
+
+async def test_initialize_supervised_mode_keeps_the_full_ceiling() -> None:
+    """supervised/autonomous keep the full set — the core parks writes itself."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.wallet_context = AsyncMock(return_value={"policy_mode": "supervised"})
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context: dict[str, Any] = {"capabilities": set(Capability)}
+    await protocol.handle(JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize"), context)
+    assert context["capabilities"] == set(Capability)
+
+
+async def test_initialize_gateway_error_falls_back_to_seeded() -> None:
+    """Unreachable core → transport ceiling only (advisory; the core enforces)."""
+    mock_client = AsyncMock(spec=GatewayClient)
+    mock_client.wallet_context = AsyncMock(side_effect=McpError(-32013, "core unavailable"))
+    protocol, _registry = create_protocol_and_registry(mock_client)
+    context: dict[str, Any] = {"capabilities": set(Capability)}
+    await protocol.handle(JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize"), context)
+    assert context["capabilities"] == set(Capability)
+
+
+async def test_sign_message_schema_allows_only_eip191() -> None:
+    """The sign_type enum matches the documented EIP-191-only contract."""
+    _protocol, registry = create_protocol_and_registry()
+    schemas = {t["name"]: t for t in registry.get_tool_schemas()}
+    sign_type = schemas["sign_message"]["inputSchema"]["properties"]["sign_type"]
+    assert sign_type["enum"] == ["eip191"]
 
 
 async def test_tools_list_handler() -> None:

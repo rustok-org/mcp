@@ -2,16 +2,23 @@
 
 import contextlib
 import json
+import logging
 from typing import Any
+
+import httpx
 
 from rustok_mcp import __version__
 from rustok_mcp.capabilities import (
+    Capability,
+    ceiling_for_policy_mode,
     extract_rustok_capabilities,
     has_capability,
 )
 from rustok_mcp.gateway import GatewayClient
 from rustok_mcp.protocol import JsonRpcRequest, McpError, McpProtocol
 from rustok_mcp.tools import Tool, ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 # Newest first: the first entry doubles as the answer for a client whose
 # revision we do not know — per the MCP spec the client then decides whether
@@ -97,27 +104,58 @@ def _with_balance_eth(balances: Any) -> Any:
 async def handle_initialize(
     request: JsonRpcRequest,
     context: dict[str, Any] | None = None,
+    gateway_client: GatewayClient | None = None,
 ) -> dict[str, Any]:
     """Handle the ``initialize`` JSON-RPC method.
 
-    Capabilities come from the rustok-specific ``params.capabilities`` *list*. A
-    client that omits it — or sends the standard MCP capabilities *object* — keeps
-    the transport-seeded default, so the process-trusted stdio transport (seeded
-    with all capabilities) stays usable by standard MCP clients. A non-empty list
-    overrides the default, letting a client opt into a narrower set.
+    The granted set is the INTERSECTION of up to three ceilings, each of
+    which can only narrow the previous one:
+
+    1. the transport-seeded ceiling (env ``RUSTOK_MCP_CAPABILITIES`` or all
+       on stdio; the session's stored set on SSE),
+    2. the client-declared ``params.capabilities`` *list* — it may opt into a
+       narrower set, never a wider one (audit B1),
+    3. the core's policy mode ceiling (``policy_mode`` from WalletContext,
+       core increment 1): ``read_only`` leaves read+preview. When the core is
+       unreachable this ceiling is skipped with a warning — MCP-side
+       filtering is advisory; enforcement lives in the core.
     """
     if context is not None:
-        caps = extract_rustok_capabilities(request.params)
-        if caps:
-            context["capabilities"] = caps
-        else:
-            context.setdefault("capabilities", set())
+        seeded = context.get("capabilities", set())
+        client_caps = extract_rustok_capabilities(request.params)
+        granted = (client_caps & seeded) if client_caps else seeded
+        ceiling = await _policy_mode_ceiling(gateway_client)
+        if ceiling is not None:
+            granted &= ceiling
+        context["capabilities"] = granted
     return {
         "protocolVersion": negotiate_protocol_version(request.params),
         "capabilities": {"tools": {}},
         "serverInfo": {"name": "rustok-mcp", "version": __version__},
         "instructions": SERVER_INSTRUCTIONS,
     }
+
+
+async def _policy_mode_ceiling(
+    gateway_client: GatewayClient | None,
+) -> set[Capability] | None:
+    """Read the policy mode ceiling from the core via the gateway.
+
+    ``None`` when there is no client or the core does not answer — the caller
+    then filters by the transport ceiling alone (advisory only).
+    """
+    if gateway_client is None:
+        return None
+    try:
+        wallet_context = await gateway_client.wallet_context()
+    except (McpError, httpx.HTTPError) as exc:
+        logger.warning(
+            "policy mode unavailable from the core (%s) — using the transport ceiling only",
+            exc,
+        )
+        return None
+    mode = wallet_context.get("policy_mode") if isinstance(wallet_context, dict) else None
+    return ceiling_for_policy_mode(mode)
 
 
 async def handle_tools_list(
@@ -439,7 +477,7 @@ def create_protocol_and_registry(
                 "type": "object",
                 "properties": {
                     "message": {"type": "string"},
-                    "sign_type": {"type": "string", "enum": ["eip191", "eip712"]},
+                    "sign_type": {"type": "string", "enum": ["eip191"]},
                 },
                 "required": ["message"],
             },
@@ -448,6 +486,12 @@ def create_protocol_and_registry(
     )
 
     # Wire JSON-RPC handlers
+    async def _initialize_handler(
+        req: JsonRpcRequest,
+        ctx: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await handle_initialize(req, ctx, gateway_client)
+
     async def _tools_list_handler(
         req: JsonRpcRequest,
         ctx: dict[str, Any] | None = None,
@@ -460,7 +504,7 @@ def create_protocol_and_registry(
     ) -> dict[str, Any]:
         return await handle_tools_call(req, registry, ctx)
 
-    protocol.register("initialize", handle_initialize)
+    protocol.register("initialize", _initialize_handler)
     protocol.register("tools/list", _tools_list_handler)
     protocol.register("tools/call", _tools_call_handler)
 

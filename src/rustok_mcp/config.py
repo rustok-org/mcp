@@ -35,7 +35,8 @@ class Settings(BaseSettings):
     # Capabilities granted to the process-trusted stdio transport
     # (RUSTOK_MCP_CAPABILITIES). Unset → all (stdio is not a security boundary);
     # a comma-separated subset restricts it (e.g. "read_wallet" for a read-only
-    # agent). The network-facing SSE transport ignores this and stays gated.
+    # agent). A set value also seeds SSE sessions (audit B1); unset, SSE keeps
+    # its historical contract — gated until the first initialize grants.
     capabilities: Annotated[str | None, BeforeValidator(_empty_to_none)] = None
 
     model_config = SettingsConfigDict(env_prefix="RUSTOK_MCP_")
