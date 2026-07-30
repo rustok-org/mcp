@@ -5,6 +5,7 @@ import json
 import re
 from typing import Any
 
+from rustok_mcp import __version__
 from rustok_mcp.capabilities import (
     extract_rustok_capabilities,
     has_capability,
@@ -12,6 +13,26 @@ from rustok_mcp.capabilities import (
 from rustok_mcp.gateway import GatewayClient
 from rustok_mcp.protocol import JsonRpcRequest, McpError, McpProtocol
 from rustok_mcp.tools import Tool, ToolRegistry
+
+# Newest first: the first entry doubles as the answer for a client whose
+# revision we do not know — per the MCP spec the client then decides whether
+# to proceed. A KNOWN client revision is mirrored back (the reference SDK
+# behaviour): a hard-pinned 2024-11-05 answer breaks the negotiation contract
+# with clients requesting a newer revision (console line hotfix 0.7.1,
+# commit 9b9c649 — ported to the agent line unchanged).
+SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
+
+
+def negotiate_protocol_version(params: dict[str, Any] | list[Any] | None) -> str:
+    """The revision to answer `initialize` with: mirror the client's when we
+    support it, otherwise our newest. `params` may be absent, a list, or a
+    dict without the field (protocol.py) — anything unreadable means
+    "the client did not say"."""
+    requested = params.get("protocolVersion") if isinstance(params, dict) else None
+    if isinstance(requested, str) and requested in SUPPORTED_PROTOCOL_VERSIONS:
+        return requested
+    return SUPPORTED_PROTOCOL_VERSIONS[0]
+
 
 SERVER_INSTRUCTIONS = (
     "Rustok is a self-custody Ethereum wallet that belongs to the agent and the person it "
@@ -125,9 +146,9 @@ async def handle_initialize(
         else:
             context.setdefault("capabilities", set())
     return {
-        "protocolVersion": "2024-11-05",
+        "protocolVersion": negotiate_protocol_version(request.params),
         "capabilities": {"tools": {}},
-        "serverInfo": {"name": "rustok-mcp", "version": "0.4.0"},
+        "serverInfo": {"name": "rustok-mcp", "version": __version__},
         "instructions": SERVER_INSTRUCTIONS,
     }
 
