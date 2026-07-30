@@ -2,10 +2,10 @@ name: MCP CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, 'release/wallet-v0.4.x']
   push:
-    branches: [main]
-    tags: ['v*']
+    branches: [main, 'release/wallet-v0.4.x']
+    tags: ['v*', 'wallet-v*']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
