@@ -5,14 +5,18 @@
 # come from the published binary image, not from source.
 #
 # Build (local, against a locally-built core image):
-#   docker build -f Dockerfile.wallet --build-arg CORE_IMAGE=rustok-core:v0.1.0 \
-#     -t rustok-wallet:0.3.2 .
+#   docker build -f Dockerfile.wallet --build-arg CORE_IMAGE=rustok-core:v0.1.2 \
+#     -t rustok-wallet:0.4.1 .
 # Onboard:  docker run -it --rm -v rustok-wallet:/data -e RUSTOK_KEYRING_PASSWORD=… \
-#     rustok-wallet:0.3.2 create-wallet
+#     rustok-wallet:0.4.1 create-wallet
 # Run (MCP stdio): docker run -i --rm --init -v rustok-wallet:/data \
-#     -e RUSTOK_KEYRING_PASSWORD=… -e RUSTOK_RPC_URLS_1=… rustok-wallet:0.3.2
+#     -e RUSTOK_KEYRING_PASSWORD=… -e RUSTOK_RPC_URLS_1=… rustok-wallet:0.4.1
 
-ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.1.0
+# Pinned to the exact core build shipped in wallet v0.4.x (verified byte-identical
+# to the binary inside ghcr.io/rustok-org/rustok-wallet:v0.4.0, sha256 audit
+# 2026-07-30). The default MUST match the shipped image — an unpinned build from
+# this tag would silently embed a different core.
+ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.1.2
 
 # --- Core/Gateway binaries (private source; public binary image) ---
 FROM ${CORE_IMAGE} AS core
