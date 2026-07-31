@@ -57,13 +57,6 @@ into any standard wallet, or the `rustok-wallet` volume + your password.)
 > **Headless/CI:** replace `-it` with `-i`. The password is already supplied
 > via the secret / `_FILE`, so no TTY is required.
 
-> **Legacy: inline `-e` password / `--env-file`.** Older setups passed the
-> password as `-e RUSTOK_KEYRING_PASSWORD=…` or via an env-file. Both still
-> work but are deprecated: the value is visible in `inspect` (and, for the
-> `env` block, in the MCP config file), and inside an env-file **quotes become
-> part of the password** — a silent unlock failure. Migrate to the secret /
-> `_FILE` delivery above.
-
 ## 3. Connect an agent (stdio)
 
 The MCP client launches the image over stdio — **the password never goes into

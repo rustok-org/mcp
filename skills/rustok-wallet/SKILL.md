@@ -1,13 +1,14 @@
 ---
 name: rustok-wallet
-description: Self-custody Ethereum agent wallet. Runs entirely on the user's machine as one Docker image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview, execute and sign. The user assumes all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.4.6
+description: Self-custody Ethereum agent wallet. Runs entirely on the user's machine as one Docker (or Podman) image (MCP over stdio, plus a loopback-only HTTP gateway for signing integrations); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview, execute and sign. The user assumes all risk for funds on the agent wallet — there are no hard-coded spending limits.
+version: 0.4.7
 metadata:
   openclaw:
     emoji: "🦀"
     requires:
-      bins:
+      anyBins:
         - docker
+        - podman
     homepage: https://github.com/rustok-org/mcp
 ---
 
@@ -18,8 +19,10 @@ metadata:
 > compiled binary image is distributed.
 
 You are connected to a **self-custody** Ethereum agent wallet that runs entirely
-on the user's machine as a single Docker image (`ghcr.io/rustok-org/rustok-wallet`).
-The container runs the wallet core + gateway and speaks MCP over **stdio**; the
+on the user's machine as a single Docker (or Podman) image
+(`ghcr.io/rustok-org/rustok-wallet`). The container runs the wallet core + gateway
+and speaks MCP over **stdio**, plus a **loopback-only** HTTP gateway
+(`127.0.0.1`, never exposed outside the container) for signing integrations; the
 private keys live only in the user's local Docker volume and never leave it.
 
 > ⚠️ **Self-custody, real funds, your risk.** This wallet has **no hard-coded
@@ -139,11 +142,6 @@ Docker variant of the args (instead of the `--secret` line):
                "-v", "/home/you/.rustok-keyring-pass:/run/keyring-pass:ro",
                "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass",
 ```
-
-> **Legacy: inline `-e` password / `--env-file`.** Both still work but are
-> deprecated — the value is visible in `inspect` (and in the MCP config for the
-> `env` block), and inside an env-file **quotes become part of the password**,
-> a silent unlock failure. Migrate to the secret / `_FILE` delivery above.
 
 ## Why Rustok exists
 
