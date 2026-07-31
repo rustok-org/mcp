@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet
 description: Self-custody Ethereum agent wallet. Runs entirely on the user's machine as one Docker image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview, execute and sign. The user assumes all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.4.5
+version: 0.4.6
 metadata:
   openclaw:
     emoji: "🦀"
@@ -39,15 +39,32 @@ private keys live only in the user's local Docker volume and never leave it.
 ## One-time onboarding (the user does this in a terminal, once)
 
 Create the wallet and **back up the 24-word recovery phrase** — it is shown only
-once, in the user's own terminal (never to the agent):
+once, in the user's own terminal (never to the agent). The keyring password goes
+in as a **secret** — never inline, never into shell history:
+
+**Podman** — via the secret store (`read -s` keeps it out of history; the
+`type=env` secret injects it byte-exact and `podman inspect` never shows it):
 
 ```bash
-# Choose a strong keyring password; read -s keeps it out of shell history and ps.
-read -r -s -p "Keyring password: " RUSTOK_KEYRING_PASSWORD && export RUSTOK_KEYRING_PASSWORD
+read -r -s -p "Keyring password: " pw && printf '%s' "$pw" | podman secret create rustok-keyring - && unset pw
+
+podman run -it --rm \
+  -v rustok-wallet:/data \
+  --secret rustok-keyring,type=env,target=RUSTOK_KEYRING_PASSWORD \
+  ghcr.io/rustok-org/rustok-wallet:latest create-wallet
+```
+
+**Docker** — via a `0600` file whose *path* is passed in (a trailing newline is
+stripped):
+
+```bash
+umask 077
+read -r -s -p "Keyring password: " pw && printf '%s' "$pw" > ~/.rustok-keyring-pass && unset pw
 
 docker run -it --rm \
   -v rustok-wallet:/data \
-  -e RUSTOK_KEYRING_PASSWORD \
+  -v ~/.rustok-keyring-pass:/run/keyring-pass:ro \
+  -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
   ghcr.io/rustok-org/rustok-wallet:latest create-wallet
 ```
 
@@ -55,25 +72,32 @@ This prints the wallet **address** and the **24 words**. Write the words down
 offline and fund the address. Recovery = these 24 words (importable into any
 standard wallet, e.g. MetaMask) or the `rustok-wallet` Docker volume + password.
 
-> **Headless/CI:** replace `-it` with `-i`. The password is already supplied via
-> `RUSTOK_KEYRING_PASSWORD`, so no TTY is required.
+> **Headless/CI:** replace `-it` with `-i`. The password is already supplied
+> via the secret / `_FILE`, so no TTY is required.
 
 ## How the agent runs the wallet
 
 The MCP client launches the image over stdio (keys stay local). **Never put the
-keyring password in the MCP config or shell history** — keep it in a private,
-`0600` env-file that only you can read:
+keyring password in the MCP config** — reuse the delivery from onboarding:
+
+**Podman** (the secret you already created):
 
 ```bash
-# One-time: write the keyring password into a private env-file (umask 077 → 0600).
-umask 077
-read -r -s -p "Keyring password: " pw \
-  && printf 'RUSTOK_KEYRING_PASSWORD=%s\n' "$pw" > ~/.rustok-wallet.env \
-  && unset pw
+podman run -i --rm --init \
+  -v rustok-wallet:/data \
+  --secret rustok-keyring,type=env,target=RUSTOK_KEYRING_PASSWORD \
+  -e RUSTOK_ALLOWED_CHAINS="1,8453" \
+  -e RUSTOK_RPC_URLS_1="https://your-rpc" \
+  ghcr.io/rustok-org/rustok-wallet:latest
+```
 
+**Docker** (the `0600` file you already created):
+
+```bash
 docker run -i --rm --init \
   -v rustok-wallet:/data \
-  --env-file ~/.rustok-wallet.env \
+  -v ~/.rustok-keyring-pass:/run/keyring-pass:ro \
+  -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
   ghcr.io/rustok-org/rustok-wallet:latest
@@ -85,20 +109,19 @@ docker run -i --rm --init \
 > network (not the default stdio setup).
 
 For **Claude Desktop / Cursor** (stdio MCP), add to the MCP config. The keyring
-password stays in the `0600` env-file above (`--env-file`), **never in this
-config file** — only the non-secret RPC URL lives here. **Replace
-`/home/you/.rustok-wallet.env` with your real absolute path** (the file you
-just created, e.g. `/home/alice/.rustok-wallet.env` — `~` is not expanded
+password rides the secret / file from onboarding, **never this config file** —
+only the non-secret RPC URL lives here. On **docker**, replace the `--secret`
+arg with the bind-mount pair (your real absolute path — `~` is not expanded
 inside JSON):
 
 ```json
 {
   "mcpServers": {
     "rustok-wallet": {
-      "command": "docker",
+      "command": "podman",
       "args": ["run", "-i", "--rm", "--init",
                "-v", "rustok-wallet:/data",
-               "--env-file", "/home/you/.rustok-wallet.env",
+               "--secret", "rustok-keyring,type=env,target=RUSTOK_KEYRING_PASSWORD",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
                "ghcr.io/rustok-org/rustok-wallet:latest"],
@@ -109,6 +132,18 @@ inside JSON):
   }
 }
 ```
+
+Docker variant of the args (instead of the `--secret` line):
+
+```json
+               "-v", "/home/you/.rustok-keyring-pass:/run/keyring-pass:ro",
+               "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass",
+```
+
+> **Legacy: inline `-e` password / `--env-file`.** Both still work but are
+> deprecated — the value is visible in `inspect` (and in the MCP config for the
+> `env` block), and inside an env-file **quotes become part of the password**,
+> a silent unlock failure. Migrate to the secret / `_FILE` delivery above.
 
 ## Why Rustok exists
 
