@@ -4,20 +4,24 @@
 # The wallet is a single self-contained image run over stdio. Keys live in YOUR
 # local Docker volume (self-custody) — they never leave your machine.
 #
-# One-time onboarding BEFORE first use (run in a terminal, back up the 24 words):
+# One-time onboarding BEFORE first use (run in a terminal, back up the 24 words).
+# The password lives only in a 0600 file — never in this config:
+#   umask 077
+#   read -r -s -p "Keyring password: " pw && printf '%s' "$pw" > ~/.rustok-keyring-pass && unset pw
 #   docker run -it --rm -v rustok-wallet:/data \
-#     -e RUSTOK_KEYRING_PASSWORD=your-strong-password \
+#     -v ~/.rustok-keyring-pass:/run/keyring-pass:ro \
+#     -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
 #     ghcr.io/rustok-org/rustok-wallet:latest create-wallet
 startCommand:
   type: stdio
   configSchema:
     type: object
-    required: ["RUSTOK_KEYRING_PASSWORD"]
+    required: ["KEYRING_PASS_PATH"]
     properties:
-      RUSTOK_KEYRING_PASSWORD:
+      KEYRING_PASS_PATH:
         type: string
-        title: Wallet password
-        description: Password that unlocks your local keystore (the one you set at create-wallet).
+        title: Keyring password file (absolute path)
+        description: Absolute path to your 0600 file holding the keyring password (created at onboarding, e.g. /home/you/.rustok-keyring-pass). The password itself never enters this config — only the file path, which is bind-mounted read-only into the container.
       RUSTOK_RPC_URLS_1:
         type: string
         title: Ethereum RPC URL
@@ -28,16 +32,16 @@ startCommand:
       args: [
         'run', '-i', '--rm', '--init',
         '-v', 'rustok-wallet:/data',
-        '-e', 'RUSTOK_KEYRING_PASSWORD',
+        '-v', (config.KEYRING_PASS_PATH || '/home/you/.rustok-keyring-pass') + ':/run/keyring-pass:ro',
+        '-e', 'RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass',
         '-e', 'RUSTOK_ALLOWED_CHAINS=1,8453',
         '-e', 'RUSTOK_RPC_URLS_1',
         'ghcr.io/rustok-org/rustok-wallet:latest'
       ],
       env: {
-        RUSTOK_KEYRING_PASSWORD: config.RUSTOK_KEYRING_PASSWORD || '',
         RUSTOK_RPC_URLS_1: config.RUSTOK_RPC_URLS_1 || ''
       }
     })
   exampleConfig:
-    RUSTOK_KEYRING_PASSWORD: "your-strong-password"
+    KEYRING_PASS_PATH: "/home/you/.rustok-keyring-pass"
     RUSTOK_RPC_URLS_1: "https://ethereum-rpc.publicnode.com"

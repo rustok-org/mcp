@@ -1,28 +1,46 @@
 # Troubleshooting
 
+## The MCP client times out connecting (30 s, silently)
+
+You are on image **≤ 0.4.0**: its JSON-RPC responses were malformed
+(`"error": null` next to `result`), which strict clients (Claude Code 2.1+)
+reject without a word — the handshake dies as a silent 30 s timeout. Fixed in
+**0.4.1**: pull `ghcr.io/rustok-org/rustok-wallet:latest` again and restart
+the agent. No config changes needed.
+
 ## "no wallet keystore … create one first"
 
-The wallet hasn't been created in this volume yet. Run onboarding once:
-
-```bash
-docker run -it --rm -v rustok-wallet:/data \
-  -e RUSTOK_KEYRING_PASSWORD="your-password" \
-  ghcr.io/rustok-org/rustok-wallet:latest create-wallet
-```
-
+The wallet hasn't been created in this volume yet. Run onboarding once —
+see [Installation](INSTALL.md) step 2 (secret / `_FILE` password delivery).
 Back up the printed 24 words, then start the agent again.
+
+## "RUSTOK_KEYRING_PASSWORD_FILE does not point to a readable regular file"
+
+The `_FILE` path is wrong or the file is not a regular readable file:
+- The path is **inside the container** — the file must be mounted there
+  (`-v ~/.rustok-keyring-pass:/run/keyring-pass:ro` on docker; on podman prefer
+  the `--secret …,type=env` delivery, no file at all).
+- A directory, device or FIFO at that path is refused by design.
+- Rootless **podman** hands a host `0600` bind-mount to the container
+  root-owned — unreadable for the in-container user. Use the
+  `--secret …,type=env,target=RUSTOK_KEYRING_PASSWORD` delivery instead.
+
+## "RUSTOK_KEYRING_PASSWORD_FILE is empty"
+
+The mounted password file has no content (or only a trailing newline, which is
+stripped). Rewrite it: `umask 077 && printf '%s' "$pw" > ~/.rustok-keyring-pass`.
 
 ## "backend not ready" / the agent can't reach the wallet
 
-- Confirm Docker is running and the image is pulled.
-- Confirm `RUSTOK_KEYRING_PASSWORD` is set and matches the password used at
-  `create-wallet` (a wrong password fails the unlock).
+- Confirm Docker/Podman is running and the image is pulled.
+- Confirm the password arrives (secret or `_FILE`) and matches the password
+  used at `create-wallet` (a wrong password fails the unlock).
 - Confirm the same `-v rustok-wallet:/data` volume is mounted as at onboarding.
 
 ## Wrong password
 
-Unlock fails with a wrong password. There is no reset — use the correct password,
-or recover from the 24-word phrase into a fresh wallet.
+Unlock fails with a wrong password. There is no reset — use the correct
+password, or recover from the 24-word phrase into a fresh wallet.
 
 ## Empty balances / positions for a chain
 
@@ -37,9 +55,9 @@ Example: `-e RUSTOK_ALLOWED_CHAINS=1 -e RUSTOK_RPC_URLS_1=https://…`.
    - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
    - Linux: `~/.config/Claude/claude_desktop_config.json`
    - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-3. Validate the JSON, and confirm `docker` is on PATH for the client.
-4. The client must grant `read_wallet` / `preview_tx` / `execute_tx` for the
-   corresponding tools to be listed/callable.
+3. Validate the JSON, and confirm `docker` (or `podman`) is on PATH for the client.
+4. Over stdio the wallet exposes all tools by default; if you set
+   `RUSTOK_MCP_CAPABILITIES` to a subset, the gated tools are hidden on purpose.
 
 ## "permission denied" on the volume
 

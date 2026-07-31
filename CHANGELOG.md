@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-07-31
+
+Secret hygiene for the agent line (backport of the console line's PR-1.1,
+`e0b7a1f`): the keyring password no longer needs to travel as a plaintext
+env var — visible in `docker/podman inspect`, shell history and MCP configs.
+
+### Added
+- **`RUSTOK_KEYRING_PASSWORD_FILE`** in the image entrypoint (the standard
+  `_FILE` convention): the password may arrive as a mounted file — a podman
+  secret (`type=mount`) or a docker `0600` bind-mount. An explicit
+  `RUSTOK_KEYRING_PASSWORD` still wins (existing installs keep working);
+  a trailing newline in the file is stripped. Unusable paths (missing,
+  non-regular, unreadable) and empty files fail fast with **named errors**
+  instead of a 60-second "core not ready" hang.
+- First e2e acceptance suite on the agent line (`tests/e2e/`, podman, marker
+  `e2e`, opt-in): secret `type=mount` and `type=env` delivery with a
+  quote-laden password (byte-exact unlock), strict no-plaintext-in-`inspect`
+  asserts, precedence, verbatim named errors, trailing-newline contract.
+
+### Changed
+- All install docs (`INSTALL`, `TROUBLESHOOTING`, `CONFIGURATION`, skill,
+  `smithery.yaml`) now teach the secret / `_FILE` delivery for both engines
+  (podman secret `type=env`; docker bind-mounted `_FILE`). Inline `-e`
+  password and `--env-file` are documented as deprecated-but-working legacy
+  (env-file turns quotes into part of the password — a silent unlock failure).
+- `TROUBLESHOOTING` documents the ≤0.4.0 silent 30 s handshake timeout and
+  the fix (upgrade to ≥0.4.1).
+
 ## [0.4.1] - 2026-07-30
 
 Hotfix: MCP handshake compatibility with current clients (backport of the
