@@ -47,12 +47,12 @@ async def _stdio_loop() -> None:
                     id=None,
                     error=JsonRpcError(code=-32700, message=f"Parse error: {exc}"),
                 )
-                print(response.model_dump_json(), flush=True)
+                print(response.to_wire(), flush=True)
                 continue
 
             result = await protocol.handle(request, context)
             if result is not None:
-                print(result.model_dump_json(), flush=True)
+                print(result.to_wire(), flush=True)
     finally:
         await gateway_client.close()
 

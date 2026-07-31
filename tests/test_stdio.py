@@ -25,7 +25,12 @@ async def test_stdio_initialize_roundtrip() -> None:
     response = json.loads(lines[0])
     assert response["jsonrpc"] == "2.0"
     assert response["id"] == 1
-    assert response["result"]["protocolVersion"] == "2024-11-05"
+    assert response["result"]["protocolVersion"] == "2025-11-25"
+    # The REAL stdio path must emit result XOR error: a strict client (Claude
+    # Code 2.1) rejects a response carrying "error": null — the proven root
+    # cause of the 30 s handshake timeout (blind install, 2026-07-30).
+    # Guards a future rollback to model_dump_json().
+    assert "error" not in response
 
 
 async def test_stdio_default_exposes_all_tools(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,3 +78,5 @@ async def test_stdio_parse_error() -> None:
 
     response = json.loads(lines[0])
     assert response["error"]["code"] == -32700
+    # The error half of the same XOR guard (see the roundtrip test above).
+    assert "result" not in response

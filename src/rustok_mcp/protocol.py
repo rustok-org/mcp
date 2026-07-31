@@ -33,6 +33,16 @@ class JsonRpcResponse(BaseModel):
     result: Any | None = None
     error: JsonRpcError | None = None
 
+    def to_wire(self) -> str:
+        """Serialize per JSON-RPC 2.0: a response carries EITHER `result` OR
+        `error` — never both keys. A bare `model_dump_json()` emitted
+        `"error": null` next to every result, and a strict client (Claude
+        Code 2.1) silently rejects such a message — the handshake then dies
+        as a 30 s timeout (root cause isolated by the blind-install audit,
+        2026-07-30; same fix as console line 0.7.1, commit 9b9c649).
+        """
+        return self.model_dump_json(exclude={"error"} if self.error is None else {"result"})
+
 
 # JSON-RPC 2.0 standard errors
 ERR_INVALID_PARAMS = -32602

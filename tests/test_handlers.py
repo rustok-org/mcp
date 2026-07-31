@@ -1,7 +1,10 @@
 """MCP handler tests."""
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock
+
+import pytest
 
 from rustok_mcp.capabilities import Capability
 from rustok_mcp.gateway import GatewayClient
@@ -17,8 +20,75 @@ async def test_initialize_handler() -> None:
 
     assert response is not None
     assert response.result is not None
-    assert response.result["protocolVersion"] == "2024-11-05"
+    assert response.result["protocolVersion"] == "2025-11-25"
     assert response.result["serverInfo"]["name"] == "rustok-mcp"
+
+
+@pytest.mark.parametrize(
+    "revision",
+    ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"],
+)
+async def test_initialize_echoes_every_supported_protocol_revision(revision: str) -> None:
+    """The live bug (blind install, 2026-07-30): a hard-pinned 2024-11-05 answer
+    breaks the handshake contract with clients requesting a newer revision.
+    The server must mirror a supported client revision."""
+    protocol, _registry = create_protocol_and_registry()
+    request = JsonRpcRequest(
+        jsonrpc="2.0", id=1, method="initialize", params={"protocolVersion": revision}
+    )
+    response = await protocol.handle(request)
+    assert response is not None and response.result is not None
+    assert response.result["protocolVersion"] == revision
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        None,  # no params at all
+        {},  # params without the field
+        {"protocolVersion": "1999-01-01"},  # unknown revision
+        {"protocolVersion": 42},  # not a string
+        ["not", "a", "dict"],  # list-shaped params
+    ],
+)
+async def test_initialize_falls_back_to_the_newest_revision(params: object) -> None:
+    """Anything we cannot honestly mirror gets our newest revision — per the
+    MCP spec the client then decides whether to proceed."""
+    protocol, _registry = create_protocol_and_registry()
+    request = JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize", params=params)
+    response = await protocol.handle(request)
+    assert response is not None and response.result is not None
+    assert response.result["protocolVersion"] == "2025-11-25"
+
+
+async def test_server_info_version_comes_from_package_metadata() -> None:
+    """serverInfo must never lie about the shipped version: a version string
+    hardcoded in code drifts from the manifest on every re-publish."""
+    import importlib.metadata
+
+    protocol, _registry = create_protocol_and_registry()
+    request = JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize")
+    response = await protocol.handle(request)
+    assert response is not None and response.result is not None
+    assert response.result["serverInfo"]["version"] == importlib.metadata.version("rustok-mcp")
+
+
+async def test_wire_response_never_carries_both_result_and_error() -> None:
+    """JSON-RPC 2.0: a response has EITHER `result` OR `error` — never both
+    keys. `model_dump_json()` emitted `"error": null` next to every result,
+    and Claude Code 2.1's strict parser silently rejects such a message — the
+    proven root cause of the 30 s handshake timeout (blind install MITM
+    isolation, 2026-07-30)."""
+    protocol, _registry = create_protocol_and_registry()
+    ok = await protocol.handle(JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize", params={}))
+    assert ok is not None
+    ok_wire = json.loads(ok.to_wire())
+    assert "result" in ok_wire and "error" not in ok_wire, ok.to_wire()
+
+    err = await protocol.handle(JsonRpcRequest(jsonrpc="2.0", id=2, method="no/such/method"))
+    assert err is not None
+    err_wire = json.loads(err.to_wire())
+    assert "error" in err_wire and "result" not in err_wire, err.to_wire()
 
 
 async def test_initialize_includes_welcome_instructions() -> None:

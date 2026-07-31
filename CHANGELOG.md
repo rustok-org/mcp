@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-07-30
+
+Hotfix: MCP handshake compatibility with current clients (backport of the
+console line's 0.7.1 protocol fix, commit `9b9c649`). Trigger: the 2026-07-30
+agent-edition audit + blind install — the published v0.4.0 image cannot
+complete a handshake with a current MCP client (silent 30 s timeout).
+
+### Fixed
+- **JSON-RPC wire shape.** Every response shipped `"error": null` next to its
+  `result` (bare `model_dump_json()`), which strict clients reject as malformed
+  (JSON-RPC 2.0: exactly one of the two keys) — the proven root cause of the
+  silent 30 s `initialize` timeout (isolated via MITM proxy: removing only
+  `"error": null` connects in ~6.5 s). One serialization seam
+  `JsonRpcResponse.to_wire()` now emits `result` XOR `error` on both
+  transports (stdio + SSE).
+- **Protocol version negotiation.** `initialize` answered a hard-pinned
+  `2024-11-05` regardless of the client's revision. Now mirrors a supported
+  client revision (`2025-11-25 / 2025-06-18 / 2025-03-26 / 2024-11-05`),
+  newest for unknown/absent/malformed.
+- `serverInfo.version` / OpenAPI version / `__version__` are read from
+  `importlib.metadata` — no hardcoded version strings left to drift.
+
+### Build
+- `Dockerfile.wallet` default `CORE_IMAGE` pinned to `v0.1.2` — the core build
+  actually shipped in the v0.4.x wallet images (an unpinned rebuild used to
+  embed `v0.1.0`).
+- CI now runs on the `release/wallet-v0.4.x` branch and `wallet-v*` tags.
+
 ## [0.4.0] - 2026-07-05
 
 Maintenance release of the all-in-one wallet image + skill, fixing the defects
