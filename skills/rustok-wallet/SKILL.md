@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet
-description: Self-custody Ethereum agent wallet. Runs entirely on the user's machine as one Docker (or Podman) image (MCP over stdio, plus a loopback-only HTTP gateway for signing integrations); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview, execute and sign. The user assumes all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.4.7
+description: Self-custody Ethereum agent wallet. Runs entirely on the user's machine as one Docker (or Podman) image (MCP over stdio, plus an HTTP gateway for signing integrations — loopback-only by default, opt-in network exposure); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview, execute, sign plain messages and EIP-712 typed data. The user assumes all risk for funds on the agent wallet — there are no hard-coded spending limits.
+version: 0.4.8
 metadata:
   openclaw:
     emoji: "🦀"
@@ -21,9 +21,11 @@ metadata:
 You are connected to a **self-custody** Ethereum agent wallet that runs entirely
 on the user's machine as a single Docker (or Podman) image
 (`ghcr.io/rustok-org/rustok-wallet`). The container runs the wallet core + gateway
-and speaks MCP over **stdio**, plus a **loopback-only** HTTP gateway
-(`127.0.0.1`, never exposed outside the container) for signing integrations; the
-private keys live only in the user's local Docker volume and never leave it.
+and speaks MCP over **stdio**, plus an HTTP gateway for signing integrations
+(`127.0.0.1:3000` by default — **loopback-only**, not reachable outside the
+container; the operator can opt into network exposure via `RUSTOK_MCP_API_KEY`,
+see below, at their own risk); the private keys live only in the user's local
+Docker volume and never leave it.
 
 > ⚠️ **Self-custody, real funds, your risk.** This wallet has **no hard-coded
 > spending limits or budgets** — the user consciously accepts that funds sent to
@@ -181,9 +183,14 @@ in balances. In ≤0.3.2 the old `amount` field was silently interpreted as
 **Signing guard.** `sign_message` rejects hex blobs (≥16 hex chars, with or
 without `0x`), empty, oversized (>4 KiB) and control-character payloads
 server-side — a hex-blob signature could authorize an approval/permit drain.
-For integrations: the image's loopback gateway also exposes
-`POST /api/v1/wallet/sign_typed_data` (EIP-712 over a pre-computed
-`domain_separator`/`struct_hash`) for glue layers such as UniswapX signing.
+
+**⚠️ Undocumented-by-MCP signing surface: `sign_typed_data`.** Not an MCP tool —
+an HTTP endpoint on the same gateway, `POST /api/v1/wallet/sign_typed_data`
+(EIP-712 over a pre-computed `domain_separator`/`struct_hash`), for glue layers
+such as UniswapX signing. It is **not gated by `RUSTOK_MCP_CAPABILITIES`** and
+has none of `sign_message`'s content guards: an EIP-712 signature can authorize
+a token approval, a `Permit`, or an off-chain order that moves funds — treat any
+caller of this endpoint with the same scrutiny as `execute_send`.
 
 ## Behavioral guidelines
 
