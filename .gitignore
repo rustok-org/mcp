@@ -53,6 +53,7 @@ target/
 
 # Workflow artifacts
 .claude/reports/
+.claude/workflow-state.json
 .review.diff
 
 # Misc
