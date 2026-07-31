@@ -1,5 +1,5 @@
 # Smithery.ai configuration for the rustok-wallet self-custody MCP server.
-# https://smithery.ai/docs/build/project-config/smithery-yaml
+# https://smithery.ai/docs
 #
 # The wallet is a single self-contained image run over stdio. Keys live in YOUR
 # local Docker volume (self-custody) — they never leave your machine.
@@ -18,6 +18,12 @@ startCommand:
     type: object
     required: ["KEYRING_PASS_PATH"]
     properties:
+      ENGINE:
+        type: string
+        enum: ["docker", "podman"]
+        default: "docker"
+        title: Container engine
+        description: Which binary Smithery should invoke locally to run the wallet container — docker or podman. Defaults to docker for existing configs.
       KEYRING_PASS_PATH:
         type: string
         title: Keyring password file (absolute path)
@@ -28,7 +34,7 @@ startCommand:
         description: RPC endpoint for Ethereum mainnet (an Alchemy key URL, or a public RPC).
   commandFunction: |-
     (config) => ({
-      command: 'docker',
+      command: config.ENGINE || 'docker',
       args: [
         'run', '-i', '--rm', '--init',
         '-v', 'rustok-wallet:/data',

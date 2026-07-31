@@ -42,6 +42,12 @@ stripped). Rewrite it: `umask 077 && printf '%s' "$pw" > ~/.rustok-keyring-pass`
 Unlock fails with a wrong password. There is no reset — use the correct
 password, or recover from the 24-word phrase into a fresh wallet.
 
+If you wrote the password into a `_FILE` by hand (not via the `read -s` +
+`printf '%s'` recipe in [Installation](INSTALL.md)) and it has quotes in it —
+e.g. `echo "my'pass" > ~/.rustok-keyring-pass` — the quote characters become
+**part of the password**, a silent mismatch. Rewrite the file with
+`printf '%s' "$pw" > ~/.rustok-keyring-pass` (no quoting, no trailing newline).
+
 ## Empty balances / positions for a chain
 
 That chain has no RPC configured. Set `RUSTOK_RPC_URLS_<chain>` (or
