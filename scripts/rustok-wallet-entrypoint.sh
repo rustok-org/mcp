@@ -45,6 +45,20 @@ fi
 # 1. Core (gRPC) first.
 RUSTOK_GRPC_ADDR="127.0.0.1:50051" core-server 1>&2 &
 
+# Core is the only process that needs the password, and it needs it once: it reads
+# the variable at startup, unlocks, and never looks again. Its copy of the
+# environment was taken at execve above, so dropping ours here cannot affect it —
+# while everything started from this point on (the readiness probes, the gateway,
+# the MCP server, and anything they in turn spawn) no longer carries the secret.
+#
+# Scope, stated honestly: this removes the password from those processes' own
+# environments. It does NOT hide it from a process that walks /proc — core's
+# /proc/<pid>/environ still holds it and stays readable to the same uid, because
+# PR_SET_DUMPABLE does not survive execve (measured) and core, on the frozen
+# v0.1.x line, sets no such flag itself. Closing that requires a change inside
+# core. See docs/TROUBLESHOOTING.md.
+unset RUSTOK_KEYRING_PASSWORD
+
 # 2. Wait for Core's gRPC port to accept connections, then start the Gateway.
 i=0
 while ! python -c "import socket,sys; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',50051)); s.close(); sys.exit(0 if r==0 else 1)" 2>/dev/null; do

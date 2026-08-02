@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-08-02
+
+### Security
+
+- The entrypoint now drops `RUSTOK_KEYRING_PASSWORD` from its environment once
+  core has started. Core is the only process that reads it, and it reads it once
+  at startup; previously every child inherited it, so the MCP server — the process
+  that parses LLM tool arguments and third-party RPC answers — carried the wallet
+  password in its own environment, as did anything it spawned.
+- Scope stated in `docs/TROUBLESHOOTING.md`: this removes the password from those
+  processes' own environments. It does not hide it from code that walks `/proc` —
+  core's `/proc/<pid>/environ` still holds it, and `PR_SET_DUMPABLE` does not
+  survive `execve`, so only core itself can close that.
+
 ## [0.4.2] - 2026-07-31
 
 Secret hygiene for the agent line (backport of the console line's PR-1.1,
