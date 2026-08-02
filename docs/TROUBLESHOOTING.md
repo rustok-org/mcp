@@ -70,6 +70,25 @@ Example: `-e RUSTOK_ALLOWED_CHAINS=1 -e RUSTOK_RPC_URLS_1=https://…`.
 The container runs as uid/gid 1000. A **named** volume (`rustok-wallet`) is
 created with the right ownership automatically; prefer it over a host-path mount.
 
+## How far the keyring password travels inside the container
+
+Since v0.4.3 the entrypoint drops `RUSTOK_KEYRING_PASSWORD` from its own
+environment once core has started, so the gateway, the MCP server, and anything
+they spawn no longer carry it. Core keeps it: it is the only process that reads
+the password, and it reads it once, at startup, to unlock the keystore.
+
+What this does **not** do, said plainly: core's `/proc/<pid>/environ` still holds
+the password, and on a host with the common `kernel.yama.ptrace_scope=0` any
+process running as the same uid can read it. `PR_SET_DUMPABLE`, which would close
+that, does not survive `execve`, so no wrapper around core can set it — only core
+itself can, and the v0.1.x core shipped in this line does not.
+
+Practical consequence: the password is out of reach of code that only looks at
+its own environment, and still reachable by code that walks `/proc`. If that
+matters for your deployment, run the wallet under a user account that runs
+nothing else, and consider `kernel.yama.ptrace_scope=1` on the host (a host
+sysctl — a container cannot set it for you).
+
 ## Getting help
 
 - [GitHub Issues](https://github.com/rustok-org/mcp/issues)
