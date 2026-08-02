@@ -5,7 +5,7 @@
 # for them to be ready, then hand the container's stdin/stdout to the MCP stdio
 # server. The MCP JSON-RPC channel is stdout — so ALL backend logs go to stderr.
 #
-# `create-wallet`: one-shot onboarding — create the keystore and print the 24-word
+# `create-wallet`: one-shot onboarding — create the keystore and print the 12-word
 # recovery phrase on the TTY (`docker run -it ... create-wallet`), then exit.
 set -e
 

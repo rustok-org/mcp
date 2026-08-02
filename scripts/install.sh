@@ -12,7 +12,7 @@ Rustok self-custody wallet — quick start (Docker)
 1) Pull the image:
    docker pull ${IMAGE}
 
-2) Create your wallet once — back up the 24 words it prints:
+2) Create your wallet once — back up the 12 words it prints:
    docker run -it --rm -v rustok-wallet:/data \\
      -e RUSTOK_KEYRING_PASSWORD="choose-a-strong-password" \\
      ${IMAGE} create-wallet

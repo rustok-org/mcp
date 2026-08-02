@@ -4,7 +4,7 @@
 # The wallet is a single self-contained image run over stdio. Keys live in YOUR
 # local Docker volume (self-custody) — they never leave your machine.
 #
-# One-time onboarding BEFORE first use (run in a terminal, back up the 24 words).
+# One-time onboarding BEFORE first use (run in a terminal, back up the 12 words).
 # The password lives only in a 0600 file — never in this config:
 #   umask 077
 #   read -r -s -p "Keyring password: " pw && printf '%s' "$pw" > ~/.rustok-keyring-pass && unset pw

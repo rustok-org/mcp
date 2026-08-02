@@ -19,6 +19,12 @@ KEYRING_PASSWORD = "e2e-keyring-password"  # noqa: S105  (throwaway keystore, pe
 
 _ADDRESS_RE = re.compile(r"Address:\s+(0x[0-9a-fA-F]{40})")
 
+# The recovery phrase is printed on its own indented line, between the banner
+# header and the warning that follows it. Matching the words themselves — not the
+# "(N words)" the header claims — is the point: the header is a string, the phrase
+# is the behaviour.
+_PHRASE_RE = re.compile(r"^ +([a-z]+(?: [a-z]+)+)\s*$", re.MULTILINE)
+
 
 @dataclass
 class Wallet:
@@ -42,7 +48,7 @@ def create_wallet(
     itself must never ride the argv.
 
     NOTHING from this command's output may ever reach a failure message. The output
-    is where the wallet prints the 24-word recovery phrase — the secret the whole
+    is where the wallet prints the recovery phrase — the secret the whole
     product exists to protect — and this suite's log is pasted whole into the
     acceptance report. So this is the one call site that must NOT use the shared
     helper's "echo stderr so a human can debug it" behaviour: a container that dies
@@ -94,6 +100,60 @@ def create_wallet(
             f"address matched: {bool(address)})"
         )
     return address.group(1)
+
+
+def create_wallet_phrase_word_count(
+    image: str,
+    volume: str,
+    password_args: tuple[str, ...] | None = None,
+) -> int:
+    """Run one-shot onboarding and return ONLY how many words the phrase has.
+
+    Same redaction contract as `create_wallet`, and the same reason: a count
+    cannot spend anything, a phrase can. The phrase never leaves this function —
+    not into a return value, not into an assertion message, not into a log.
+
+    Counting the words themselves rather than reading the "(N words)" the banner
+    claims is deliberate: the header is a string a careless edit could desync from
+    reality, and this test exists precisely to catch that.
+    """
+    if password_args is None:
+        password_args = ("-e", f"RUSTOK_KEYRING_PASSWORD={KEYRING_PASSWORD}")
+
+    try:
+        done = subprocess.run(
+            [
+                PODMAN,
+                "run",
+                "--rm",
+                "-i",
+                "-v",
+                f"{volume}:/data",
+                *password_args,
+                image,
+                "create-wallet",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as timed_out:
+        # Never let the exception object escape: it carries the captured banner.
+        raise AssertionError(
+            f"create-wallet timed out after {timed_out.timeout}s "
+            "(output redacted — it contains the recovery phrase)"
+        ) from None
+
+    output = done.stdout + done.stderr
+    phrase = _PHRASE_RE.search(output)
+    if done.returncode != 0 or not phrase:
+        raise AssertionError(
+            f"create-wallet failed or printed an unexpected format (exit {done.returncode}; "
+            f"output redacted — it contains the recovery phrase; {len(output)} chars, "
+            f"phrase line matched: {bool(phrase)})"
+        )
+    return len(phrase.group(1).split())
 
 
 def start_wallet(
