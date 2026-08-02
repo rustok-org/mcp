@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet
 description: Self-custody Ethereum agent wallet. Runs entirely on the user's machine as one Docker (or Podman) image (MCP over stdio, plus an HTTP gateway for signing integrations — loopback-only by default, opt-in network exposure); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview, execute, sign plain messages and EIP-712 typed data. The user assumes all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.4.8
+version: 0.4.9
 metadata:
   openclaw:
     emoji: "🦀"
@@ -43,7 +43,7 @@ Docker volume and never leave it.
 
 ## One-time onboarding (the user does this in a terminal, once)
 
-Create the wallet and **back up the 24-word recovery phrase** — it is shown only
+Create the wallet and **back up the 12-word recovery phrase** — it is shown only
 once, in the user's own terminal (never to the agent). The keyring password goes
 in as a **secret** — never inline, never into shell history:
 
@@ -73,8 +73,8 @@ docker run -it --rm \
   ghcr.io/rustok-org/rustok-wallet:latest create-wallet
 ```
 
-This prints the wallet **address** and the **24 words**. Write the words down
-offline and fund the address. Recovery = these 24 words (importable into any
+This prints the wallet **address** and the **12 words**. Write the words down
+offline and fund the address. Recovery = these 12 words (importable into any
 standard wallet, e.g. MetaMask) or the `rustok-wallet` Docker volume + password.
 
 > **Headless/CI:** replace `-it` with `-i`. The password is already supplied

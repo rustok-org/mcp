@@ -26,7 +26,7 @@ password, provide **either** `RUSTOK_KEYRING_PASSWORD` **or**
 ## Data & keys
 
 - Mount a named volume at `/data`: `-v rustok-wallet:/data`. It holds the
-  encrypted `keystore.json`. Back it up (or the 24-word phrase) — losing both
+  encrypted `keystore.json`. Back it up (or your recovery phrase) — losing both
   loses the wallet.
 - Keys are encrypted at rest (Argon2id + AES-256-GCM) and only ever decrypted
   inside the container on your machine.

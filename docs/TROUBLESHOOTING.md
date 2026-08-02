@@ -12,7 +12,7 @@ the agent. No config changes needed.
 
 The wallet hasn't been created in this volume yet. Run onboarding once —
 see [Installation](INSTALL.md) step 2 (secret / `_FILE` password delivery).
-Back up the printed 24 words, then start the agent again.
+Back up the printed 12 words, then start the agent again.
 
 ## "RUSTOK_KEYRING_PASSWORD_FILE does not point to a readable regular file"
 
@@ -40,7 +40,7 @@ stripped). Rewrite it: `umask 077 && printf '%s' "$pw" > ~/.rustok-keyring-pass`
 ## Wrong password
 
 Unlock fails with a wrong password. There is no reset — use the correct
-password, or recover from the 24-word phrase into a fresh wallet.
+password, or recover from your recovery phrase into a fresh wallet.
 
 If you wrote the password into a `_FILE` by hand (not via the `read -s` +
 `printf '%s'` recipe in [Installation](INSTALL.md)) and it has quotes in it —

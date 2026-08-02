@@ -49,9 +49,9 @@ docker run -it --rm \
   ghcr.io/rustok-org/rustok-wallet:latest create-wallet
 ```
 
-Run this in a terminal and **write down the 24-word recovery phrase** — it is
-shown only once. It prints your wallet **address** and the **24 words**. Back
-them up offline, then fund the address. (Recovery = the 24 words, importable
+Run this in a terminal and **write down the 12-word recovery phrase** — it is
+shown only once. It prints your wallet **address** and the **12 words**. Back
+them up offline, then fund the address. (Recovery = the 12 words, importable
 into any standard wallet, or the `rustok-wallet` volume + your password.)
 
 > **Headless/CI:** replace `-it` with `-i`. The password is already supplied

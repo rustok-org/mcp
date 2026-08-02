@@ -12,11 +12,14 @@
 # Run (MCP stdio): docker run -i --rm --init -v rustok-wallet:/data \
 #     -e RUSTOK_KEYRING_PASSWORD=… -e RUSTOK_RPC_URLS_1=… rustok-wallet:0.4.1
 
-# Pinned to the exact core build shipped in wallet v0.4.x (verified byte-identical
-# to the binary inside ghcr.io/rustok-org/rustok-wallet:v0.4.0, sha256 audit
-# 2026-07-30). The default MUST match the shipped image — an unpinned build from
-# this tag would silently embed a different core.
-ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.1.2
+# Pinned to an exact core build, never a floating tag: an unpinned build from this
+# Dockerfile would silently embed a different core than the one shipped under the
+# same wallet version.
+#
+# v0.1.3 (digest 718ffccc…) carries 12-word recovery phrases and closes
+# RUSTSEC-2026-0220 in ruint. Wallets created under v0.1.2 keep their 24-word
+# phrases and still unlock — the keystore holds the encrypted key, not the phrase.
+ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.1.3
 
 # --- Core/Gateway binaries (private source; public binary image) ---
 FROM ${CORE_IMAGE} AS core

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.3] - 2026-08-02
 
+### Changed
+
+- New wallets are handed a **12-word** recovery phrase instead of 24. Twelve is
+  the project standard, the BIP-39 default and 128 bits of entropy — beyond brute
+  force, and half as many words to copy down by hand, which is where recovery
+  phrases are actually lost. Built on `rustok-core:v0.1.3`, which was the last
+  production path in the codebase still generating 24.
+- **Existing wallets are unaffected.** The keystore holds the encrypted private
+  key, not the phrase, so a wallet created before this release keeps its 24 words
+  and still unlocks — asserted by a regression test in core and by a live check
+  here (a v0.4.2 volume opened by this build reports `core: serving`).
+
 ### Security
 
 - The entrypoint now drops `RUSTOK_KEYRING_PASSWORD` from its environment once
@@ -18,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   processes' own environments. It does not hide it from code that walks `/proc` —
   core's `/proc/<pid>/environ` still holds it, and `PR_SET_DUMPABLE` does not
   survive `execve`, so only core itself can close that.
+- `rustok-core:v0.1.3` also carries **RUSTSEC-2026-0220** (`ruint` 1.17.2 →
+  1.20.0). Shift operations reported incorrect overflow flags — `checked_*`
+  returned `Some` where it owed `None` — under everything that touches `U256`.
+  The shift results themselves were correct; the guard rails were not.
 
 ## [0.4.2] - 2026-07-31
 
