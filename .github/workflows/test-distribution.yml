@@ -40,8 +40,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      # Pinned by digest, like every action in this repo. It was the one
+      # unpinned dependency here, and it drifted: a hadolint release added
+      # DL3066 and turned every run red — on a Dockerfile line unchanged since
+      # June. A linter that can change its mind between two pushes is not a
+      # gate, it is a coin toss.
       - name: Run hadolint
-        run: docker run --rm -i ghcr.io/hadolint/hadolint hadolint - < Dockerfile
+        run: |
+          docker run --rm -i \
+            ghcr.io/hadolint/hadolint@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d \
+            hadolint - < Dockerfile
 
   docker-smoke:
     name: Docker Smoke Test

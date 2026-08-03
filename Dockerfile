@@ -42,6 +42,12 @@ RUN groupadd -g 1000 rustok && useradd -u 1000 -g rustok -m rustok
 COPY --from=builder --chown=rustok:rustok /app /app
 ENV PATH="/app/.venv/bin:$PATH"
 
+# DL3066 warns that a name may not resolve to a uid on the host. Here it does:
+# the line above creates `rustok` with a pinned `-u 1000`, and docker-compose
+# matches it. The name is kept because it is the readable half of that pair.
+# The pragma has to sit directly on the instruction — a comment in between and
+# hadolint attaches it to nothing (measured).
+# hadolint ignore=DL3066
 USER rustok
 EXPOSE 3001
 
