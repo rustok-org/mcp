@@ -4,10 +4,23 @@
 # The wallet is a single self-contained image run over stdio. Keys live in YOUR
 # local Docker volume (self-custody) — they never leave your machine.
 #
-# One-time onboarding BEFORE first use (run in a terminal, back up the 12 words + PIN):
-#   docker run -it --rm --name rustok-wallet-tui -v rustok-wallet-tui:/data \
-#     -e RUSTOK_KEYRING_PASSWORD=your-strong-password \
-#     ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0 create-wallet
+# One-time onboarding BEFORE first use (run in a terminal, back up the 12 words + PIN).
+# Keep the password in a 0600 file and hand the wallet its PATH — the value then
+# stays out of your shell history and out of `docker inspect`:
+#   umask 077 && read -r -s -p "Keyring password: " pw \
+#     && printf '%s' "$pw" > ~/.rustok-keyring-pass && unset pw
+#   docker run -it --rm -v rustok-wallet-tui:/data \
+#     -v ~/.rustok-keyring-pass:/run/keyring-pass:ro \
+#     -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
+#     ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3 create-wallet
+#
+# The launch below cannot use that path: Smithery hands the server its config as
+# environment values, with nowhere to put a file. The password therefore arrives
+# as `-e RUSTOK_KEYRING_PASSWORD`, which the entrypoint stages into a 0600 file,
+# clears from every process and deletes once the core is unlocked — so no process
+# carries it, but the value does land in the container config (`docker inspect`).
+# A host that mounts a file (the shim, or the commands in docs/INSTALL.md) avoids
+# even that.
 startCommand:
   type: stdio
   configSchema:
@@ -31,7 +44,7 @@ startCommand:
         '-e', 'RUSTOK_KEYRING_PASSWORD',
         '-e', 'RUSTOK_ALLOWED_CHAINS=1,8453',
         '-e', 'RUSTOK_RPC_URLS_1',
-        'ghcr.io/rustok-org/rustok-wallet-tui:v0.6.0'
+        'ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3'
       ],
       env: {
         RUSTOK_KEYRING_PASSWORD: config.RUSTOK_KEYRING_PASSWORD || '',
