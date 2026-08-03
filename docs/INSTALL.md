@@ -70,7 +70,7 @@ this config file**. For **Claude Desktop / Cursor**, add to the MCP config
   "mcpServers": {
     "rustok-wallet": {
       "command": "podman",
-      "args": ["run", "-i", "--rm", "--init",
+      "args": ["run", "-i", "--rm",
                "-v", "rustok-wallet:/data",
                "--secret", "rustok-keyring,type=env,target=RUSTOK_KEYRING_PASSWORD",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
