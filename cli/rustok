@@ -25,7 +25,7 @@ CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rustok"
 CONFIG_FILE="$CONFIG_DIR/config"
 # The shipped wallet image; RUSTOK_IMAGE overrides (a digest-pinned ref comes
 # with the installer stage of the epic).
-DEFAULT_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2"
+DEFAULT_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3"
 
 usage() {
     cat <<'EOF'
@@ -183,6 +183,31 @@ volume_for() {
 
 secret_for() { echo "rustok-keyring-$1"; }
 password_file_for() { echo "$CONFIG_DIR/keyring-pass-$1"; }
+
+keyring_password_args() {
+    # How the keyring password reaches the container — a FILE on both engines,
+    # never an environment value. `type=env` would put it in `/proc/<pid>/environ`
+    # of every process in there (and of anything the agent spawns that inherits
+    # it); a mount puts it in one file that only the wallet's own user can read,
+    # and leaves `podman inspect` holding a path instead of the password.
+    #
+    # `mode`/`uid`/`gid` narrow it from the 0444-root default to 0400 owned by
+    # the image's user (1000). No `target=`: the default `/run/secrets/<name>`
+    # works on every podman that has secrets at all, while an absolute target is
+    # a newer spelling — and there is nothing to gain by requiring it.
+    #
+    # Emits a word-split fragment, like the other argv helpers here.
+    agent="$1"
+    if [ "$engine" = "podman" ]; then
+        printf '%s\n' --secret "$(secret_for "$agent"),type=mount,mode=0400,uid=1000,gid=1000" \
+            -e "RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/$(secret_for "$agent")"
+    else
+        # docker has no secret store outside swarm; the 0600 file the shim keeps
+        # is bind-mounted read-only. Same mechanism, same variable.
+        printf '%s\n' -v "$(password_file_for "$agent"):/run/keyring-pass:ro" \
+            -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass
+    fi
+}
 
 valid_agent_name() {
     # ONE charset gate for every road an agent name travels in on: the --agent
@@ -371,12 +396,8 @@ cmd_init() {
     # shim adds no capture, no tee, no log around it.
     echo "rustok: creating the wallet — back up the 12 words and the PIN it prints:"
     set -- run -it --rm -v "$volume:/data"
-    if [ "$engine" = "podman" ]; then
-        set -- "$@" --secret "$(secret_for "$agent"),type=env,target=RUSTOK_KEYRING_PASSWORD"
-    else
-        set -- "$@" -v "$(password_file_for "$agent"):/run/keyring-pass:ro" \
-            -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass
-    fi
+    # shellcheck disable=SC2046  # keyring_password_args emits a word-split fragment
+    set -- "$@" $(keyring_password_args "$agent")
     set -- "$@" "$(image_ref)" create-wallet
     "$engine" "$@"
     echo "rustok: wallet created for agent '$agent' — next: rustok start (or connect your agent), then fund the address"
@@ -388,8 +409,11 @@ wallet_run_args() {
     agent="$1"
     volume="$(volume_for "$agent")"
     rpc_secrets="$(rpc_secret_names "$agent")"
+    # No `--init`: the image's entrypoint is PID 1 itself and hands that role to
+    # tini through `exec`, so the reaping is covered — and an extra init process
+    # only adds one more holder of whatever the runtime was handed.
     # shellcheck disable=SC2046  # label_volume_args emits a word-split fragment
-    set -- run -d -i --rm --init $(label_volume_args "$agent")
+    set -- run -d -i --rm $(label_volume_args "$agent")
     for name in $(rustok_env_names); do
         case "$name" in
             RUSTOK_RPC_URLS_*)
@@ -416,13 +440,8 @@ wallet_run_args() {
     done
     # shellcheck disable=SC2046
     set -- "$@" $(printf '%s\n' "$rpc_secrets" | rpc_secret_args "$agent")
-    # shellcheck disable=SC2046
-    if [ "$engine" = "podman" ]; then
-        set -- "$@" --secret "$(secret_for "$agent"),type=env,target=RUSTOK_KEYRING_PASSWORD"
-    else
-        set -- "$@" -v "$(password_file_for "$agent"):/run/keyring-pass:ro" \
-            -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass
-    fi
+    # shellcheck disable=SC2046  # keyring_password_args emits a word-split fragment
+    set -- "$@" $(keyring_password_args "$agent")
     set -- "$@" "$(image_ref)"
     printf '%s\n' "$@"
 }
@@ -622,13 +641,9 @@ PYEOF
     # hand-off could not survive.
     reg_rpc_secrets="$(rpc_secret_names "$agent")"
     # shellcheck disable=SC2046  # fragment helpers emit word-split args
-    set -- run -i --rm --init $(label_volume_args "$agent")
-    if [ "$engine" = "podman" ]; then
-        set -- "$@" --secret "$(secret_for "$agent"),type=env,target=RUSTOK_KEYRING_PASSWORD"
-    else
-        set -- "$@" -v "$(password_file_for "$agent"):/run/keyring-pass:ro" \
-            -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass
-    fi
+    set -- run -i --rm $(label_volume_args "$agent")
+    # shellcheck disable=SC2046  # keyring_password_args emits a word-split fragment
+    set -- "$@" $(keyring_password_args "$agent")
     # shellcheck disable=SC2046  # rpc_secret_args emits a word-split fragment
     set -- "$@" $(printf '%s\n' "$reg_rpc_secrets" | rpc_secret_args "$agent")
     # Non-secret RUSTOK_* config is FROZEN as literal -e values: the agent
