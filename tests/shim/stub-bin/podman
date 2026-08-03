@@ -10,6 +10,14 @@
 set -eu
 
 [ -n "${STUB_LOG:-}" ] && printf '%s %s\n' "$(basename "$0")" "$*" >>"$STUB_LOG"
+# The same call again, ONE ARGUMENT PER LINE. The line above joins argv with
+# spaces, so an argument that got word-split into two is byte-identical there to
+# one that survived whole — and a shim regression that tears a path with a space
+# into several tokens reads as a pass. Token boundaries have to be visible
+# somewhere, and this is where.
+if [ -n "${STUB_LOG:-}" ]; then
+    for stub_arg in "$@"; do printf '%s\n' "$stub_arg"; done >>"$STUB_LOG.tokens"
+fi
 
 entry_id() { printf '%s' "$1" | cut -d';' -f1; }
 
