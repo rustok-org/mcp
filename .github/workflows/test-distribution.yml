@@ -27,6 +27,29 @@ jobs:
             docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:stable scripts/*.sh
           fi
 
+  secret-scan:
+    name: Secret Scan (skills + docs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      # The skill package is what ClawHub scans, and it is published from here.
+      # A finding there lands on the storefront, in front of users, with no way
+      # to answer it until a maintainer notices — so the same class of check
+      # runs on our own pull requests first. Docs are in scope for the same
+      # reason: every recipe a user copies ships from this repo.
+      #
+      # Pinned by digest, like everything else here: a scanner that changes its
+      # rules between two pushes turns a gate into a coin toss (this workflow
+      # already learned that from hadolint).
+      - name: Scan the published surface for secrets
+        run: |
+          docker run --rm -v "$PWD:/scan:ro" \
+            ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            detect --source /scan/skills --no-git --verbose
+          docker run --rm -v "$PWD:/scan:ro" \
+            ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            detect --source /scan/docs --no-git --verbose
+
   install-script-syntax:
     name: Install Script Syntax
     runs-on: ubuntu-latest
