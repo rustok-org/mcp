@@ -26,7 +26,7 @@ startCommand:
     (config) => ({
       command: 'docker',
       args: [
-        'run', '-i', '--rm', '--init', '--name', 'rustok-wallet-tui',
+        'run', '-i', '--rm', '--name', 'rustok-wallet-tui',
         '-v', 'rustok-wallet-tui:/data',
         '-e', 'RUSTOK_KEYRING_PASSWORD',
         '-e', 'RUSTOK_ALLOWED_CHAINS=1,8453',

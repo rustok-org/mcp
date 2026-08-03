@@ -20,17 +20,12 @@
         {
           "type": "named",
           "name": "-i",
-          "description": "Keep stdin open — required for the stdio MCP transport."
+          "description": "Keep stdin open \u2014 required for the stdio MCP transport."
         },
         {
           "type": "named",
           "name": "--rm",
           "description": "Remove the ephemeral container on exit (keys persist in the volume)."
-        },
-        {
-          "type": "named",
-          "name": "--init",
-          "description": "PID-1 init: signal forwarding and zombie reaping."
         },
         {
           "type": "named",
@@ -41,8 +36,8 @@
         {
           "type": "named",
           "name": "-e",
-          "description": "Keystore password.",
-          "value": "RUSTOK_KEYRING_PASSWORD={password}",
+          "description": "Path to a file holding the keystore password (never the value itself).",
+          "value": "RUSTOK_KEYRING_PASSWORD_FILE={path}",
           "isRequired": true,
           "variables": {
             "password": {

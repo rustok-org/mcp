@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet-tui
 description: Self-custody Ethereum agent wallet. Installs with one command and runs entirely on your machine as a single container image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain requires your approval in a separate terminal console, never inside the agent chat; message signing is not console-gated. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.8.2
+version: 0.8.3
 metadata:
   openclaw:
     emoji: "🦀"
@@ -57,7 +57,7 @@ Three commands, in a **terminal the agent cannot see** — the full guide is
 # 1. install the `rustok` command (pulls the image by digest; verifies the
 #    signature too when cosign is available)
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.2/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.3/scripts/install.sh | sh
 
 # 2. create the wallet — prints the 12-word phrase and the approval PIN ONCE
 rustok init
@@ -97,13 +97,14 @@ the secret store; on docker, keep it in a private `0600` file and pass its *path
 # One-time (podman): the value never touches history, inspect or configs.
 read -r -s -p "Keyring password: " pw && printf '%s' "$pw" | podman secret create rustok-keyring-claude - && unset pw
 
-podman run -i --rm --init \
+podman run -i --rm \
   --label rustok=wallet --label rustok.agent=claude \
   -v rustok-wallet-tui:/data \
-  --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD \
+  --secret rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000 \
+  -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3
 ```
 
 ```bash
@@ -111,14 +112,14 @@ podman run -i --rm --init \
 umask 077
 read -r -s -p "Keyring password: " pw && printf '%s' "$pw" > ~/.rustok-keyring-pass && unset pw
 
-docker run -i --rm --init \
+docker run -i --rm \
   --label rustok=wallet --label rustok.agent=claude \
   -v rustok-wallet-tui:/data \
   -v ~/.rustok-keyring-pass:/run/keyring-pass:ro \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3
 ```
 
 > Legacy `--env-file` delivery still works but is deprecated: the value lands in
@@ -161,13 +162,14 @@ password is delivered by the podman secret (or the docker `_FILE` mount) above,
   "mcpServers": {
     "rustok": {
       "command": "podman",
-      "args": ["run", "-i", "--rm", "--init",
+      "args": ["run", "-i", "--rm",
                "--label", "rustok=wallet", "--label", "rustok.agent=claude",
                "-v", "rustok-wallet-tui:/data",
-               "--secret", "rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD",
+               "--secret", "rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000",
+               "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2"],
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3"],
       "env": {
         "RUSTOK_RPC_URLS_1": "https://your-rpc"
       }
