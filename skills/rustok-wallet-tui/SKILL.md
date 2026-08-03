@@ -51,18 +51,47 @@ true: keys stay local, and **on-chain sends** are human-gated in the console.
 ## One-time onboarding (the user does this in their own terminal, once)
 
 Three commands, in a **terminal the agent cannot see** — the full guide is
-[docs/INSTALL.md](https://github.com/rustok-org/mcp/blob/main/docs/INSTALL.md):
+[docs/INSTALL.md](https://github.com/rustok-org/mcp/blob/main/docs/INSTALL.md).
+
+**1. Install the `rustok` command.** Fetch the installer to a file, read that
+file, then run **that same file** — what you read is exactly what runs. This is a
+wallet: fetching a script straight into a shell means running code you never saw,
+and one look costs less than that trade.
 
 ```bash
-# 1. install the `rustok` command (pulls the image by digest; verifies the
-#    signature too when cosign is available)
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.3/scripts/install.sh -o install.sh
+less install.sh      # ~150 lines of POSIX sh
+sh install.sh
+```
+
+It pulls the wallet image **by digest** (those bytes or nothing) and verifies who
+built it with cosign when cosign is available. The release notes for that tag
+publish the script's `sha256` if you would rather check the bytes than read them.
+
+<details>
+<summary>The one-liner, if you have already read the script</summary>
+
+```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
   https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.3/scripts/install.sh | sh
+```
 
-# 2. create the wallet — prints the 12-word phrase and the approval PIN ONCE
+Piping to a shell runs whatever the URL serves at that moment, unreviewed. The
+tag pins a *version*, not the bytes — the identities bound to exact bytes live
+**inside** the script (the image digest and the shim's commit SHA). Fine once you
+have read it; not the way to meet it.
+</details>
+
+**2. Create the wallet** — prints the 12-word phrase and the approval PIN ONCE:
+
+```bash
 rustok init
+```
 
-# 3. register this wallet with the agent client
+**3. Register this wallet with the agent client:**
+
+```bash
 rustok connect claude
 ```
 
