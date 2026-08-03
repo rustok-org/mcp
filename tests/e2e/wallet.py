@@ -189,10 +189,15 @@ def start_wallet(
     anvil_url: str,
     stderr_path: Path,
     password_args: tuple[str, ...] | None = None,
+    extra_args: tuple[str, ...] = (),
 ) -> McpStdio:
     """Start the wallet container with its stdio as the MCP channel.
 
     `password_args` — same contract as in `create_wallet`.
+
+    `extra_args` is spliced in before the image. No scenario needs it to run the
+    wallet — the entrypoint is PID 1 and reaps its own children — so it exists for
+    the one suite that must prove a property still holds under `--init`.
     """
     if password_args is None:
         password_args = ("-e", f"RUSTOK_KEYRING_PASSWORD={KEYRING_PASSWORD}")
@@ -202,7 +207,7 @@ def start_wallet(
         "run",
         "--rm",
         "-i",
-        "--init",
+        *extra_args,
         "--name",
         name,
         "--network",
