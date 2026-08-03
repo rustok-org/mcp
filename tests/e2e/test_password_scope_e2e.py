@@ -8,13 +8,20 @@ the process that parses untrusted input — LLM tool arguments, third-party RPC
 answers — carried the wallet password in its own environment, and so did anything
 it spawned.
 
-What this suite proves, and only this: after the entrypoint drops the variable,
-the password is absent from the environment of the MCP server and the gateway,
-while the wallet still unlocks and serves. What it deliberately does NOT claim:
-that the password is unreachable. Core's `/proc/<pid>/environ` still holds it and
-stays readable to the same uid — `PR_SET_DUMPABLE` does not survive `execve`
-(measured), and core on the frozen v0.1.x line sets no such flag itself. That gap
-closes only inside core; see docs/TROUBLESHOOTING.md.
+Since 0.4.4 the claim is stronger, because the gap this file used to document has
+been closed at its source. Core v0.1.4 reads the password from a *file*, so the
+entrypoint no longer has to hand it over as a variable: it stages an `-e` password
+into a 0600 file, drops the variable, gives core the path, and deletes the file
+once the keystore is unlocked. `tini` stopped being a carrier too — the entrypoint
+is PID 1 itself and hands that role over through `exec`, which is the only thing
+that rewrites `/proc/1/environ`.
+
+So what this suite now proves: with the password delivered the *old* way (`-e`),
+no process in the settled container carries it in its own environment — core
+included. What it still does NOT claim: that the value is gone from the machine.
+The runtime keeps a copy in the container config (`podman inspect`), which nothing
+inside the image can reach; the documented delivery is a mounted file, and then
+even that copy is a path.
 
 Redaction discipline, as in `test_password_file_e2e`: no raw container output may
 reach a failure message — `create_wallet` output carries the recovery phrase.
@@ -32,15 +39,19 @@ from tests.e2e.wallet import KEYRING_PASSWORD, create_wallet
 
 pytestmark = pytest.mark.e2e
 
-# Processes that handle untrusted input. Neither reads the password in code
-# (0 occurrences of RUSTOK_KEYRING_PASSWORD in the gateway crate and in src/).
-UNTRUSTED = ("rustok-mcp-stdi", "gateway")
+# A canary the container is started with. It exists for one reason: to prove the
+# probe below can see a variable when one is really there. Until 0.4.4 that job
+# was done by asserting core still carried the password — which stops working the
+# moment the leak is fixed, and would have to be deleted exactly when the suite
+# needs its control most.
+CANARY_VAR = "RUSTOK_SCOPE_CANARY"
+CANARY_VALUE = "probe-can-see-this"  # noqa: S105  (not a secret; a visibility marker)
 
 # One shell probe, run inside the container: for every live pid, report the comm
-# of any process whose own environment still carries the keyring password.
-LEAK_PROBE = r"""
+# of any process whose own environment carries the named variable.
+LEAK_PROBE_TEMPLATE = r"""
 for p in /proc/[0-9]*; do
-    if tr '\0' '\n' < "$p/environ" 2>/dev/null | grep -q '^RUSTOK_KEYRING_PASSWORD='; then
+    if tr '\0' '\n' < "$p/environ" 2>/dev/null | grep -q '^{variable}='; then
         cat "$p/comm" 2>/dev/null
     fi
 done
@@ -64,6 +75,8 @@ def running_wallet(image: str) -> Iterator[str]:
             f"{volume}:/data",
             "-e",
             f"RUSTOK_KEYRING_PASSWORD={KEYRING_PASSWORD}",
+            "-e",
+            f"{CANARY_VAR}={CANARY_VALUE}",
             image,
         )
         _wait_for_core(name)
@@ -101,30 +114,30 @@ def _wait_for_process(name: str, comm: str) -> None:
         pytest.fail(f"process {comm!r} never appeared — the container never finished starting")
 
 
-def _processes_holding_password(name: str) -> set[str]:
-    out = podman("exec", name, "sh", "-c", LEAK_PROBE).stdout
+def _processes_holding(name: str, variable: str) -> set[str]:
+    probe = LEAK_PROBE_TEMPLATE.format(variable=variable)
+    out = podman("exec", name, "sh", "-c", probe).stdout
     return {line.strip() for line in out.splitlines() if line.strip()}
 
 
-def test_untrusted_processes_do_not_carry_the_password(running_wallet: str) -> None:
-    """The MCP server and the gateway must not hold the password in their env.
+def test_no_process_carries_the_password(running_wallet: str) -> None:
+    """Not one process — core included — holds the password in its environment.
 
-    Red against v0.4.2, where the entrypoint exported it to every child.
+    Delivered the OLD way (`-e`), which is the hard case: the value really did
+    enter the container as a variable. Red against v0.4.3, where the probe found
+    `tini` and `core-server`; the untrusted pair was already clean by then.
     """
-    holders = _processes_holding_password(running_wallet)
-    leaked = sorted(h for h in holders if h in UNTRUSTED)
-    assert not leaked, (
-        f"processes handling untrusted input still carry the keyring password: {leaked}"
-    )
+    holders = sorted(_processes_holding(running_wallet, "RUSTOK_KEYRING_PASSWORD"))
+    assert holders == [], f"processes still carrying the keyring password: {holders}"
 
 
-def test_core_still_carries_it(running_wallet: str) -> None:
-    """Positive control: the probe can see a password when one is there.
+def test_the_probe_can_see_a_variable_that_is_really_there(running_wallet: str) -> None:
+    """Positive control, independent of the defect under test.
 
-    Without this, `test_untrusted_processes_do_not_carry_the_password` would also
-    pass against a broken probe that never finds anything.
+    Without it, the assertion above would pass just as happily against a probe
+    that finds nothing anywhere. The canary is delivered exactly like the old
+    password was — a plain `-e` — so a probe that misses it would have missed
+    the password too.
     """
-    holders = _processes_holding_password(running_wallet)
-    assert "core-server" in holders, (
-        "probe found the password nowhere at all — it is not measuring what it claims"
-    )
+    holders = _processes_holding(running_wallet, CANARY_VAR)
+    assert holders, "the probe found a planted variable nowhere — it measures nothing"

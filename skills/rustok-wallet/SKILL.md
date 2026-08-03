@@ -88,7 +88,7 @@ keyring password in the MCP config** — reuse the delivery from onboarding:
 **Podman** (the secret you already created):
 
 ```bash
-podman run -i --rm --init \
+podman run -i --rm \
   -v rustok-wallet:/data \
   --secret rustok-keyring,type=env,target=RUSTOK_KEYRING_PASSWORD \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
@@ -99,7 +99,7 @@ podman run -i --rm --init \
 **Docker** (the `0600` file you already created):
 
 ```bash
-docker run -i --rm --init \
+docker run -i --rm \
   -v rustok-wallet:/data \
   -v ~/.rustok-keyring-pass:/run/keyring-pass:ro \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
@@ -124,7 +124,7 @@ inside JSON):
   "mcpServers": {
     "rustok-wallet": {
       "command": "podman",
-      "args": ["run", "-i", "--rm", "--init",
+      "args": ["run", "-i", "--rm",
                "-v", "rustok-wallet:/data",
                "--secret", "rustok-keyring,type=env,target=RUSTOK_KEYRING_PASSWORD",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",

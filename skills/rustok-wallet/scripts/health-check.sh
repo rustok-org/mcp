@@ -10,7 +10,7 @@ IMAGE="${RUSTOK_WALLET_IMAGE:-ghcr.io/rustok-org/rustok-wallet:latest}"
 echo "Checking ${IMAGE} responds to MCP initialize over stdio..."
 resp=$(printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":["read_wallet"]}}' \
-  | docker run -i --rm --init \
+  | docker run -i --rm \
       -v rustok-wallet:/data \
       -e RUSTOK_KEYRING_PASSWORD \
       -e RUSTOK_MCP_API_KEY \

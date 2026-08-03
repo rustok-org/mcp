@@ -18,7 +18,7 @@ Rustok self-custody wallet — quick start (Docker)
      ${IMAGE} create-wallet
 
 3) Run / connect an agent (MCP over stdio):
-   docker run -i --rm --init -v rustok-wallet:/data \\
+   docker run -i --rm -v rustok-wallet:/data \\
      -e RUSTOK_KEYRING_PASSWORD="..." \\
      -e RUSTOK_ALLOWED_CHAINS="1,8453" \\
      -e RUSTOK_RPC_URLS_1="https://your-rpc" \\

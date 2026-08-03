@@ -179,7 +179,6 @@ def start_wallet(
         "run",
         "--rm",
         "-i",
-        "--init",
         "--name",
         name,
         "-v",

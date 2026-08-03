@@ -36,7 +36,7 @@ startCommand:
     (config) => ({
       command: config.ENGINE || 'docker',
       args: [
-        'run', '-i', '--rm', '--init',
+        'run', '-i', '--rm',
         '-v', 'rustok-wallet:/data',
         '-v', (config.KEYRING_PASS_PATH || '/home/you/.rustok-keyring-pass') + ':/run/keyring-pass:ro',
         '-e', 'RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass',
