@@ -25,7 +25,7 @@ CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rustok"
 CONFIG_FILE="$CONFIG_DIR/config"
 # The shipped wallet image; RUSTOK_IMAGE overrides (a digest-pinned ref comes
 # with the installer stage of the epic).
-DEFAULT_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui:v0.8.2"
+DEFAULT_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3"
 
 usage() {
     cat <<'EOF'
@@ -183,6 +183,21 @@ volume_for() {
 
 secret_for() { echo "rustok-keyring-$1"; }
 password_file_for() { echo "$CONFIG_DIR/keyring-pass-$1"; }
+
+keyring_secret_mount() {
+    # The podman half of the password delivery, as ONE token: the secret is
+    # mounted as a file rather than handed over as `type=env`, which would put
+    # the password in `/proc/<pid>/environ` of every process in the container.
+    # `mode`/`uid`/`gid` narrow it from podman's 0444-root default to 0400 owned
+    # by the image's user (1000). No `target=`: the default `/run/secrets/<name>`
+    # works on every podman that has secrets at all.
+    #
+    # Only the agent name varies here, and `valid_agent_name` already restricts
+    # it to `[a-zA-Z0-9_-]` — so unlike the docker path this token can never
+    # carry a space. The `-e …_FILE=` half is written out at each call site.
+    echo "$(secret_for "$1"),type=mount,mode=0400,uid=1000,gid=1000"
+}
+keyring_secret_path() { echo "/run/secrets/$(secret_for "$1")"; }
 
 valid_agent_name() {
     # ONE charset gate for every road an agent name travels in on: the --agent
@@ -372,7 +387,8 @@ cmd_init() {
     echo "rustok: creating the wallet — back up the 12 words and the PIN it prints:"
     set -- run -it --rm -v "$volume:/data"
     if [ "$engine" = "podman" ]; then
-        set -- "$@" --secret "$(secret_for "$agent"),type=env,target=RUSTOK_KEYRING_PASSWORD"
+        set -- "$@" --secret "$(keyring_secret_mount "$agent")" \
+            -e "RUSTOK_KEYRING_PASSWORD_FILE=$(keyring_secret_path "$agent")"
     else
         set -- "$@" -v "$(password_file_for "$agent"):/run/keyring-pass:ro" \
             -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass
@@ -388,8 +404,11 @@ wallet_run_args() {
     agent="$1"
     volume="$(volume_for "$agent")"
     rpc_secrets="$(rpc_secret_names "$agent")"
+    # No `--init`: the image's entrypoint is PID 1 itself and hands that role to
+    # tini through `exec`, so the reaping is covered — and an extra init process
+    # only adds one more holder of whatever the runtime was handed.
     # shellcheck disable=SC2046  # label_volume_args emits a word-split fragment
-    set -- run -d -i --rm --init $(label_volume_args "$agent")
+    set -- run -d -i --rm $(label_volume_args "$agent")
     for name in $(rustok_env_names); do
         case "$name" in
             RUSTOK_RPC_URLS_*)
@@ -416,9 +435,9 @@ wallet_run_args() {
     done
     # shellcheck disable=SC2046
     set -- "$@" $(printf '%s\n' "$rpc_secrets" | rpc_secret_args "$agent")
-    # shellcheck disable=SC2046
     if [ "$engine" = "podman" ]; then
-        set -- "$@" --secret "$(secret_for "$agent"),type=env,target=RUSTOK_KEYRING_PASSWORD"
+        set -- "$@" --secret "$(keyring_secret_mount "$agent")" \
+            -e "RUSTOK_KEYRING_PASSWORD_FILE=$(keyring_secret_path "$agent")"
     else
         set -- "$@" -v "$(password_file_for "$agent"):/run/keyring-pass:ro" \
             -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass
@@ -622,9 +641,10 @@ PYEOF
     # hand-off could not survive.
     reg_rpc_secrets="$(rpc_secret_names "$agent")"
     # shellcheck disable=SC2046  # fragment helpers emit word-split args
-    set -- run -i --rm --init $(label_volume_args "$agent")
+    set -- run -i --rm $(label_volume_args "$agent")
     if [ "$engine" = "podman" ]; then
-        set -- "$@" --secret "$(secret_for "$agent"),type=env,target=RUSTOK_KEYRING_PASSWORD"
+        set -- "$@" --secret "$(keyring_secret_mount "$agent")" \
+            -e "RUSTOK_KEYRING_PASSWORD_FILE=$(keyring_secret_path "$agent")"
     else
         set -- "$@" -v "$(password_file_for "$agent"):/run/keyring-pass:ro" \
             -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass

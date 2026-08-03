@@ -6,16 +6,17 @@
 #
 # Build (local, against locally-built core/console images):
 #   docker build -f Dockerfile.wallet \
-#     --build-arg CORE_IMAGE=rustok-core:v0.3.0 \
+#     --build-arg CORE_IMAGE=rustok-core:v0.3.1 \
 #     --build-arg CONSOLE_IMAGE=rustok-console:v0.2.0 \
-#     -t rustok-wallet-tui:0.7.1 .
-# Onboard:  docker run -it --rm --name rustok-wallet-tui -v rustok-wallet-tui:/data \
-#     -e RUSTOK_KEYRING_PASSWORD=… rustok-wallet-tui:0.7.1 create-wallet
-# Run (MCP stdio): docker run -i --rm --init --name rustok-wallet-tui \
-#     -v rustok-wallet-tui:/data -e RUSTOK_KEYRING_PASSWORD=… \
-#     -e RUSTOK_RPC_URLS_1=… rustok-wallet-tui:0.7.1
+#     -t rustok-wallet-tui:0.8.3 .
+# The password rides a file, not the environment — see docs/INSTALL.md. Onboard:
+#   podman run -it --rm -v rustok-wallet-tui:/data \
+#     --secret rustok-keyring,type=mount,target=/run/keyring-pass,mode=0400,uid=1000,gid=1000 \
+#     -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
+#     rustok-wallet-tui:0.8.3 create-wallet
+# Run (MCP stdio): the same run without `create-wallet`, plus `-e RUSTOK_RPC_URLS_1=…`.
 
-ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.3.0
+ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.3.1
 ARG CONSOLE_IMAGE=ghcr.io/rustok-org/rustok-console:v0.2.0
 
 # --- Core/Gateway binaries (private source; public binary image) ---
@@ -79,6 +80,9 @@ USER rustok
 ENV RUSTOK_DATA_DIR=/data
 VOLUME ["/data"]
 
-# tini = PID 1: forwards signals to the MCP process and reaps zombies. The
-# backgrounded core/gateway are torn down with the ephemeral (--rm) container.
-ENTRYPOINT ["tini", "--", "/usr/local/bin/rustok-wallet-entrypoint"]
+# The entrypoint is PID 1, and hands that role to tini through `exec` once the
+# backend is up (tini still forwards signals and reaps zombies for the whole
+# container). It is deliberately not started *under* tini: a password supplied
+# the compatibility way (`-e`) would then sit in tini's /proc/1/environ for the
+# life of the container, where nothing inside the image could clear it.
+ENTRYPOINT ["/usr/local/bin/rustok-wallet-entrypoint"]

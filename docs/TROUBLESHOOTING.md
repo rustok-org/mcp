@@ -116,10 +116,12 @@ Hermes itself ships python3 + PyYAML). No other rustok command needs them —
 
 ## On docker: the wallet never unlocks, as if no password reached it
 
-The `_FILE` password delivery docker uses needs a wallet image that understands
-it — **0.8.0 or newer**. The image published as `v0.7.1` was built a day before
-that support landed, so on docker it starts without a password and never unlocks.
-Podman is unaffected (its secret arrives as a plain environment variable).
+The `_FILE` password delivery needs a wallet image that understands it —
+**0.8.0 or newer**. The image published as `v0.7.1` was built a day before that
+support landed, so it starts without a password and never unlocks. This used to
+be a docker-only trap, because podman's secret arrived as a plain environment
+variable; since **0.8.3** both engines deliver a file, so an image older than
+0.8.0 fails the same way on either.
 
 Check which image is actually running:
 
@@ -132,7 +134,7 @@ If it is older than `v0.8.0`, **re-run the installer** — do not stop at
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.2/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.3/scripts/install.sh | sh
 ```
 
 The image version is chosen by the **shim**, and the shim does not update itself.
@@ -151,7 +153,8 @@ the one that verifies the signature.
   (keys untouched).
 - Hand-rolled setup: confirm the same `-v rustok-wallet-tui:/data` volume is
   mounted as at onboarding, and that the password reaches the container
-  (podman `--secret …,type=env,target=RUSTOK_KEYRING_PASSWORD`, docker
+  (podman `--secret <name>,type=mount,mode=0400,uid=1000,gid=1000` plus
+  `-e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/<name>`; docker
   `RUSTOK_KEYRING_PASSWORD_FILE` + file mount).
 
 ## "RUSTOK_KEYRING_PASSWORD_FILE does not point to a readable regular file" / "… is empty"

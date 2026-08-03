@@ -39,7 +39,7 @@ to pretend otherwise. macOS and `arm64` are not published yet.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.2/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.3/scripts/install.sh | sh
 ```
 
 ### Inspect it before you run it
@@ -50,7 +50,7 @@ exactly what runs.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.2/scripts/install.sh -o install.sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.3/scripts/install.sh -o install.sh
 less install.sh      # ~150 lines of POSIX sh
 sh install.sh
 ```
@@ -253,17 +253,20 @@ setup by hand. It is also the reference for what a registration looks like.
 
 ### Create the wallet
 
-**Podman (recommended)** — store the password once in podman's secret store: it
-never touches shell history, `podman inspect` or the MCP config, and quotes in
-the password are safe (they are read as-is, not parsed):
+**Podman (recommended)** — store the password once in podman's secret store and
+mount it as a *file*: it never touches shell history, `podman inspect` or the MCP
+config, it is in no process's environment, and quotes in the password are safe
+(they are read as-is, not parsed). `mode`/`uid`/`gid` narrow the mount from
+podman's world-readable default to owner-only for the image's user:
 
 ```bash
 read -r -s -p "Keyring password: " pw && printf '%s' "$pw" | podman secret create rustok-keyring-claude - && unset pw
 
 podman run -it --rm \
   -v rustok-wallet-tui:/data \
-  --secret rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0 create-wallet
+  --secret rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000 \
+  -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude \
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3 create-wallet
 ```
 
 **Docker** (no secret store without swarm) — keep the password in a `0600` file
@@ -279,8 +282,32 @@ docker run -it --rm \
   -v rustok-wallet-tui:/data \
   -v ~/.rustok-keyring-pass:/run/keyring-pass:ro \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0 create-wallet
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3 create-wallet
 ```
+
+#### What the file delivery does and does not protect
+
+Worth reading once, because the difference decides which of the two commands
+above you should use.
+
+- **What it closes.** The password is in no process's `/proc/<pid>/environ`, so
+  it cannot be harvested from a running wallet the cheapest way there is; it is
+  not inherited by anything the agent spawns; and `podman inspect` holds a path,
+  not the value.
+- **The `-e` path is still accepted, and still leaks into the container config.**
+  The entrypoint stages such a password in a `0600` file, drops the variable and
+  deletes the file once the core has unlocked — but the copy the *runtime* keeps
+  in the container config is outside the image's reach, and `--init` would add
+  another holder for the container's life. That is why the commands above pass a
+  file and no `--init`.
+- **Same-user code is not in scope.** Anything already running as your user can
+  read the mounted secret, the staged file during its short life, the core's
+  memory and the data volume. This protects a secret from casual harvesting, not
+  a machine from its own compromise.
+- **Measured on podman 5.8.4.** Docker was not installed on the machine these
+  runs were made on: the mechanism is engine-independent (a mounted file plus an
+  environment variable naming its path), but docker's behaviour here is
+  **expected, not verified**.
 
 Either way, `create-wallet` prints the **12-word recovery phrase** and the
 **6-digit approval PIN** exactly once. Back both up offline before going further,
@@ -297,13 +324,14 @@ this config file**. With podman the secret above does the delivery:
   "mcpServers": {
     "rustok": {
       "command": "podman",
-      "args": ["run", "-i", "--rm", "--init",
+      "args": ["run", "-i", "--rm",
                "--label", "rustok=wallet", "--label", "rustok.agent=claude",
                "-v", "rustok-wallet-tui:/data",
-               "--secret", "rustok-keyring-claude,type=env,target=RUSTOK_KEYRING_PASSWORD",
+               "--secret", "rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000",
+               "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1=https://ethereum-rpc.publicnode.com",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0"]
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3"]
     }
   }
 }
@@ -313,14 +341,14 @@ With **docker**, swap the `--secret` argument pair for the `0600`-file mount:
 
 ```jsonc
 "command": "docker",
-"args": ["run", "-i", "--rm", "--init",
+"args": ["run", "-i", "--rm",
          "--label", "rustok=wallet", "--label", "rustok.agent=claude",
          "-v", "rustok-wallet-tui:/data",
          "-v", "/home/you/.rustok-keyring-pass:/run/keyring-pass:ro",
          "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass",
          "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
          "-e", "RUSTOK_RPC_URLS_1=https://ethereum-rpc.publicnode.com",
-         "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0"]
+         "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3"]
 ```
 
 > **An RPC URL that embeds a provider key** (an Alchemy URL) is a credential too
@@ -351,11 +379,12 @@ the keyring password and an interactive TTY.)
 Give it a distinct volume and sub-label, and its own secret:
 
 ```jsonc
-"args": ["run", "-i", "--rm", "--init",
+"args": ["run", "-i", "--rm",
          "--label", "rustok=wallet", "--label", "rustok.agent=hermes",
          "-v", "rustok-hermes:/data",                // its own wallet volume
-         "--secret", "rustok-keyring-hermes,type=env,target=RUSTOK_KEYRING_PASSWORD", …,
-         "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0"]
+         "--secret", "rustok-keyring-hermes,type=mount,mode=0400,uid=1000,gid=1000",
+         "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-hermes", …,
+         "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3"]
 ```
 
 `create-wallet` that volume once (as above, with `-v rustok-hermes:/data` and its
@@ -366,7 +395,7 @@ own secret), and open its console with `--filter label=rustok.agent=hermes`.
 Pull the new tag, restart the agent, keep the volume:
 
 ```bash
-docker pull ghcr.io/rustok-org/rustok-wallet-tui:v0.8.0
+docker pull ghcr.io/rustok-org/rustok-wallet-tui:v0.8.3
 # the agent-launched container is --rm (it disappears when the agent session ends);
 # just restart the agent with the new tag in its MCP config, same -v … :/data volume
 ```
