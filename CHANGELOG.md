@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **The keyring password no longer lives in any process's environment.**
+  Until now every process in the wallet image — core, the gateway and the MCP
+  server — carried it in `/proc/<pid>/environ`, where anything running as the
+  same user could read it, decrypt `keystore.json` directly and re-mint the
+  approval PIN. Reading `/proc/*/environ` is the cheapest secret harvest there
+  is, and it made the console edition's PIN gate bypassable. Only the core ever
+  needed the password; the other two held it because the entrypoint exported it.
+
+  Now the password reaches the core as a *file*, and only as a file. Supplied
+  the documented way (a mounted secret plus `RUSTOK_KEYRING_PASSWORD_FILE`), it
+  is in no environment at all and `podman inspect` carries a path instead of the
+  value. Supplied the compatibility way (`-e RUSTOK_KEYRING_PASSWORD`), the
+  entrypoint stages it in a 0600 file, drops the variable, and removes the file
+  once the core has unlocked — and because the entrypoint is now PID 1 and hands
+  that role to `tini` through `exec`, even PID 1's own environment is rewritten.
+  A file *you* mounted is never deleted.
+
+  **What this does not cover, stated plainly:** with `-e` delivery the value
+  still sits in the container config (`podman inspect`) and, under `--init`, in
+  the runtime's own PID 1 — neither is reachable from inside the image, which is
+  why the file delivery is the documented one. Nothing here defends against code
+  already running as the same user: it can read the staged file during its short
+  life, the core's memory, and the data volume. Measured on podman 5.8.4; docker
+  is not installed on the machine these runs were made on, so its behaviour is
+  expected to match by mechanism but is **not verified**.
+
+- **`rustok init`/`start`/`connect` now deliver the password as a mounted
+  secret**, not `--secret …,type=env`. The generated command was the leaky path
+  itself: documentation alone would have fixed the advice and not the product.
+  Existing registrations keep working; re-run `rustok connect <client>` to move
+  an already-registered client onto the new command.
+
+- **Secret files on disk are owner-only** (core `v0.3.1`). `keystore.json` and
+  `approval-pin.json` were world-readable (0644) — they are now written 0600 and
+  narrowed on the first start of an existing wallet, which says so in the log.
+
+### Changed
+- **`--init` is gone from every documented command.** The entrypoint is PID 1
+  itself and hands the role to `tini` through `exec`, so signal forwarding and
+  zombie reaping are covered without it; with `-e` delivery an extra init
+  process is a carrier nothing inside the image can clear.
+- The image is built on core `v0.3.1` (from `v0.3.0`).
+
 ### Fixed
 - **A client can no longer expand its own capabilities via `initialize`.**
   The rustok capability list now *intersects* with the transport-seeded
