@@ -51,9 +51,11 @@ target/
 .env.*
 !.env.example
 
-# Workflow artifacts
-.claude/reports/
-.claude/workflow-state.json
+# Workflow artifacts — the whole directory, not selected parts of it.
+# These are internal working notes: specs, decisions, reports, the state file.
+# They are written for us, not for a reader of this repository, and they are
+# kept outside the published tree.
+.claude/
 .review.diff
 
 # Misc
