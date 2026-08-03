@@ -68,6 +68,13 @@ LABEL org.opencontainers.image.title="rustok-wallet" \
 # config label; value MUST equal server.json `name`).
 LABEL io.modelcontextprotocol.server.name="io.github.rustok-org/rustok-wallet"
 
+# Where the entrypoint stages a password that arrived as a plain `-e` value.
+# Owned by the runtime user because it is created before the drop to `USER`:
+# /run itself is root-owned, so a `mkdir` from the entrypoint would be refused.
+# (The console line has this directory for the approver socket; here it exists
+# for the staged password alone.)
+RUN mkdir -p /run/wallet && chown rustok:rustok /run/wallet
+
 USER rustok
 ENV RUSTOK_DATA_DIR=/data
 VOLUME ["/data"]

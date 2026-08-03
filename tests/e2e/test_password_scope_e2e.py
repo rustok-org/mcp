@@ -51,11 +51,21 @@ CANARY_VALUE = "probe-can-see-this"  # noqa: S105  (not a secret; a visibility m
 # of any process whose own environment carries the named variable.
 LEAK_PROBE_TEMPLATE = r"""
 for p in /proc/[0-9]*; do
+    [ "$p" = "/proc/$$" ] && continue
     if tr '\0' '\n' < "$p/environ" 2>/dev/null | grep -q '^{variable}='; then
         cat "$p/comm" 2>/dev/null
     fi
 done
 """
+# The probe skips ITSELF and nothing else. `podman exec` hands the new process the
+# container's *configured* environment, so under `-e` delivery this shell is born
+# holding the password no matter how clean the wallet's own processes are — a
+# property of exec, not of the wallet. Its children are not a concern: the glob
+# expands once, before the first one exists.
+#
+# The exclusion was harmless to omit while the assertion only looked at the MCP
+# server and the gateway; it became load-bearing the moment the suite started
+# asserting that NO process carries it.
 
 
 @pytest.fixture
