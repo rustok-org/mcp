@@ -17,6 +17,7 @@ output — `create_wallet`'s stderr holds the recovery phrase.
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -62,12 +63,12 @@ for entry in os.listdir("/proc"):
 print(json.dumps(carriers))
 """
 
-# `podman run --init` inserts its own PID 1 into the container. It receives the
-# runtime's environment before our entrypoint exists, so nothing inside the image
-# can clear it — under `-e` delivery it is an unreachable carrier by construction.
-# Named here so the `-e` case can exclude it explicitly instead of loosening the
-# assertion; under `_FILE` delivery it must come up clean like everything else.
-FOREIGN_INIT = ("podman-init", "catatonit", "tini")
+# Nothing is excluded by process name. `podman run --init` would insert a PID 1
+# the image cannot reach, and under `-e` delivery that one would be a carrier by
+# construction — but no test here combines the two, and excluding by name would
+# also exempt OUR own PID 1, which is called `tini` after the entrypoint hands
+# the role over. That process is exactly the one the fix has to clean, so a name
+# filter would hide the regression it exists to catch.
 
 
 def password_carriers(container: str, password: str = KEYRING_PASSWORD) -> list[dict[str, object]]:
@@ -210,17 +211,22 @@ def test_file_delivery_stays_clean_under_init(
 def test_env_delivery_leaves_the_password_in_no_process_of_our_chain(
     env_delivered_wallet: str,
 ) -> None:
-    """Criterion 1(c): the `-e` path — nothing of OURS carries it.
+    """Criterion 1(c): the `-e` path — no process in the container carries it.
 
-    The container config still holds the value (`podman inspect`), and under
-    `--init` the runtime's PID 1 would too; neither is reachable from inside the
-    image, and both are documented. What must be clean is every process the image
-    itself starts — including PID 1, which is our entrypoint until it `exec`s.
+    No exemptions, PID 1 included: it is our own entrypoint, and the `exec` that
+    hands its role to tini is precisely what rewrites the environment region the
+    `unset` could not reach. Excusing it by name would excuse the mechanism under
+    test.
+
+    What stays outside this assertion is outside the *container*: the runtime
+    keeps the value in the container config (`podman inspect`), and under
+    `--init` in its own PID 1. Neither is reachable from inside the image, both
+    are documented, and neither is a process this test can see.
     """
     carriers = password_carriers(env_delivered_wallet)
-    ours = [c for c in carriers if c["comm"] not in FOREIGN_INIT]
-    assert ours == [], (
-        f"the keyring password is readable in /proc/<pid>/environ of: {[c['comm'] for c in ours]}"
+    assert carriers == [], (
+        "the keyring password is readable in /proc/<pid>/environ of: "
+        f"{[c['comm'] for c in carriers]}"
     )
 
 
@@ -238,6 +244,60 @@ def test_the_temporary_password_file_does_not_outlive_startup(
     ).stdout.split()
     leftovers = [entry for entry in listing if "password" in entry or "keyring" in entry]
     assert leftovers == [], f"a staged password file outlived startup: {leftovers}"
+
+
+@pytest.mark.e2e_slow
+def test_a_start_that_never_comes_up_leaves_no_staged_password(image: str) -> None:
+    """A failed start must not leave the password in the container's filesystem.
+
+    The container is deliberately started WITHOUT `--rm` on an empty volume, so
+    the core exits, the entrypoint gives up at its own timeout, and the stopped
+    container stays — which is exactly what someone debugging a failed start
+    does. `podman diff` then reads its writable layer from the host: a staged
+    password left there is recoverable with `podman cp` by anyone who can talk
+    to the engine, a wider audience than the same-user access the threat model
+    accepts.
+
+    Marked slow: it waits out the entrypoint's 60-second core-ready timeout.
+    (Red-proven by measurement: before the cleanup covered every exit path, the
+    file was in the exited container's layer.)
+    """
+    suffix = uuid.uuid4().hex[:8]
+    name = f"rustok-wallet-tui-e2e-failed-{suffix}"
+    volume = f"rustok-e2e-data-failed-{suffix}"
+
+    podman("volume", "create", volume)
+    try:
+        # No wallet in the volume: the core refuses to start, and the entrypoint
+        # times out waiting for it.
+        podman(
+            "run",
+            "-d",
+            "-i",
+            "--name",
+            name,
+            "-v",
+            f"{volume}:/data",
+            "-e",
+            f"RUSTOK_KEYRING_PASSWORD={KEYRING_PASSWORD}",
+            image,
+        )
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            state = podman("inspect", "-f", "{{.State.Status}}", name).stdout.strip()
+            if state == "exited":
+                break
+            time.sleep(2)
+        else:
+            raise AssertionError("the container never exited; the timeout path was not exercised")
+
+        # `podman diff` lists what the container wrote into its own layer.
+        changes = podman("diff", name).stdout
+        staged = [line for line in changes.splitlines() if "keyring-password" in line]
+        assert staged == [], f"a failed start left the password on disk: {staged}"
+    finally:
+        rm_force(name)
+        volume_rm(volume)
 
 
 def test_a_password_file_the_wallet_can_write_to_is_still_never_deleted(
