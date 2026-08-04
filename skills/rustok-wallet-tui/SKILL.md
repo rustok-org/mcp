@@ -29,6 +29,9 @@ private keys live only in the user's local Docker volume and never leave it.
 
 The wallet's guarantee is narrow and specific. State it plainly; do not oversell it.
 
+The full list of boundaries — password delivery, updates, what we do not verify at
+all — lives in [docs/CAVEATS.md](https://github.com/rustok-org/mcp/blob/main/docs/CAVEATS.md).
+
 | | |
 |---|---|
 | **Protected** | Private keys stay in the user's **local Docker volume** and never leave the machine. **Sending funds on-chain** (`execute_transaction`) is parked and requires the user's approval in a **separate console window** (`rustok console`, opened by the user — see below), with a PIN for high-risk items. |

@@ -287,6 +287,9 @@ docker run -it --rm \
 
 #### What the file delivery does and does not protect
 
+> Every boundary this wallet has is collected in one place: **[CAVEATS](CAVEATS.md)**.
+> The list below is the part of it that concerns the password.
+
 Worth reading once, because the difference decides which of the two commands
 above you should use.
 
