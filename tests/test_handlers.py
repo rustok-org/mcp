@@ -107,8 +107,13 @@ async def test_initialize_includes_welcome_instructions() -> None:
     assert "preview" in instructions.lower()
 
 
-async def test_initialize_stores_capabilities() -> None:
-    """initialize parses and stores client capabilities in context."""
+async def test_initialize_without_seed_fails_closed() -> None:
+    """No seeded ceiling means the client cannot grant itself anything.
+
+    This test used to assert the opposite — that a client list with nothing
+    seeded became the granted set. That was the vulnerability, written down as
+    an expectation, so the assertion is replaced rather than relaxed.
+    """
     protocol, _registry = create_protocol_and_registry()
     context: dict[str, set[str]] = {}
     request = JsonRpcRequest(
@@ -120,7 +125,31 @@ async def test_initialize_stores_capabilities() -> None:
     response = await protocol.handle(request, context)
 
     assert response is not None
-    assert context["capabilities"] == {Capability.READ_WALLET, Capability.PREVIEW_TX}
+    # The server seeds the ceiling and the client only narrows it — with no
+    # seed there is nothing to narrow, so nothing is granted.
+    assert context["capabilities"] == set()
+
+
+async def test_initialize_client_cannot_expand_beyond_seed() -> None:
+    """A client list may only NARROW the seeded ceiling, never widen it.
+
+    Measured on the shipped code before the fix: a session seeded with
+    ``read_wallet`` from ``RUSTOK_MCP_CAPABILITIES`` came back holding
+    ``execute_tx`` after asking for it in ``initialize`` — the operator's
+    ceiling overwritten by one field in the client's first call, no stolen
+    key required. The console line closed this under audit B1; this is the
+    same guard on the agent line.
+    """
+    protocol, _registry = create_protocol_and_registry()
+    context: dict[str, Any] = {"capabilities": {Capability.READ_WALLET}}
+    request = JsonRpcRequest(
+        jsonrpc="2.0",
+        id=1,
+        method="initialize",
+        params={"capabilities": ["read_wallet", "preview_tx", "execute_tx"]},
+    )
+    await protocol.handle(request, context)
+    assert context["capabilities"] == {Capability.READ_WALLET}
 
 
 async def test_initialize_keeps_seeded_default_for_object() -> None:
