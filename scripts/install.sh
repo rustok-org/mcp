@@ -32,7 +32,7 @@ set -eu
 # to their exact bytes. Both start as fail-closed placeholders — an unfilled
 # release cannot pull or fetch anything (the all-zero refs 404 / have no
 # signature), it fails loudly instead of installing something unverified.
-WALLET_VERSION="0.8.3"
+WALLET_VERSION="0.8.4"
 WALLET_DIGEST="sha256:951fc20dcc3e0d7956c790de70c25f4c81f9f761623239cd7587be710b6c538c"
 SHIM_COMMIT="c612f534a6954637e6ee0469cc64216e60204362"
 
