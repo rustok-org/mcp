@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-08-04
+
+### Security
+
+- **`RUSTOK_MCP_CAPABILITIES` is enforced now; until this release it was
+  decoration.** The ceiling was checked only in the MCP layer, and every tool
+  also has a plain HTTP route on the same gateway that went past that check
+  entirely. Measured on the published `v0.4.4`, in a container started with
+  `RUSTOK_MCP_CAPABILITIES=read_wallet`: `POST /api/v1/wallet/sign_typed_data`
+  answered `200` with a real 65-byte signature. The ceiling now lives in the
+  gateway, on the path of every request — see `rustok-core:v0.1.5`. **If you ran
+  a narrowed session before this release, assume it had full access.**
+- **A client can no longer widen its own session.** `initialize` assigned the
+  client's capability list over the transport-seeded one instead of intersecting
+  with it, so a session seeded with `read_wallet` came back holding `execute_tx`
+  for asking — no stolen key required. It is an intersection now: a client may
+  narrow its session, never widen it.
+- **The gateway key is delivered as a path, not a value.** The entrypoint stages
+  it in a `0600` file under `/run/wallet` and exports only
+  `RUSTOK_MCP_API_KEY_FILE`, so the key is in no process's `/proc/<pid>/environ`.
+  It is deliberately *not* deleted afterwards, unlike the keyring password: the
+  gateway reads it at startup and the MCP server reads it after the entrypoint's
+  `exec`, leaving nobody to clean up — and deleting it from inside the MCP server
+  would destroy an operator-mounted file rather than ours. The residual is
+  bounded: `0600` on a tmpfs, and worthless outside the container, since the
+  gateway it authenticates to listens on loopback only.
+
+### Changed
+
+- `SKILL.md` no longer promises a restriction the code did not enforce.
+  `sign_typed_data` is documented as requiring `execute_tx` instead of nothing.
+- Built on `rustok-core:v0.1.5`.
+
+## [0.4.4] - 2026-08-04
+
+*Recorded after the fact — this release shipped without a changelog entry.*
+
+### Security
+
+- **The keyring password leaves every process environment.** Measured on the
+  published `v0.4.3` and reproduced independently by the reviewer: `tini` (PID 1)
+  and `core-server` still carried it in `/proc/<pid>/environ`. `tini` was PID 1
+  from the start, so the entrypoint's `unset` could never reach its environment;
+  only replacing the process image does, which is why the entrypoint now ends in
+  `exec tini`. Core reads the password from a file itself as of
+  `rustok-core:v0.1.4`, so whatever way it arrives, it leaves the entrypoint as a
+  *path* and the value is never exported.
+- Delivered the documented way — a mounted file plus `RUSTOK_KEYRING_PASSWORD_FILE`
+  — the password is in no process's environment inside the container, and
+  `podman inspect` carries the path rather than the value. Delivered the
+  compatibility way (`-e`), the entrypoint stages it `0600`, drops the variable,
+  and removes the file on every exit path once the keystore is unlocked.
+
 ## [0.4.3] - 2026-08-02
 
 ### Changed
