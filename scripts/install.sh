@@ -33,8 +33,8 @@ set -eu
 # release cannot pull or fetch anything (the all-zero refs 404 / have no
 # signature), it fails loudly instead of installing something unverified.
 WALLET_VERSION="0.8.4"
-WALLET_DIGEST="sha256:951fc20dcc3e0d7956c790de70c25f4c81f9f761623239cd7587be710b6c538c"
-SHIM_COMMIT="c612f534a6954637e6ee0469cc64216e60204362"
+WALLET_DIGEST="sha256:f19d1d19146602d7d973b03b5975cbd73724df1b0af71ffa9d70235cf30bce83"
+SHIM_COMMIT="8fcf47b336ef2fe5fc78dc93eda1560ea9a42640"
 
 IMAGE_REPO="ghcr.io/rustok-org/rustok-wallet-tui"
 RAW_BASE="https://raw.githubusercontent.com/rustok-org/mcp"
