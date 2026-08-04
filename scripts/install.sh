@@ -25,16 +25,30 @@ set -eu
 
 : "${SHELL:=/bin/sh}"
 
-# --- release-pinned constants (filled by the 4.2 release step) ----------------
-# WALLET_DIGEST and SHIM_COMMIT are immutable identities, NOT mutable tags: the
-# tag :vX.Y.Z can be repointed at a different image, and a git tag can be force-
-# pushed to a different commit, but a @sha256: digest and a commit SHA are bound
-# to their exact bytes. Both start as fail-closed placeholders — an unfilled
-# release cannot pull or fetch anything (the all-zero refs 404 / have no
-# signature), it fails loudly instead of installing something unverified.
+# --- release-pinned constants (filled by the release step) --------------------
+# WALLET_DIGEST and SHIM_SHA256 are immutable identities, NOT mutable tags: the
+# tag :vX.Y.Z can be repointed at a different image and a git tag can be force-
+# pushed elsewhere, but a @sha256: digest and a content hash are bound to their
+# exact bytes. Both start as fail-closed placeholders — an unfilled release
+# cannot pull or fetch anything, it fails loudly instead of installing something
+# unverified.
+#
+# The shim used to be pinned by COMMIT. A commit SHA cannot exist before the
+# commit that carries the shim, so every release passed through a state where
+# the pin named the previous release's shim — and the test guarding it could
+# never be green during the very flow it guarded (it skipped in CI, where
+# actions/checkout clones at depth 1, and failed locally). A content hash is
+# computable from the working tree, so the new shim and its correct pin land in
+# the same commit. Same guarantee, no chicken-and-egg.
+#
+# Why the hash and not just the tag the shim is fetched from: docs/INSTALL.md
+# tells people to download this script, READ it, then run that same file. That
+# splits the two fetches in time. A tag moved in between would hand them a
+# different shim while the script they read stayed the same — the hash is what
+# makes "what you read is what runs" true for the shim too.
 WALLET_VERSION="0.8.4"
 WALLET_DIGEST="sha256:f19d1d19146602d7d973b03b5975cbd73724df1b0af71ffa9d70235cf30bce83"
-SHIM_COMMIT="8fcf47b336ef2fe5fc78dc93eda1560ea9a42640"
+SHIM_SHA256="63746b39e38992edc2a09c73b043c2334a3bb5b069ff15b9d4c91e8f54e745c3"
 
 IMAGE_REPO="ghcr.io/rustok-org/rustok-wallet-tui"
 RAW_BASE="https://raw.githubusercontent.com/rustok-org/mcp"
@@ -68,6 +82,26 @@ detect_engine() {
         echo docker
     else
         die "neither podman nor docker found — install podman (recommended): https://podman.io/getting-started/installation"
+    fi
+}
+
+# The sha256 of a file, printed bare, or nothing at all when no tool can do it.
+#
+# Three names because the tool is not the same everywhere and its absence must
+# not be mistaken for a pass: `sha256sum` ships with GNU coreutils (Linux),
+# macOS has `shasum -a 256` from perl by default, and `openssl` is the fallback
+# on anything stripped down. openssl prints `SHA256(f)= h` on 1.x and
+# `SHA2-256(f)= h` on 3.x, so the suffix after `= ` is what we take.
+#
+# Prints nothing rather than dying here: the caller decides what an unverifiable
+# shim means, and it decides to refuse.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    elif command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha256 "$1" | sed 's/.*= //'
     fi
 }
 
@@ -225,8 +259,10 @@ main() {
     "$engine" pull "$image" >/dev/null \
         || die "'$engine' failed to pull the image — check the daemon/machine and your network"
 
-    # 3) Fetch the shim from a COMMIT-pinned raw URL (immutable; a force-pushed
-    #    tag cannot swap it) over a hardened TLS channel, then install atomically.
+    # 3) Fetch the shim over a hardened TLS channel and verify it against
+    #    SHIM_SHA256 before it is ever made executable, then install atomically.
+    #    The URL is derived from WALLET_VERSION rather than being its own pinned
+    #    identity: it is only an address, and the hash is what binds the bytes.
     # Every write below is checked. They used to be bare: a failure produced the
     # shell's own unbranded error, and two of them fired AFTER the work had
     # already succeeded — reporting a failed install that had in fact worked.
@@ -235,8 +271,18 @@ main() {
     shim_tmp="$SHIM_PATH.rustok-tmp"
     say "fetching the rustok shim…"
     curl --proto '=https' --tlsv1.2 -fsSL \
-        "$RAW_BASE/$SHIM_COMMIT/cli/rustok" -o "$shim_tmp" \
+        "$RAW_BASE/wallet-tui-v$WALLET_VERSION/cli/rustok" -o "$shim_tmp" \
         || { rm -f "$shim_tmp"; die "failed to fetch the shim over TLS — refusing to install a partial copy"; }
+    # Verified BEFORE chmod +x: an unverified file never becomes executable.
+    fetched_sha="$(sha256_of "$shim_tmp")" || fetched_sha=""
+    if [ -z "$fetched_sha" ]; then
+        rm -f "$shim_tmp"
+        die "no sha256 tool found (tried sha256sum, shasum, openssl) — refusing to install a shim we cannot verify. Install GNU coreutils, perl's shasum, or openssl, then re-run."
+    fi
+    if [ "$fetched_sha" != "$SHIM_SHA256" ]; then
+        rm -f "$shim_tmp"
+        die "the shim does not match the hash this installer was published with — the bytes at that URL changed since then. Expected $SHIM_SHA256, got $fetched_sha. Refusing to install."
+    fi
     chmod +x "$shim_tmp" \
         || { rm -f "$shim_tmp"; die "could not make the shim executable in $INSTALL_DIR — check its permissions"; }
     # Say it out loud: whatever was there is about to be gone. A `rustok` from

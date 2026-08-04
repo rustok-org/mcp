@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import uuid
 from collections.abc import Iterator
@@ -15,8 +16,21 @@ from tests.e2e.chain import WEI_PER_ETH, Anvil
 from tests.e2e.podman import free_port, network_rm, podman, rm_force, volume_rm
 from tests.e2e.wallet import CHAIN_ID, Wallet, create_wallet, start_wallet
 
+
+def _manifest_version() -> str:
+    """The version in pyproject.toml — the one source of truth for this release."""
+    pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
+    match = re.search(r'^version = "(.+)"$', pyproject.read_text(encoding="utf-8"), re.MULTILINE)
+    assert match, "pyproject.toml has no top-level version — the suite cannot know what to test"
+    return match.group(1)
+
+
 # The suite aims at the SHIPPED artifact — override to accept a different tag.
-DEFAULT_IMAGE = "ghcr.io/rustok-org/rustok-wallet-tui:v0.8.4"
+#
+# Derived, never written down. As a constant this drifted out of every guard: a
+# stale tag here does not fail, it makes the whole acceptance suite run against
+# the PREVIOUS release and pass, which is the one outcome worse than red.
+DEFAULT_IMAGE = f"ghcr.io/rustok-org/rustok-wallet-tui:v{_manifest_version()}"
 DEFAULT_ANVIL_IMAGE = "ghcr.io/foundry-rs/foundry:latest"
 STARTING_BALANCE = 10 * WEI_PER_ETH
 
