@@ -70,23 +70,57 @@ def test_every_version_point_matches_the_manifest() -> None:
     )
 
 
-def test_every_image_tag_in_the_skill_body_matches_the_manifest() -> None:
-    """The listing's copy-paste commands must not pin the previous image.
+# Every file whose text a reader copies into their own terminal. SKILL.md is the
+# ClawHub listing; the docs are what the listing and the README send people to.
+COPY_PASTE_SOURCES = (
+    SKILL_MD,
+    REPO_ROOT / "docs" / "INSTALL.md",
+    REPO_ROOT / "docs" / "TROUBLESHOOTING.md",
+    REPO_ROOT / "docs" / "CONFIGURATION.md",
+)
+
+# The image tag, never a bare version string. `docs/TROUBLESHOOTING.md` says the
+# file delivery "arrived in 0.8.3" — history, not a pin, and a check that matched
+# bare versions would demand that sentence be rewritten every release until it
+# said something false.
+IMAGE_TAG_RE = re.compile(r"ghcr\.io/rustok-org/rustok-wallet-tui:v([0-9]+\.[0-9]+\.[0-9]+)")
+
+
+def test_every_image_tag_a_reader_can_copy_matches_the_manifest() -> None:
+    """The copy-paste commands must not pin the previous image.
 
     SKILL.md is not documentation, it is the ClawHub listing: whatever image tag
     its `podman run` / `docker run` / MCP-config examples name is what a reader
     copies into their own setup. The frontmatter check above never looked at the
     body, and the body drifted — 0.8.1 shipped with three `:v0.8.0` examples in
     it, found only because someone read the listing before publishing it.
+
+    `docs/` was added after the 0.8.4 release audit found six more image tags in
+    `INSTALL.md` guarded by nothing at all. They are the same class as the
+    SKILL.md ones and worse in reach: INSTALL.md is where the listing sends
+    anyone who wants more than the one-liner.
     """
     expected = manifest_version()
-    tags = re.findall(
-        r"ghcr\.io/rustok-org/rustok-wallet-tui:v([0-9]+\.[0-9]+\.[0-9]+)",
-        SKILL_MD.read_text(encoding="utf-8"),
+    stale: list[str] = []
+    seen_any = False
+
+    for path in COPY_PASTE_SOURCES:
+        if not path.exists():
+            continue
+        tags = IMAGE_TAG_RE.findall(path.read_text(encoding="utf-8"))
+        if tags:
+            seen_any = True
+        stale += [
+            f"{path.relative_to(REPO_ROOT)}: v{tag}" for tag in sorted(set(tags)) if tag != expected
+        ]
+
+    # Guard the guard: a regex that stopped matching would make every assertion
+    # below vacuously true, and the examples cannot have vanished.
+    assert seen_any, (
+        "no wallet image tag found in any copy-paste source — the run examples "
+        f"cannot have vanished from {[str(p.name) for p in COPY_PASTE_SOURCES]}"
     )
-    assert tags, "no image tag found in SKILL.md — the run examples cannot have vanished"
-    stale = sorted({tag for tag in tags if tag != expected})
     assert not stale, (
-        f"SKILL.md names image tag(s) {stale} but the manifest says {expected!r} — "
-        "a reader copying those commands would run the previous wallet image"
+        f"these copy-paste commands name an image other than {expected!r}, so a reader "
+        "following them would run the previous wallet:\n  " + "\n  ".join(sorted(stale))
     )
