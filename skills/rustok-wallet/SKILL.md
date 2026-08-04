@@ -164,6 +164,12 @@ normal preview/confirm flow — never move funds without their explicit approval
 The stdio wallet image is process-trusted and exposes **all** tools by default.
 To run a restricted agent, set `RUSTOK_MCP_CAPABILITIES` to a subset
 (`read_wallet` / `preview_tx` / `execute_tx`) — e.g. `read_wallet` for read-only.
+The ceiling is enforced by the gateway, on the path every request takes: it
+covers the MCP tools below **and** the HTTP routes behind them, so a session
+cannot reach past its capabilities by calling the gateway directly. Until this
+release it was checked in the MCP layer only, which left every route reachable
+beside it; a session narrowed to `read_wallet` could sign. A client may narrow
+its own session further in `initialize`, and can never widen it.
 
 | Tool | Capability | What it does |
 |------|-----------|--------------|
@@ -184,13 +190,15 @@ in balances. In ≤0.3.2 the old `amount` field was silently interpreted as
 without `0x`), empty, oversized (>4 KiB) and control-character payloads
 server-side — a hex-blob signature could authorize an approval/permit drain.
 
-**⚠️ Undocumented-by-MCP signing surface: `sign_typed_data`.** Not an MCP tool —
+**⚠️ Signing surface outside the tool list: `sign_typed_data`.** Not an MCP tool —
 an HTTP endpoint on the same gateway, `POST /api/v1/wallet/sign_typed_data`
 (EIP-712 over a pre-computed `domain_separator`/`struct_hash`), for glue layers
-such as UniswapX signing. It is **not gated by `RUSTOK_MCP_CAPABILITIES`** and
-has none of `sign_message`'s content guards: an EIP-712 signature can authorize
-a token approval, a `Permit`, or an off-chain order that moves funds — treat any
-caller of this endpoint with the same scrutiny as `execute_send`.
+such as UniswapX signing. It now requires `execute_tx`, like every other signing
+route; it used to require nothing, which is what made
+`RUSTOK_MCP_CAPABILITIES` a decoration rather than a limit. It still has none of
+`sign_message`'s content guards: an EIP-712 signature can authorize a token
+approval, a `Permit`, or an off-chain order that moves funds — treat any caller
+of this endpoint with the same scrutiny as `execute_send`.
 
 ## Behavioral guidelines
 

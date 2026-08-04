@@ -133,18 +133,24 @@ async def handle_initialize(
 ) -> dict[str, Any]:
     """Handle the ``initialize`` JSON-RPC method.
 
-    Capabilities come from the rustok-specific ``params.capabilities`` *list*. A
-    client that omits it — or sends the standard MCP capabilities *object* — keeps
-    the transport-seeded default, so the process-trusted stdio transport (seeded
-    with all capabilities) stays usable by standard MCP clients. A non-empty list
-    overrides the default, letting a client opt into a narrower set.
+    The granted set is the INTERSECTION of two ceilings, and the client owns the
+    narrower one:
+
+    1. the transport-seeded ceiling (``RUSTOK_MCP_CAPABILITIES``, or all of them
+       on stdio, which is process-trusted),
+    2. the client-declared ``params.capabilities`` *list* — it may opt into a
+       narrower set, never a wider one.
+
+    It used to be an assignment rather than an intersection, which meant a
+    session seeded with ``read_wallet`` walked away with ``execute_tx`` for
+    asking. A client that omits the list — or sends the standard MCP
+    capabilities *object* — keeps the seeded ceiling untouched, so a standard
+    MCP client on stdio still sees every tool.
     """
     if context is not None:
-        caps = extract_rustok_capabilities(request.params)
-        if caps:
-            context["capabilities"] = caps
-        else:
-            context.setdefault("capabilities", set())
+        seeded = context.get("capabilities", set())
+        client_caps = extract_rustok_capabilities(request.params)
+        context["capabilities"] = (client_caps & seeded) if client_caps else seeded
     return {
         "protocolVersion": negotiate_protocol_version(request.params),
         "capabilities": {"tools": {}},
