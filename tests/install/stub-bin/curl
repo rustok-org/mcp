@@ -1,7 +1,13 @@
 #!/bin/sh
 # Stub curl for the installer tests. Logs argv to $STUB_LOG, then — for the
-# ONE fetch the installer makes (the shim from a commit-pinned raw URL) —
-# writes a marker shim body to the -o target. No network anywhere.
+# ONE fetch the installer makes (the shim) — writes a body to the -o target.
+# No network anywhere.
+#
+# It writes the REAL cli/rustok when $STUB_SHIM_SRC points at it, because the
+# installer now verifies the fetched bytes against SHIM_SHA256: a marker body
+# would fail that check every time and the suite could only ever test the
+# refusal. With $STUB_SHIM_TAMPER=1 it writes something else on purpose — that
+# is how the refusal gets tested deliberately rather than by accident.
 set -eu
 
 [ -n "${STUB_LOG:-}" ] && printf 'curl %s\n' "$*" >>"$STUB_LOG"
@@ -20,6 +26,10 @@ for a in "$@"; do
 done
 
 if [ -n "$out" ]; then
-    printf '%s\n' "#!/bin/sh" "# STUB-SHIM-BODY marker" "echo rustok-stub" >"$out"
+    if [ "${STUB_SHIM_TAMPER:-0}" != "1" ] && [ -n "${STUB_SHIM_SRC:-}" ] && [ -f "${STUB_SHIM_SRC}" ]; then
+        cat "$STUB_SHIM_SRC" >"$out"
+    else
+        printf '%s\n' "#!/bin/sh" "# STUB-SHIM-BODY marker" "echo rustok-stub" >"$out"
+    fi
 fi
 exit 0

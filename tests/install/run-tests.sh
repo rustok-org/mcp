@@ -28,6 +28,9 @@ fresh() {
     done
     ln -s "$TESTS_DIR/stub-bin/curl" "$WORK/bin/curl"
     ln -s "$TESTS_DIR/stub-bin/cosign" "$WORK/bin/cosign"
+    # The installer verifies the fetched shim against SHIM_SHA256, so the sandbox
+    # needs a hasher. `plant_no_hasher` leaves it out to test the refusal.
+    ln -s "$TESTS_DIR/stub-bin/sha256sum" "$WORK/bin/sha256sum"
     STUB_CURL_FAIL=0
     STUB_PULL_FAIL=0
     STUB_COSIGN_FAIL=0
@@ -64,6 +67,8 @@ plant_unrunnable_cosign() {
 }
 
 plant_podman() { ln -s "$TESTS_DIR/stub-bin/podman" "$WORK/bin/podman"; }
+# A host with no sha256sum, shasum or openssl at all.
+plant_no_hasher() { rm -f "$WORK/bin/sha256sum"; }
 plant_docker() { ln -s "$TESTS_DIR/stub-bin/podman" "$WORK/bin/docker"; }
 
 # cosign is planted by fresh(); these two take it away in the two ways the real
@@ -90,6 +95,8 @@ run_install() {
         STUB_CURL_FAIL="$STUB_CURL_FAIL" STUB_PULL_FAIL="$STUB_PULL_FAIL" \
         STUB_COSIGN_FAIL="$STUB_COSIGN_FAIL" \
         STUB_COSIGN_BROKEN="$STUB_COSIGN_BROKEN" \
+        STUB_SHIM_SRC="$REPO_ROOT/cli/rustok" \
+        STUB_SHIM_TAMPER="${STUB_SHIM_TAMPER:-0}" \
         RUSTOK_NO_MODIFY_PATH="$NO_MODIFY" \
         "$RUN_SHELL" "$INSTALL" </dev/null 2>&1)" && RC=0 || RC=$?
 }
@@ -115,7 +122,7 @@ plant_podman
 run_install
 SHIMOK=0
 [ -f "$WORK/home/.local/bin/rustok" ] && [ -x "$WORK/home/.local/bin/rustok" ] \
-    && grep -q "STUB-SHIM-BODY" "$WORK/home/.local/bin/rustok" && SHIMOK=1
+    && cmp -s "$WORK/home/.local/bin/rustok" "$REPO_ROOT/cli/rustok" && SHIMOK=1
 if assert_exit 0 && [ "$SHIMOK" = "1" ] \
     && log_has 'cosign verify' && log_has 'wallet-publish.yml' \
     && log_has 'certificate-identity.*wallet-publish.yml@refs/heads/main' \
@@ -133,9 +140,9 @@ plant_podman
 run_install
 if assert_exit 0 \
     && log_has "curl .*--proto =https" && log_has "curl .*--tlsv1.2" \
-    && grep -E "curl .*raw.githubusercontent.com/rustok-org/mcp/[0-9a-f]{7,40}/cli/rustok" "$WORK/log" >/dev/null; then
-    ok "install: shim fetched over --proto=https --tlsv1.2 from a commit-SHA-pinned raw URL (not a mutable tag)"
-else not_ok "install: shim fetched over --proto=https --tlsv1.2 from a commit-SHA-pinned raw URL (not a mutable tag)"; fi
+    && grep -E "curl .*raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v[0-9]+\.[0-9]+\.[0-9]+/cli/rustok" "$WORK/log" >/dev/null; then
+    ok "install: shim fetched over --proto=https --tlsv1.2 from the release tag, and verified by hash"
+else not_ok "install: shim fetched over --proto=https --tlsv1.2 from the release tag, and verified by hash"; fi
 
 # --- fail-closed: a bad signature installs NOTHING ----------------------------
 # A WORKING cosign whose verify says no. The only branch that may refuse.
@@ -376,6 +383,30 @@ if assert_exit 0 && shim_installed \
     && assert_has "fish"; then
     ok "install: under fish, no POSIX profile is written and fish-specific instructions are printed"
 else not_ok "install: under fish, no POSIX profile is written and fish-specific instructions are printed"; fi
+
+# --- the shim hash gate: the reason the tag in that URL is safe ---------------
+# The URL is a tag, and a tag can in principle be repointed. What makes that
+# acceptable is that the bytes are checked against a pin baked into the very
+# install.sh the user read. These two tests are that claim, exercised.
+
+fresh
+plant_podman
+STUB_SHIM_TAMPER=1 run_install
+if assert_exit 1 \
+    && ! shim_installed \
+    && assert_has "bytes at that URL changed"; then
+    ok "install: a shim whose bytes do not match SHIM_SHA256 is refused, and nothing is installed"
+else not_ok "install: a shim whose bytes do not match SHIM_SHA256 is refused, and nothing is installed"; fi
+
+fresh
+plant_podman
+plant_no_hasher
+run_install
+if assert_exit 1 \
+    && ! shim_installed \
+    && assert_has "no sha256 tool found"; then
+    ok "install: with no hashing tool at all the installer refuses rather than installing unverified"
+else not_ok "install: with no hashing tool at all the installer refuses rather than installing unverified"; fi
 
 # --- the refusal points somewhere a curl|sh user can actually reach ----------
 

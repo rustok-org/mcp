@@ -1,0 +1,15 @@
+#!/bin/sh
+# Not a fake hasher — a real one, reachable from the stubbed PATH.
+#
+# The suite runs install.sh with PATH pointing at this directory only, so the
+# host's tools are invisible on purpose. Hashing is the one place where a fake
+# would destroy the test: a stub that printed the expected pin would make the
+# check pass for ANY bytes, which is precisely the failure the check exists to
+# catch. So this delegates to the genuine tool by absolute path.
+set -eu
+
+for real in /usr/bin/sha256sum /bin/sha256sum; do
+    [ -x "$real" ] && exec "$real" "$@"
+done
+echo "sha256sum stub: no real hasher on this host" 1>&2
+exit 127
