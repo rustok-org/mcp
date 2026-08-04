@@ -1,0 +1,106 @@
+# Caveats — what this wallet does not guarantee
+
+Every security property has an edge. This file names ours, in one place, so the
+answer does not have to be reassembled from a changelog entry, an install page
+and a troubleshooting note — which is how it was answered three separate times
+before this file existed.
+
+Nothing here is a known bug. These are the boundaries of guarantees we *do*
+make. A boundary you can see is worth more than one you have to discover.
+
+The form is borrowed from [seL4's `CAVEATS.md`](https://github.com/seL4/seL4/blob/master/CAVEATS.md),
+including the habit that produced it: their proof file for non-interference opens
+by stating that the property in its own filename *"does not hold on the kernel and
+is not proven"*. Naming the gap where it is easiest to stay quiet is the standard
+worth copying.
+
+---
+
+## The keyring password
+
+**What holds.** Delivered the documented way — a mounted file plus
+`RUSTOK_KEYRING_PASSWORD_FILE` — the password is in no process's
+`/proc/<pid>/environ` inside the container, and `podman inspect` carries the path
+rather than the value. Delivered the compatibility way (`-e`), the entrypoint
+stages it in a `0600` file, drops the variable, hands the core a path, and removes
+the file once the keystore is unlocked; every exit path removes it, including the
+failure timeouts.
+
+**What does not hold.**
+
+- With `-e` delivery the value still sits in the **container config** (`podman
+  inspect`) and, under `--init`, in the **runtime's own PID 1**. Neither is
+  reachable from inside the image. This is why the file delivery is the documented
+  one and `--init` is absent from every command we publish.
+- Nothing here defends against **code already running as your user**. It can read
+  the mounted secret, the staged file during its short life, the core's memory,
+  and the data volume.
+- Measured on **podman 5.8.4**. Docker is not installed on the machine these runs
+  were made on: the mechanism is engine-independent (a mounted file plus a variable
+  naming its path), but docker's behaviour here is **expected, not verified**.
+
+## Keys and the approval gate
+
+**What holds.** Private keys stay in your local volume. On the console edition,
+`execute_transaction` is parked and needs your approval in a **separate console
+window**, with a PIN for high-risk items. `keystore.json` and `approval-pin.json`
+are owner-only (`0600`), and installs that predate that are narrowed at startup.
+
+**What does not hold.**
+
+- **`sign_message` is not console-gated.** The wallet refuses a raw hex blob — which
+  could hide a transaction, an approval, or typed data — but it will sign an
+  ordinary plaintext message. Treat message signing as unprotected.
+- **Shell access to the container defeats the gate.** Anything that can
+  `docker exec` into it reads the gateway key and reaches the full signing surface,
+  including EIP-712 permits. That is why the console is a separate window and not
+  an agent command.
+- **The agent edition (`rustok-wallet` 0.4.x) has no approval gate at all.** It
+  executes autonomously by design — that is the difference between the editions,
+  not an oversight.
+- **There are no spending limits.** `txguard` flags risky transactions; it does not
+  block them.
+
+**Never claim** that a prompt-injected agent "cannot move funds". What is true:
+keys stay local, and on-chain sends are human-gated *on the console edition*.
+
+## Installation and updates
+
+**What holds.** The installer pulls the image **by digest** — those bytes or
+nothing — and verifies who built it with cosign when cosign is present and
+runnable. The shim is fetched by commit SHA.
+
+**What does not hold.**
+
+- **The git tag in the installer URL pins a version, not bytes.** A tag can in
+  principle be repointed. The identities bound to exact bytes live *inside* the
+  script: the image digest and the shim's commit SHA.
+- **`rustok update` pulls by tag and does not re-run the signature check.** The
+  provenance guarantee covers installation, not the lifecycle.
+- **cosign is optional.** A missing or broken cosign downgrades the run to
+  "installed by digest, provenance unchecked" and says so; it does not fail.
+
+## What we do not verify at all
+
+- **No formal verification, and none planned.** We measured the price on the
+  system usually cited for it: roughly 8–11 lines of proof per line of kernel code,
+  depending on what you count. A proof lives only while the code is nearly frozen —
+  ours changes daily, and much of the product stands on third-party libraries
+  nobody will prove. What we took from that world instead is this file.
+- **Reproducible builds are observed, not enforced.** Rebuilding a release from the
+  same sources has produced the identical image layer, and that is a good sign —
+  but nothing in CI asserts it, so do not treat it as a promise.
+- **The architecture-edge guard matches text, not syntax.** See
+  [`core/docs/ARCHITECTURE-EDGES.md`](https://github.com/rustok-org/core) — it is a
+  second line behind the compiler, aimed at drift rather than at someone determined
+  to get around it.
+- **Scanner findings on our storefront listing are not all ours.** A `Critical`
+  currently shown against the skill points at a line that contains no secret; it is
+  disputed in [openclaw/clawhub#3381](https://github.com/openclaw/clawhub/issues/3381)
+  with an independent scanner's clean result attached. We say this here rather than
+  hoping you do not look.
+
+---
+
+*If you find a boundary we have not named here, that is a bug in this file. Please
+open an issue — an unnamed edge is the only kind that is dangerous.*
