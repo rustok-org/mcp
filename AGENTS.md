@@ -69,7 +69,12 @@ the pins are filled is dead permanently.
       `WALLET_VERSION`, the `DEFAULT_IMAGE` tag)
 - [ ] `CHANGELOG.md` describes the release — including anything user-facing that
       landed since the last tag, not only the last PR
-- [ ] Docs carry no stale image tag
+- [ ] Docs carry no stale image tag (guarded by
+      `test_every_image_tag_a_reader_can_copy_matches_the_manifest`)
+- [ ] `ARG CORE_IMAGE` / `CONSOLE_IMAGE` name the intended dependency versions.
+      The guard only checks their **shape** (`:vX.Y.Z`, never a floating tag) —
+      whether `v0.3.1` should have become `v0.3.2` is not decidable inside this
+      repo and stays a human step here
 
 **2 — publish (ops, from `main`):**
 - [ ] `gh workflow run wallet-publish.yml --ref main -f version=<X.Y.Z>` —
@@ -78,15 +83,26 @@ the pins are filled is dead permanently.
       honest image for every user
 - [ ] Never dispatch an already-published version (the workflow now refuses;
       `allow_existing_tag` is break-glass only — it rebuilds and replaces)
-- [ ] `cosign verify` passes and a `.sig` tag appeared in GHCR
+- [ ] `cosign verify` passes — **with cosign 3.x**. Our signatures are stored as
+      OCI referrers, so the tag in GHCR reads `sha256-<digest>` with **no `.sig`
+      suffix** and cosign 2.x reports `no signatures found` on a perfectly signed
+      image. `install.sh` says so in its own error text; this line used to say
+      `.sig` and cost a reviewer an hour
 
 **3 — pin (PR):**
-- [ ] `WALLET_DIGEST` = the digest just published; `SHIM_COMMIT` = the merge
-      commit from step 1 (it carries the bumped `DEFAULT_IMAGE`)
+- [ ] `WALLET_DIGEST` = the digest just published
+- [ ] `SHIM_SHA256` = `sha256sum cli/rustok` — **and it belongs in step 1, not
+      here.** A content hash is computable from the working tree, so the shim and
+      its pin land in the same commit; only the image digest has to wait for the
+      publish. It was a commit SHA once, which could not exist before the commit
+      carrying the shim — that is why the release used to need three commits and
+      why its guard could never be green mid-release
 - [ ] No fail-closed placeholders left in `scripts/install.sh`
 
 **4 — tag & publish (ops):**
-- [ ] Tag `wallet-tui-v<X.Y.Z>` on the step-3 merge commit — **last**
+- [ ] Tag `wallet-tui-v<X.Y.Z>` on the step-3 merge commit — **last**, because
+      the documented install command fetches `install.sh` through this tag and
+      the shim beside it
 - [ ] `sha256` of `install.sh` at that tag published in the release notes
 - [ ] Release notes state compatibility and migration (the shim chooses the image
       version; an old shim keeps users on an old image whatever `update` prints)

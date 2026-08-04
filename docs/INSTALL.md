@@ -62,8 +62,13 @@ check the bytes instead of reading them.
 > cryptographic identity. A git tag can in principle be repointed at a different
 > commit, so treat the tag as "which release", not as proof of content. The
 > identities that are bound to exact bytes are the ones **inside** the script:
-> the image `@sha256:` digest it pulls and the commit SHA it fetches the shim
-> from. For the script itself, the published `sha256` is the check.
+> the image `@sha256:` digest it pulls and the `sha256` of the shim it installs.
+> For the script itself, the published `sha256` is the check.
+>
+> This is why reading the script and running *that same file* matters. The shim
+> is fetched later than the script was, and the hash the script carries is what
+> makes the bytes you get then match the release you read now — even if the tag
+> moved in between.
 
 ### What the installer does — and what it deliberately does not
 
@@ -77,8 +82,12 @@ check the bytes instead of reading them.
 2. Pulls the image **by digest** (`@sha256:…`), so a mutable tag cannot be
    repointed at different bytes underneath you. This — not cosign — is what
    guarantees you get the exact image this release pinned.
-3. Fetches the `rustok` shim from a **commit-pinned** URL over
-   `--proto '=https' --tlsv1.2` and installs it to `~/.local/bin`.
+3. Fetches the `rustok` shim over `--proto '=https' --tlsv1.2`, **verifies its
+   `sha256` against the pin inside this script**, and only then makes it
+   executable and installs it to `~/.local/bin`. A mismatch aborts and says so:
+   the bytes at that URL changed since the script was published. If no hashing
+   tool is available at all (`sha256sum`, `shasum`, `openssl`), the installer
+   refuses rather than installing something it cannot check.
 4. Adds `~/.local/bin` to your `PATH` in one marked block of your shell profile.
    Set `RUSTOK_NO_MODIFY_PATH=1` to skip that and get the line to add yourself.
 
