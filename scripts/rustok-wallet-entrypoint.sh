@@ -128,7 +128,28 @@ cleanup_staged_password
 if [ -z "${RUSTOK_MCP_API_KEY:-}" ] && [ "${RUSTOK_GATEWAY_DEV:-}" != "1" ]; then
     RUSTOK_MCP_API_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 fi
-export RUSTOK_MCP_API_KEY
+# ─── The gateway key leaves this block as a PATH, like the password above ─────
+#
+# It used to be exported. Measured on the published v0.4.4, `tini` (PID 1), the
+# gateway and the MCP server all carried it in /proc/<pid>/environ — and reading
+# it there was step one of the capability bypass: take the key, skip the MCP
+# layer, call the gateway straight. The gate now lives in the gateway itself, so
+# a stolen key no longer widens what the caller may do; this removes the
+# cheapest way to steal it in the first place.
+#
+# Unlike the password, this file is deliberately NOT deleted. The gateway reads
+# it at startup and the MCP server reads it after the `exec` at the end of this
+# script, which leaves nobody to clean up afterwards; and deleting it from
+# inside the MCP server would destroy an operator-mounted file rather than ours.
+# The residual is small and bounded: `0600` on /run (a tmpfs under podman), and
+# worthless outside this container — the gateway it authenticates to listens on
+# loopback only, so a copy taken from a stopped container opens nothing.
+if [ -n "${RUSTOK_MCP_API_KEY:-}" ]; then
+    RUSTOK_MCP_API_KEY_FILE=/run/wallet/gateway-key
+    ( umask 077; printf '%s' "$RUSTOK_MCP_API_KEY" >"$RUSTOK_MCP_API_KEY_FILE" )
+    unset RUSTOK_MCP_API_KEY
+    export RUSTOK_MCP_API_KEY_FILE
+fi
 
 RUSTOK_GATEWAY_ADDR="127.0.0.1:3000" RUSTOK_CORE_ADDR="http://127.0.0.1:50051" gateway 1>&2 &
 

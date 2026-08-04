@@ -52,9 +52,18 @@ are owner-only (`0600`), and installs that predate that are narrowed at startup.
   could hide a transaction, an approval, or typed data — but it will sign an
   ordinary plaintext message. Treat message signing as unprotected.
 - **Shell access to the container defeats the gate.** Anything that can
-  `docker exec` into it reads the gateway key and reaches the full signing surface,
-  including EIP-712 permits. That is why the console is a separate window and not
-  an agent command.
+  `docker exec` into it reads the gateway key — a `0600` file staged under `/run`
+  — and reaches every route the configured `RUSTOK_MCP_CAPABILITIES` ceiling
+  allows, which by default is all of them, including EIP-712 permits. A narrower
+  ceiling does now genuinely narrow this, because the gateway enforces it on the
+  path; it does not make the caller harmless. That is why the console is a
+  separate window and not an agent command.
+- **`RUSTOK_MCP_CAPABILITIES` was decoration until 2026-08-04.** It was checked
+  in the MCP layer only, and every tool's HTTP route sat beside that check rather
+  than behind it. On the published agent image a session narrowed to
+  `read_wallet` produced a real EIP-712 signature — measured, not reasoned about.
+  It is enforced in the gateway now, on both editions. If you ran a narrowed
+  session before this release, assume it had full access.
 - **The agent edition (`rustok-wallet` 0.4.x) has no approval gate at all.** It
   executes autonomously by design — that is the difference between the editions,
   not an oversight.

@@ -229,6 +229,14 @@ normal preview/confirm flow — never move funds without their explicit approval
 The stdio wallet image is process-trusted and exposes **all** tools by default.
 To run a restricted agent, set `RUSTOK_MCP_CAPABILITIES` to a subset
 (`read_wallet` / `preview_tx` / `execute_tx`) — e.g. `read_wallet` for read-only.
+The ceiling is enforced by the gateway, on the path every request takes: it
+covers the MCP tools below **and** the HTTP routes behind them, so a session
+cannot reach past its capabilities by calling the gateway directly. Until this
+release it was checked in the MCP layer only, which left every route reachable
+beside it — on this edition the core refused signing for its own unrelated
+reasons, but a session narrowed away from `read_wallet` still read the wallet
+address and every balance. A client may narrow its own session further in
+`initialize`, and can never widen it.
 
 | Tool | Capability | What it does |
 |------|-----------|--------------|

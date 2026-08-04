@@ -6,7 +6,7 @@ import sys
 from typing import Any
 
 from rustok_mcp.capabilities import resolve_stdio_capabilities
-from rustok_mcp.config import get_settings
+from rustok_mcp.config import get_settings, resolve_outbound_api_key
 from rustok_mcp.gateway import GatewayClient
 from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.protocol import JsonRpcError, JsonRpcRequest, JsonRpcResponse
@@ -18,7 +18,7 @@ async def _stdio_loop() -> None:
     settings = get_settings()
     gateway_client = GatewayClient(
         base_url=settings.gateway_url,
-        api_key=settings.api_key,
+        api_key=resolve_outbound_api_key(settings),
     )
     try:
         protocol, _registry = create_protocol_and_registry(gateway_client)
