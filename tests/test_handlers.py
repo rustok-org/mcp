@@ -108,11 +108,10 @@ async def test_initialize_includes_welcome_instructions() -> None:
 async def test_initialize_never_asks_the_agent_for_money() -> None:
     """The wallet must not lobby the model on its author's behalf.
 
-    A third-party agent found this on first contact, called it baked into the
-    tool rather than what the human asked for, and refused to act on it
-    (Captain's brief, 2026-08-05). The donation ask belongs on the website,
-    where a human chooses to read it — not in the context of every agent that
-    connects to a wallet holding real keys.
+    An agent meeting the wallet for the first time flagged this unprompted, as
+    something baked into the tool rather than what its human had asked for. The
+    donation ask belongs on the website, where a human chooses to read it — not
+    in the context of every agent that connects to a wallet holding real keys.
     """
     protocol, _registry = create_protocol_and_registry()
     request = JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize")
