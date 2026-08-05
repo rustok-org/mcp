@@ -91,7 +91,7 @@ async def test_wire_response_never_carries_both_result_and_error() -> None:
 
 
 async def test_initialize_includes_welcome_instructions() -> None:
-    """initialize returns mission/safety/donation instructions for the LLM."""
+    """initialize returns mission and safety instructions for the LLM."""
     protocol, _registry = create_protocol_and_registry()
     request = JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize")
     response = await protocol.handle(request)
@@ -101,9 +101,46 @@ async def test_initialize_includes_welcome_instructions() -> None:
     instructions = response.result["instructions"]
     assert isinstance(instructions, str)
     assert instructions
-    assert "0xA713e7145F0060A35E92a928e997B42481c0FfEE" in instructions
     assert "self-custody" in instructions.lower()
     assert "preview" in instructions.lower()
+
+
+async def test_initialize_never_asks_the_agent_for_money() -> None:
+    """The wallet must not lobby the model on its author's behalf.
+
+    A third-party agent found this on first contact, called it baked into the
+    tool rather than what the human asked for, and refused to act on it
+    (Captain's brief, 2026-08-05). The donation ask belongs on the website,
+    where a human chooses to read it — not in the context of every agent that
+    connects to a wallet holding real keys.
+    """
+    protocol, _registry = create_protocol_and_registry()
+    request = JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize")
+    response = await protocol.handle(request)
+
+    assert response is not None and response.result is not None
+    instructions = response.result["instructions"]
+    assert "0xA713e7145F0060A35E92a928e997B42481c0FfEE" not in instructions
+    assert "donation" not in instructions.lower()
+
+
+async def test_initialize_keeps_the_safety_clause() -> None:
+    """Positive control for the deletion above: the approval rules stay put.
+
+    The donation paragraph sat directly under the safety one, so a deletion off
+    by a few lines takes the approval rules with it — and nothing else in this
+    suite would notice: `preview` survives such a cut because the word also
+    appears one line above the seam, and `self-custody` lives in the first
+    paragraph entirely.
+    """
+    protocol, _registry = create_protocol_and_registry()
+    request = JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize")
+    response = await protocol.handle(request)
+
+    assert response is not None and response.result is not None
+    instructions = response.result["instructions"]
+    assert "never send or sign without the human's explicit approval" in instructions
+    assert "prefer read-only use" in instructions
 
 
 async def test_initialize_without_seed_fails_closed() -> None:
@@ -783,7 +820,8 @@ async def test_execute_transaction_pending_carries_next_step() -> None:
     response = await protocol.handle(request, context)
 
     result = _tool_result(response)
-    assert "docker exec -it rustok-wallet-tui rustok-console" in result["next_step"]
+    assert "rustok console" in result["next_step"]
+    assert "label=rustok=wallet" in result["next_step"]
 
 
 async def test_execute_transaction_missing_arg_returns_invalid_params() -> None:
@@ -878,7 +916,8 @@ async def test_get_execution_status_pending_carries_next_step() -> None:
     response = await protocol.handle(request, context)
 
     result = _tool_result(response)
-    assert "docker exec -it rustok-wallet-tui rustok-console" in result["next_step"]
+    assert "rustok console" in result["next_step"]
+    assert "label=rustok=wallet" in result["next_step"]
 
 
 async def test_get_execution_status_missing_arg_returns_invalid_params() -> None:
