@@ -51,7 +51,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process is a carrier nothing inside the image can clear.
 - The image is built on core `v0.3.1` (from `v0.3.0`).
 
+### Removed
+- **The donation ask is gone from everything an agent reads.** The server's
+  `initialize` instructions and the published skill both asked the model to
+  raise the subject of supporting this project — with an address and suggested
+  amounts — with the human it works for. An agent meeting the wallet for the
+  first time flagged it unprompted, as something baked into the tool rather than
+  what its human had asked for. A product trusted with keys does not lobby the
+  agent on its author's behalf. The ask lives on the website, where a human
+  chooses to read it.
+
 ### Fixed
+- **The console command the wallet prints now works.** `initialize`, the
+  `next_step` of every parked transaction and the `execute_transaction`
+  description all told the human to run
+  `docker exec -it rustok-wallet-tui rustok-console`. There is no container by
+  that name — the wallet is launched by label, on purpose — so the command
+  failed for anyone who installed the documented way, and it named `docker` on a
+  product that recommends `podman`. All three now name `rustok console` first
+  and the label-discovery form second, with the engine left to the reader. The
+  grep-invariant that has guarded this exact papercut since July covered only
+  the docs; it covers the source and its tests now, which is why it stayed green
+  while the defect shipped.
 - **A client can no longer expand its own capabilities via `initialize`.**
   The rustok capability list now *intersects* with the transport-seeded
   ceiling instead of replacing it: an operator launching the wallet with
