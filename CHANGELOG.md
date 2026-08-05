@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- **The donation ask is gone from everything an agent reads.** The server's
+  `initialize` instructions and the published skill both asked the model to
+  raise the subject of supporting this project — with an address and suggested
+  amounts — with the human it works for. An agent meeting the wallet for the
+  first time flagged it unprompted, as something baked into the tool rather than
+  what its human had asked for. A product trusted with keys does not lobby the
+  agent on its author's behalf, and on this edition — which signs and sends on
+  its own authority — the ask sits closer to the money than anywhere else. It
+  lives on the website, where a human chooses to read it.
+
 ## [0.4.5] - 2026-08-04
 
 ### Security
