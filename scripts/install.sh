@@ -125,14 +125,23 @@ cosign_state() {
     echo unavailable
 }
 
+# Set when provenance was skipped, so the closing summary can repeat it. The
+# skip is announced where it happens — in the middle of a long install log,
+# which is exactly where it scrolls away: the first third party to install this
+# wallet did not notice, and worked out from the outside that the signature had
+# never been checked. The last lines are the ones that get read.
+PROVENANCE_SKIPPED=0
+
 skip_provenance() {
     # $1 — the honest reason, $2 — the image ref. Never phrased as a security
     # event: nothing here says anything about the image, only about the tool.
+    PROVENANCE_SKIPPED=1
     say "$1 — skipping the signature check."
     say "this is not an error: the image is pinned by digest ($WALLET_DIGEST),"
     say "so you get exactly those bytes or nothing. cosign proves WHO built them (provenance),"
     say "which you can check any time later, once cosign works:"
     say "  cosign verify $2 --certificate-identity $COSIGN_IDENTITY --certificate-oidc-issuer $COSIGN_ISSUER"
+    say "note: that check needs cosign 3 or newer — 2.x cannot see our signatures at all"
 }
 
 profile_file() {
@@ -300,6 +309,11 @@ main() {
 
     # 5) Next steps — the installer's job ends here; the wallet is the human's.
     say "done. Before running, you can inspect this script and the shim you just installed."
+    if [ "$PROVENANCE_SKIPPED" -eq 1 ]; then
+        say "one thing to know: the image signature was NOT checked — cosign was unavailable."
+        say "you have the right bytes (pinned by digest), but not proof of who built them."
+        say "to check provenance later, install cosign 3 or newer and run the verify command printed above."
+    fi
     say "next (in YOUR terminal, never through an agent): rustok init   — creates the wallet and prints your 12-word phrase + PIN once"
     say "to roll back to a previous version, re-run the installer from that version's tag: $RAW_BASE/wallet-tui-v<older>/scripts/install.sh"
 }

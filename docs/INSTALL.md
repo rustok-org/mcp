@@ -32,6 +32,12 @@ One command installs it; `rustok` does the rest.
 - An Ethereum RPC URL (an Alchemy key URL is recommended; a public RPC works for
   testing).
 
+> **There is no `latest` tag for the console image.** It is published by version
+> only (`v0.8.4`, `v0.8`, `v0`), on purpose: the installer pins the exact digest
+> of the release it ships with, and a floating tag would quietly undo that.
+> `podman pull …-tui:latest` answers `manifest unknown` — that is the design,
+> not a broken publish.
+
 **Platforms.** The published image is `linux/amd64`, and the installer is POSIX
 `sh`. Linux is the tested path. On **Windows, install inside WSL2** and treat it
 as a Linux machine — there is no native Windows installer, and we are not going

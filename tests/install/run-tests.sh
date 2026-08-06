@@ -188,6 +188,32 @@ if assert_exit 0 && shim_installed \
     ok "install: no cosign at all -> warns about provenance, still installs by digest (cosign is not a wall)"
 else not_ok "install: no cosign at all -> warns about provenance, still installs by digest (cosign is not a wall)"; fi
 
+# The skip is announced in the middle of a long install log, where it scrolls
+# away — a third party installing for the first time did not notice it and had
+# to work out from the outside that provenance had not been checked. The last
+# thing the installer prints is what gets read, so the summary carries it too,
+# with the version requirement named where it is actionable.
+
+fresh
+plant_podman
+unplant_cosign
+run_install
+if assert_exit 0 && shim_installed \
+    && assert_has "signature was NOT checked" \
+    && assert_has "cosign 3" ; then
+    ok "install without cosign: the final summary says provenance went unchecked, and names cosign 3+"
+else not_ok "install without cosign: the final summary says provenance went unchecked, and names cosign 3+"; fi
+
+# The other half of the same claim: a notice that always prints is not a notice.
+fresh
+plant_podman
+run_install
+if assert_exit 0 && shim_installed \
+    && log_has 'cosign verify' \
+    && assert_lacks "signature was NOT checked"; then
+    ok "install with a working cosign: the summary does NOT claim a skipped signature check"
+else not_ok "install with a working cosign: the summary does NOT claim a skipped signature check"; fi
+
 # --- cosign PRESENT but NOT RUNNABLE (wrong arch / missing libc) --------------
 # Executable, so `command -v` says yes in every shell — only running it tells
 # the truth. Without the `version` probe this lands in verify and dies with

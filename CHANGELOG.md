@@ -86,6 +86,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chooses to read it.
 
 ### Fixed
+- **A skipped signature check now says so where it gets read.** When `cosign` is
+  unavailable the installer has always announced the skip — in the middle of a
+  long install log, where it scrolls away. The first third party to install this
+  wallet did not notice, and worked out from the outside that provenance had
+  never been checked. The closing summary now repeats it and names the version
+  requirement where it is actionable: the check needs **cosign 3 or newer**,
+  because our signatures are OCI referrers that 2.x cannot see at all. Nothing
+  about the install changes — the image is still pulled by digest, and a
+  signature that is present but does not verify still stops everything.
 - **The console command the wallet prints now works.** `initialize`, the
   `next_step` of every parked transaction and the `execute_transaction`
   description all told the human to run
