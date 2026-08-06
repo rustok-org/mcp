@@ -25,6 +25,10 @@ rustok init             # creates the wallet — prints the 12 words + PIN once
 rustok connect claude   # registers it with your agent (or: cursor / hermes / openclaw)
 ```
 
+The console image is published **by version only** — there is no `latest` tag to
+pull, on purpose: the installer pins the exact digest of the release it ships
+with, and a floating tag would quietly undo that.
+
 The installer verifies the wallet image's cosign signature **before** anything
 touches disk, pulls it by digest, and installs the `rustok` command — it never
 touches a secret, a keystore or your wallet. Requires podman (or docker) and

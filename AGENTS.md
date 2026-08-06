@@ -108,3 +108,16 @@ the pins are filled is dead permanently.
       version; an old shim keeps users on an old image whatever `update` prints)
 - [ ] Listings refreshed (ClawHub — then re-check its audit page, Smithery,
       MCP registry); GHCR tags semver only, no `latest`
+
+**5 — the landing page (ops):** the site is a release surface like any listing,
+and it was missing from this list — which is the whole reason its install command
+sat two versions behind until a third party noticed.
+- [ ] `rustokwallet.com` install command and release-notes link moved to the new
+      tag (`src/components/Install.astro`, both the command and the link beside it)
+- [ ] Merged — and then **check that the deployment actually happened**. A merge
+      is not a deploy: Vercel blocks a build whose commit author is not the
+      project owner (Hobby plan, no collaborators), and a squash merge re-authors
+      the commit to whoever opened the PR. When it blocks, the owner re-triggers
+      it from their side.
+- [ ] Verified on the live page, not in the dashboard:
+      `curl -s https://rustokwallet.com/ | grep wallet-tui-v<X.Y.Z>`
