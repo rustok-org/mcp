@@ -22,7 +22,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
   https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.8.4/scripts/install.sh | sh
 
 rustok init             # creates the wallet — prints the 12 words + PIN once
-rustok connect claude   # registers it with your agent (or: cursor / hermes)
+rustok connect claude   # registers it with your agent (or: cursor / hermes / openclaw)
 ```
 
 The installer verifies the wallet image's cosign signature **before** anything
