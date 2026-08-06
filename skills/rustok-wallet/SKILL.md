@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet
 description: Self-custody Ethereum agent wallet. Runs entirely on the user's machine as one Docker (or Podman) image (MCP over stdio, plus an HTTP gateway for signing integrations — loopback-only by default, opt-in network exposure); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview, execute, sign plain messages and EIP-712 typed data. The user assumes all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.5.0
+version: 0.5.1
 metadata:
   openclaw:
     emoji: "🦀"

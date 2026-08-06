@@ -6,12 +6,12 @@
 #
 # Build (local, against a locally-built core image):
 #   docker build -f Dockerfile.wallet --build-arg CORE_IMAGE=rustok-core:v0.1.5 \
-#     -t rustok-wallet:0.4.5 .
+#     -t rustok-wallet:0.4.6 .
 # The password rides a file, not the environment. Onboard:
 #   podman run -it --rm -v rustok-wallet:/data \
 #     --secret rustok-keyring,type=mount,mode=0400,uid=1000,gid=1000 \
 #     -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring \
-#     rustok-wallet:0.4.5 create-wallet
+#     rustok-wallet:0.4.6 create-wallet
 # Run (MCP stdio): the same run without `create-wallet`, plus `-e RUSTOK_RPC_URLS_1=…`.
 
 # Pinned to an exact core build, never a floating tag: an unpinned build from this
