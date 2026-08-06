@@ -7,50 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security
-- **The keyring password no longer lives in any process's environment.**
-  Until now every process in the wallet image — core, the gateway and the MCP
-  server — carried it in `/proc/<pid>/environ`, where anything running as the
-  same user could read it, decrypt `keystore.json` directly and re-mint the
-  approval PIN. Reading `/proc/*/environ` is the cheapest secret harvest there
-  is, and it made the console edition's PIN gate bypassable. Only the core ever
-  needed the password; the other two held it because the entrypoint exported it.
-
-  Now the password reaches the core as a *file*, and only as a file. Supplied
-  the documented way (a mounted secret plus `RUSTOK_KEYRING_PASSWORD_FILE`), it
-  is in no environment at all and `podman inspect` carries a path instead of the
-  value. Supplied the compatibility way (`-e RUSTOK_KEYRING_PASSWORD`), the
-  entrypoint stages it in a 0600 file, drops the variable, and removes the file
-  once the core has unlocked — and because the entrypoint is now PID 1 and hands
-  that role to `tini` through `exec`, even PID 1's own environment is rewritten.
-  A file *you* mounted is never deleted.
-
-  **What this does not cover, stated plainly:** with `-e` delivery the value
-  still sits in the container config (`podman inspect`) and, under `--init`, in
-  the runtime's own PID 1 — neither is reachable from inside the image, which is
-  why the file delivery is the documented one. Nothing here defends against code
-  already running as the same user: it can read the staged file during its short
-  life, the core's memory, and the data volume. Measured on podman 5.8.4; docker
-  is not installed on the machine these runs were made on, so its behaviour is
-  expected to match by mechanism but is **not verified**.
-
-- **`rustok init`/`start`/`connect` now deliver the password as a mounted
-  secret**, not `--secret …,type=env`. The generated command was the leaky path
-  itself: documentation alone would have fixed the advice and not the product.
-  Existing registrations keep working; re-run `rustok connect <client>` to move
-  an already-registered client onto the new command.
-
-- **Secret files on disk are owner-only** (core `v0.3.1`). `keystore.json` and
-  `approval-pin.json` were world-readable (0644) — they are now written 0600 and
-  narrowed on the first start of an existing wallet, which says so in the log.
-
-### Changed
-- **`--init` is gone from every documented command.** The entrypoint is PID 1
-  itself and hands the role to `tini` through `exec`, so signal forwarding and
-  zombie reaping are covered without it; with `-e` delivery an extra init
-  process is a carrier nothing inside the image can clear.
-- The image is built on core `v0.3.1` (from `v0.3.0`).
-
 ### Added
 - **`rustok connect openclaw`.** OpenClaw was unsupported, so the first
   third-party agent to install this wallet had to route around us: generate the
@@ -106,6 +62,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grep-invariant that has guarded this exact papercut since July covered only
   the docs; it covers the source and its tests now, which is why it stayed green
   while the defect shipped.
+
+
+## [0.8.4] — 2026-08-04
+
+> Written after the fact (2026-08-06): 0.8.2, 0.8.3 and 0.8.4 all shipped
+> while their notes sat in `[Unreleased]`, so the entries below were
+> reconstructed from the commits between `wallet-tui-v0.8.3` and
+> `wallet-tui-v0.8.4`. The releases themselves are unchanged.
+
+### Security
+
+- **The gateway API key is delivered as a path, not a value.**
+  `resolve_outbound_api_key` reads `RUSTOK_MCP_API_KEY_FILE` when set and
+  falls back to the plain variable; the entrypoint stages the key under
+  `/run/wallet` at `umask 077`, unsets the value and exports only the path,
+  so it is in no process's environment. An unreadable or empty file is fatal
+  at startup instead of a silent "no key". Companion to `core#105`, which
+  moves the capability ceiling onto the gateway's request path.
+
+### Added
+
+- **`docs/CAVEATS.md` — one place for what this wallet does not guarantee.**
+  The same boundary had been written from scratch four times in a single day
+  (release notes, `INSTALL.md`, `CONFIGURATION.md`, an audit dispute), each
+  slightly differently scoped — which is how a boundary quietly becomes a
+  claim. `INSTALL.md` and the skill link to it instead of restating a subset.
+
+## [0.8.3] — 2026-08-03
+
+### Security
+- **The keyring password no longer lives in any process's environment.**
+  Until now every process in the wallet image — core, the gateway and the MCP
+  server — carried it in `/proc/<pid>/environ`, where anything running as the
+  same user could read it, decrypt `keystore.json` directly and re-mint the
+  approval PIN. Reading `/proc/*/environ` is the cheapest secret harvest there
+  is, and it made the console edition's PIN gate bypassable. Only the core ever
+  needed the password; the other two held it because the entrypoint exported it.
+
+  Now the password reaches the core as a *file*, and only as a file. Supplied
+  the documented way (a mounted secret plus `RUSTOK_KEYRING_PASSWORD_FILE`), it
+  is in no environment at all and `podman inspect` carries a path instead of the
+  value. Supplied the compatibility way (`-e RUSTOK_KEYRING_PASSWORD`), the
+  entrypoint stages it in a 0600 file, drops the variable, and removes the file
+  once the core has unlocked — and because the entrypoint is now PID 1 and hands
+  that role to `tini` through `exec`, even PID 1's own environment is rewritten.
+  A file *you* mounted is never deleted.
+
+  **What this does not cover, stated plainly:** with `-e` delivery the value
+  still sits in the container config (`podman inspect`) and, under `--init`, in
+  the runtime's own PID 1 — neither is reachable from inside the image, which is
+  why the file delivery is the documented one. Nothing here defends against code
+  already running as the same user: it can read the staged file during its short
+  life, the core's memory, and the data volume. Measured on podman 5.8.4; docker
+  is not installed on the machine these runs were made on, so its behaviour is
+  expected to match by mechanism but is **not verified**.
+
+- **`rustok init`/`start`/`connect` now deliver the password as a mounted
+  secret**, not `--secret …,type=env`. The generated command was the leaky path
+  itself: documentation alone would have fixed the advice and not the product.
+  Existing registrations keep working; re-run `rustok connect <client>` to move
+  an already-registered client onto the new command.
+
+- **Secret files on disk are owner-only** (core `v0.3.1`). `keystore.json` and
+  `approval-pin.json` were world-readable (0644) — they are now written 0600 and
+  narrowed on the first start of an existing wallet, which says so in the log.
+
+### Changed
+- **`--init` is gone from every documented command.** The entrypoint is PID 1
+  itself and hands the role to `tini` through `exec`, so signal forwarding and
+  zombie reaping are covered without it; with `-e` delivery an extra init
+  process is a carrier nothing inside the image can clear.
+- The image is built on core `v0.3.1` (from `v0.3.0`).
+- **`sign_message` schema matches its documented contract.** The `sign_type`
+  enum listed `eip712` while the tool description said EIP-712 is not
+  supported; the enum is now `["eip191"]`.
+
+### Fixed
 - **A client can no longer expand its own capabilities via `initialize`.**
   The rustok capability list now *intersects* with the transport-seeded
   ceiling instead of replacing it: an operator launching the wallet with
@@ -126,10 +159,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capabilities *object* (which parses to empty) left the session open to a
   second, wider grant. The session now tracks `initialized` explicitly.
 
-### Changed
-- **`sign_message` schema matches its documented contract.** The `sign_type`
-  enum listed `eip712` while the tool description said EIP-712 is not
-  supported; the enum is now `["eip191"]`.
+
+## [0.8.2] — 2026-07-22
+
+> Written after the fact (2026-08-06), reconstructed from the commits between
+> `wallet-tui-v0.8.1` and `wallet-tui-v0.8.2`. Nothing about the release itself
+> changed.
+
+### Fixed
+
+- **`uninstall --purge-keys` gated the keys after tearing everything down.**
+  Run through a pipe or an agent it refused correctly — but only after
+  deregistering the clients, stopping the wallets, deleting the secrets,
+  removing the PATH block, deleting the shim itself and wiping the config
+  directory. The keys survived; the installation did not, and the user was
+  left without the command that manages them. A gate that fires after the
+  damage is not a gate.
+- **The installer stopped asserting things it does not do.** A first-user
+  probe and a read-only audit of `install.sh` found the same class of defect
+  underneath a working install: statements about its own behaviour that were
+  not true. Nothing here broke an installation; all of it misinformed the
+  person running one.
+- **The ClawHub listing still sold cosign as a prerequisite.** `SKILL.md` is
+  the listing — the text a new user reads first and copies commands from —
+  and it still named cosign as required, which is the exact wall 0.8.1 exists
+  to remove.
 
 ## [0.8.1] — 2026-07-22
 
