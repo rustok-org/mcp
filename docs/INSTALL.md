@@ -24,8 +24,10 @@ One command installs it; `rustok` does the rest.
   the installer must treat as a refusal.
   [installation](https://docs.sigstore.dev/cosign/installation) — nothing else
   in the wallet uses it.
-- **`jq`** — needed only by `rustok connect claude` / `connect cursor`;
-  **`python3` + PyYAML** — needed only by `rustok connect hermes`.
+- **`jq`** — needed only by `rustok connect claude` / `connect cursor` /
+  `connect openclaw`; **`python3` + PyYAML** — needed only by
+  `rustok connect hermes`; the **`openclaw`** CLI — needed only by
+  `rustok connect openclaw`, which registers through it.
   `rustok doctor` tells you which of these you are missing.
 - An Ethereum RPC URL (an Alchemy key URL is recommended; a public RPC works for
   testing).
@@ -132,6 +134,7 @@ without touching the keys, use `rustok init --force`.
 rustok connect claude     # writes ~/.claude.json
 rustok connect cursor     # writes ~/.cursor/mcp.json
 rustok connect hermes     # writes ~/.hermes/config.yaml
+rustok connect openclaw   # writes ~/.openclaw/openclaw.json (via `openclaw mcp set`)
 ```
 
 This registers the wallet as an MCP server for that client, launching it by
@@ -189,7 +192,7 @@ rustok update
 ```
 
 Pulls the current wallet image and re-registers every rustok MCP entry it finds
-across claude / cursor / hermes, each keeping its own wallet. A failed pull stops
+across claude / cursor / hermes / openclaw, each keeping its own wallet. A failed pull stops
 the run before any config is touched. Wallets that are running keep the previous
 image until their agent's next session starts (or until `rustok stop`).
 

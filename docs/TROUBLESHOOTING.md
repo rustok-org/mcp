@@ -107,12 +107,40 @@ If the list contains `(unlabeled)`, that wallet predates the label model: add
 [INSTALL](INSTALL.md#running-a-second-agent)), or re-register it with
 `rustok connect <client> --force`.
 
-## `connect needs jq` / `connect hermes needs python3 with PyYAML`
+## `connect needs jq` / `connect hermes needs python3 with PyYAML` / `openclaw CLI not found`
 
 `rustok connect` edits your agent's config file and refuses to do that with
 string surgery. Install what it names (`dnf install jq` / `apt install jq`;
-Hermes itself ships python3 + PyYAML). No other rustok command needs them —
-`rustok doctor` reports both as informational.
+Hermes itself ships python3 + PyYAML). `connect openclaw` needs jq **and** the
+`openclaw` CLI itself: the registration is written through `openclaw mcp set`,
+never by editing that config behind its back. No other rustok command needs any
+of them — `rustok doctor` reports all three as informational.
+
+## `openclaw mcp unset rustok` fails with `Config write rejected … size-drop`
+
+That is OpenClaw's own guard against a config write **made through its CLI**
+when the file shrinks too far. Removing a large entry can trip it, and
+`openclaw config unset mcp.servers.rustok` hits the same guard (measured:
+`1069->492` and `1069->526`, both refused).
+
+What works, measured end to end:
+
+```bash
+openclaw doctor --fix          # writes the defaults back: 1069 -> 2868 bytes,
+                               # the rustok entry is still there
+openclaw mcp unset rustok      # now succeeds: 2868 -> 2291, entry gone
+```
+
+`doctor --fix` helps by raising the size the guard compares against, not by
+restoring a backup. `rustok uninstall` relays OpenClaw's own message and this
+order when it hits the refusal, instead of repeating the command that failed.
+
+Editing the config file directly — outside OpenClaw — is **not** gated by that
+guard: the change sticks, and `openclaw doctor` without `--fix` does not undo it
+(measured). OpenClaw notices the external edit and prints one line about it,
+`Config observe anomaly … size-drop-vs-last-good` — a different guard on a
+different path, which is why that token never appears in the write refusal
+above.
 
 ## On docker: the wallet never unlocks, as if no password reached it
 

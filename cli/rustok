@@ -40,9 +40,10 @@ Commands:
                  12-word phrase and approval PIN exactly once — run it in your
                  own terminal, never through an agent)
   connect        register the wallet as an MCP server with an agent client:
-                 rustok connect claude|cursor|hermes (the wallet defaults to
-                 that client's own — --agent overrides); claude/cursor need
-                 jq, hermes needs python3+PyYAML; --force replaces an
+                 rustok connect claude|cursor|hermes|openclaw (the wallet
+                 defaults to that client's own — --agent overrides);
+                 claude/cursor/openclaw need jq, hermes needs python3+PyYAML,
+                 openclaw also needs the openclaw CLI; --force replaces an
                  existing registration
   start          start the wallet container in the background
   stop           stop the running wallet container
@@ -544,9 +545,12 @@ cmd_connect() {
     volume="$(volume_for "$agent")"
 
     case "$client" in
-        claude | cursor)
+        claude | cursor | openclaw)
             command -v jq >/dev/null 2>&1 \
                 || die "connect needs jq to read the agent config safely — install it (dnf/apt install jq); no other rustok command uses it"
+            if [ "$client" = "openclaw" ] && ! command -v openclaw >/dev/null 2>&1; then
+                die "openclaw CLI not found — connect openclaw registers through it ('openclaw mcp set'); install OpenClaw, or register the wallet by hand"
+            fi
             ;;
         hermes)
             if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import yaml' 2>/dev/null; then
@@ -591,6 +595,21 @@ cmd_connect() {
             if [ "$client" = "claude" ] && jq -e '.mcpServers."rustok-wallet-tui"' "$cfg" >/dev/null 2>&1; then
                 echo "rustok: warn: a doc-era 'rustok-wallet-tui' entry is also registered — remove it: claude mcp remove -s user rustok-wallet-tui" 1>&2
             fi
+            ;;
+        openclaw)
+            # OpenClaw owns its config, so the probe goes through its CLI rather
+            # than reading the file: `mcp show` exits 1 when the server is
+            # absent and 0 with the JSON object when it is present (measured
+            # against OpenClaw 2026.7.1-2 in a --profile sandbox). Unlike
+            # `claude mcp get`, it starts no wallet container to answer.
+            registered=0
+            openclaw mcp show rustok --json >/dev/null 2>&1 || registered=$?
+            case "$registered" in
+                0)
+                    [ "$FORCE" -eq 1 ] || die "MCP server 'rustok' is already registered — rerun with --force to replace the registration (RPC secrets refresh either way)"
+                    ;;
+                *) registered=1 ;;
+            esac
             ;;
         hermes)
             [ -f "$cfg" ] || die "no Hermes config at $cfg — is Hermes installed?"
@@ -677,6 +696,7 @@ PYEOF
         claude) connect_write_claude "$@" ;;
         cursor) connect_write_cursor "$@" ;;
         hermes) connect_write_hermes "$@" ;;
+        openclaw) connect_write_openclaw "$@" ;;
     esac
 }
 
@@ -802,6 +822,35 @@ PYEOF
     echo "rustok: MCP server 'rustok' registered for Hermes, agent '$agent' ($engine, enabled: true) — restart Hermes to pick it up"
 }
 
+connect_write_openclaw() {
+    # OpenClaw's own CLI owns the write, as with claude — but `mcp set` REPLACES
+    # an existing entry in a single call, so there is no remove→add window where
+    # the wallet is registered nowhere. Measured, not assumed: a second `set` on
+    # the same name overwrote it with no error and no duplicate (OpenClaw
+    # 2026.7.1-2, in a --profile sandbox so no real config was touched).
+    if [ "$registered" -eq 0 ]; then
+        oc_old="$(openclaw mcp show rustok --json 2>/dev/null || true)"
+        if [ -n "$oc_old" ]; then
+            echo "rustok: replacing the previous entry (return path if needed):" 1>&2
+            printf '  %s\n' "$oc_old" 1>&2
+        fi
+    fi
+    oc_json="$(jq -nc --arg cmd "$engine" '{command: $cmd, args: $ARGS.positional}' --args -- "$@")" \
+        || die "could not build the registration JSON (jq failed) — nothing was written"
+    if ! openclaw mcp set rustok "$oc_json" >/dev/null; then
+        echo "rustok: 'openclaw mcp set rustok' failed — the registration is unchanged. Re-run it by hand:" 1>&2
+        printf "  openclaw mcp set rustok '%s'\n" "$oc_json" 1>&2
+        exit 1
+    fi
+    # New config is read on the next turn; reload drops the cached runtimes so a
+    # session already open stops serving the old command. Not fatal — the
+    # registration is written by this point, only its pickup is delayed.
+    if ! openclaw mcp reload >/dev/null 2>&1; then
+        echo "rustok: warn: 'openclaw mcp reload' failed — restart the OpenClaw session to pick up the new config" 1>&2
+    fi
+    echo "rustok: MCP server 'rustok' registered for OpenClaw, agent '$agent' ($engine) — verify with: openclaw mcp probe rustok"
+}
+
 cmd_status() {
     echo "engine: $engine ($CONFIG_FILE)"
     ids="$(discover_ids "$AGENT")"
@@ -850,6 +899,11 @@ cmd_doctor() {
     else
         echo "info: python3+PyYAML not found — needed only by 'rustok connect hermes'"
     fi
+    if command -v openclaw >/dev/null 2>&1; then
+        echo "ok: openclaw CLI present (used only by 'rustok connect openclaw')"
+    else
+        echo "info: openclaw CLI not found — needed only by 'rustok connect openclaw'"
+    fi
     # Running wallets.
     ids="$(discover_ids "")"
     # shellcheck disable=SC2086
@@ -887,6 +941,7 @@ client_cfg_for() {
         claude) echo "$HOME/.claude.json" ;;
         cursor) echo "$HOME/.cursor/mcp.json" ;;
         hermes) echo "$HOME/.hermes/config.yaml" ;;
+        openclaw) echo "$HOME/.openclaw/openclaw.json" ;;
     esac
 }
 
@@ -908,9 +963,15 @@ cmd_update() {
     fi
     updated=0
     upd_failed=0
-    for upd_client in claude cursor hermes; do
+    for upd_client in claude cursor hermes openclaw; do
         upd_cfg="$(client_cfg_for "$upd_client")"
-        [ -f "$upd_cfg" ] || continue
+        # openclaw is exempt from the file gate on purpose: its CLI owns the
+        # config location (profiles move it), and our probe goes through that
+        # CLI anyway — gating on the default path would skip a real
+        # registration silently.
+        if [ "$upd_client" != "openclaw" ] && [ ! -f "$upd_cfg" ]; then
+            continue
+        fi
         upd_agent=""
         upd_probe=""
         case "$upd_client" in
@@ -959,6 +1020,26 @@ PYEOF
                         ;;
                 esac
                 ;;
+            openclaw)
+                # The entry is read through OpenClaw's own CLI, then the agent
+                # label is pulled out of it with jq — same shape as claude and
+                # cursor, different reader.
+                if ! command -v openclaw >/dev/null 2>&1; then
+                    # No CLI: nothing here to update, and nothing to say — unless
+                    # its default config is sitting there, which is evidence the
+                    # client exists and only the tool is missing.
+                    if [ -f "$upd_cfg" ]; then
+                        echo "rustok: warn: $upd_cfg exists but the openclaw CLI is not on PATH — skipped" 1>&2
+                    fi
+                    continue
+                fi
+                if ! command -v jq >/dev/null 2>&1; then
+                    echo "rustok: warn: cannot read the OpenClaw registration without jq — skipped (install jq and re-run)" 1>&2
+                    continue
+                fi
+                upd_probe="$(openclaw mcp show rustok --json 2>/dev/null)" || continue
+                upd_agent="$(printf '%s' "$upd_probe" | jq -r '.args // [] | map(select(type == "string" and startswith("rustok.agent="))) | first // empty' 2>/dev/null | sed 's/^rustok\.agent=//')"
+                ;;
         esac
         if [ -z "$upd_agent" ]; then
             echo "rustok: $upd_client: registration found but no rustok.agent label inside it — re-run: rustok connect $upd_client --force" 1>&2
@@ -980,7 +1061,7 @@ PYEOF
         fi
     done
     if [ "$updated" -eq 0 ] && [ "$upd_failed" -eq 0 ]; then
-        echo "rustok: nothing to update — no rustok registration found (first: rustok connect claude|cursor|hermes)"
+        echo "rustok: nothing to update — no rustok registration found (first: rustok connect claude|cursor|hermes|openclaw)"
     else
         upd_tail=""
         [ "$upd_failed" -gt 0 ] && upd_tail=", $upd_failed FAILED"
@@ -1022,9 +1103,13 @@ cmd_uninstall() {
             echo "rustok: --purge-keys: no keystore volumes found — nothing to purge"
         fi
     fi
-    for un_client in claude cursor hermes; do
+    for un_client in claude cursor hermes openclaw; do
         un_cfg="$(client_cfg_for "$un_client")"
-        [ -f "$un_cfg" ] || continue
+        # See cmd_update: openclaw's config lives wherever its CLI says, so the
+        # default-path gate would skip a live registration.
+        if [ "$un_client" != "openclaw" ] && [ ! -f "$un_cfg" ]; then
+            continue
+        fi
         case "$un_client" in
             claude)
                 command -v jq >/dev/null 2>&1 || {
@@ -1053,6 +1138,48 @@ cmd_uninstall() {
                 else
                     rm -f "$un_tmp"
                     echo "rustok: warn: could not update $un_cfg — remove .mcpServers.rustok by hand" 1>&2
+                fi
+                ;;
+            openclaw)
+                # OpenClaw owns its config: `mcp unset` is the removal, and it
+                # exits 1 when the server is not there — the same "absent is
+                # free" contract the other three clients get.
+                #
+                # The other three clients only warn when their config file
+                # exists, i.e. when there is evidence the client is installed at
+                # all. Dropping the path gate for openclaw (its CLI owns the
+                # location) removed that evidence, so the warning fired for
+                # everyone. Here the CLI itself is the evidence: no CLI and no
+                # config in the default place means nothing to do, silently.
+                if ! command -v openclaw >/dev/null 2>&1; then
+                    if [ -f "$un_cfg" ]; then
+                        echo "rustok: warn: $un_cfg exists but the openclaw CLI is not on PATH — if the wallet is registered there, remove it with: openclaw mcp unset rustok" 1>&2
+                    fi
+                    continue
+                fi
+                openclaw mcp show rustok --json >/dev/null 2>&1 || continue
+                un_oc_rc=0
+                un_oc_out="$(openclaw mcp unset rustok 2>&1)" || un_oc_rc=$?
+                if [ "$un_oc_rc" -eq 0 ]; then
+                    echo "rustok: deregistered from openclaw"
+                else
+                    # Measured on the real CLI: OpenClaw refuses a config write
+                    # made THROUGH its own CLI when the file shrinks too far
+                    # against the current one — token `size-drop`. What decides
+                    # is the size of the drop, not "the wallet was the only
+                    # server": removing ours from a config holding four others
+                    # went through. `openclaw config unset` hits the same guard
+                    # (1069->526). An edit made OUTSIDE OpenClaw is not gated at
+                    # all — it sticks, and `doctor` without --fix does not undo
+                    # it; OpenClaw only notes it afterwards as a "Config observe
+                    # anomaly" (that message carries the OTHER token,
+                    # size-drop-vs-last-good — different guard, different path).
+                    echo "rustok: warn: 'openclaw mcp unset rustok' failed — OpenClaw said:" 1>&2
+                    printf '%s\n' "$un_oc_out" | sed 's/^/  /' 1>&2
+                    if printf '%s' "$un_oc_out" | grep -q 'size-drop'; then
+                        echo "rustok: that guard (token 'size-drop') applies to writes made through OpenClaw's own CLI — 'openclaw config unset' hits it too. What works, measured: run 'openclaw doctor --fix' — it writes the defaults back and raises the size the guard compares against, leaving the entry in place — then repeat 'openclaw mcp unset rustok'" 1>&2
+                        echo "rustok: editing the config file directly also works and sticks — OpenClaw only prints a one-line 'Config observe anomaly' notice about it afterwards" 1>&2
+                    fi
                 fi
                 ;;
             hermes)
@@ -1229,16 +1356,16 @@ if [ $# -gt 0 ]; then
             # the positional target names the agent CLIENT being registered
             # with; the wallet defaults to that client's own (--agent overrides)
             case "${1:-}" in
-                claude | cursor | hermes)
+                claude | cursor | hermes | openclaw)
                     CONNECT_TARGET="$1"
                     shift
                     ;;
                 "" | -*)
-                    echo "rustok: connect needs a target agent client: rustok connect claude|cursor|hermes" 1>&2
+                    echo "rustok: connect needs a target agent client: rustok connect claude|cursor|hermes|openclaw" 1>&2
                     exit 2
                     ;;
                 *)
-                    echo "rustok: unknown connect target '$1' (supported: claude, cursor, hermes)" 1>&2
+                    echo "rustok: unknown connect target '$1' (supported: claude, cursor, hermes, openclaw)" 1>&2
                     exit 2
                     ;;
             esac

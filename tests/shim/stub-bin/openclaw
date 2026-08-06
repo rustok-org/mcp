@@ -1,0 +1,59 @@
+#!/bin/sh
+# Stub OpenClaw CLI for the connect tests: records argv and emulates the four
+# subcommands the shim uses. Contract measured against the real CLI (OpenClaw
+# 2026.7.1-2) in an isolated `--profile` sandbox, never against the operator's
+# own config:
+#
+#   mcp show <name> --json   exit 1 when the server is absent,
+#                            exit 0 + the JSON object when it is present
+#   mcp set <name> <json>    replaces an existing entry, no remove→add dance
+#   mcp unset <name>         exit 1 when the server is absent; ALSO exit 1 when
+#                            the removal shrinks the config too far against the
+#                            CURRENT file — OpenClaw's own write guard, token
+#                            `size-drop`. Measured: a realistic wallet entry
+#                            (1069->492) refused, the same removal from a config
+#                            holding four other servers passed.
+#   mcp reload               drops cached runtimes so the next turn sees new config
+#
+# STUB_OPENCLAW_REGISTERED=1 makes `mcp show` answer "already registered".
+set -eu
+
+[ -n "${STUB_LOG:-}" ] && printf '%s %s\n' "$(basename "$0")" "$*" >>"$STUB_LOG"
+
+case "${1:-} ${2:-}" in
+    "mcp show")
+        [ "${STUB_OPENCLAW_REGISTERED:-0}" = "1" ] || {
+            echo "No MCP server named \"${3:-}\"." 1>&2
+            exit 1
+        }
+        echo '{"command":"podman","args":["run","-i","--label","rustok=wallet"]}'
+        exit 0
+        ;;
+    "mcp set")
+        [ "${STUB_OPENCLAW_SET_FAIL:-0}" = "1" ] && exit 1
+        # Record the JSON payload on its own line: the test asserts it verbatim,
+        # so a re-quoted or re-ordered argv cannot pass unnoticed.
+        [ -n "${STUB_LOG:-}" ] && printf 'openclaw-set-json %s\n' "${4:-}" >>"$STUB_LOG"
+        echo "Saved MCP server \"${3:-}\"."
+        exit 0
+        ;;
+    "mcp unset")
+        if [ "${STUB_OPENCLAW_UNSET_FAIL:-0}" = "1" ]; then
+            # The real refusal, verbatim in shape: the shim is supposed to relay
+            # OpenClaw's own words, and a stub that fails SILENTLY lets a broken
+            # relay pass — the assertion would only be checking the shim's own
+            # two lines.
+            echo "Config write rejected: $HOME/.openclaw/openclaw.json (size-drop:1069->492). Rejected payload saved to $HOME/.openclaw/openclaw.json.rejected.2026-08-06T05-45-23-140Z." 1>&2
+            exit 1
+        fi
+        exit 0
+        ;;
+    "mcp reload")
+        [ "${STUB_OPENCLAW_RELOAD_FAIL:-0}" = "1" ] && exit 1
+        exit 0
+        ;;
+    *)
+        echo "stub: unexpected openclaw command: $*" 1>&2
+        exit 64
+        ;;
+esac

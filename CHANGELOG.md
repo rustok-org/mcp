@@ -51,6 +51,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process is a carrier nothing inside the image can clear.
 - The image is built on core `v0.3.1` (from `v0.3.0`).
 
+### Added
+- **`rustok connect openclaw`.** OpenClaw was unsupported, so the first
+  third-party agent to install this wallet had to route around us: generate the
+  command with `rustok connect claude`, then register it in OpenClaw by hand.
+  The client is now first-class across the whole lifecycle — `connect`, `update`,
+  `uninstall` and `doctor` — not just in the dispatcher, so `rustok update` no
+  longer walks past a registration it cannot see.
+
+  Registration goes through OpenClaw's own CLI (`openclaw mcp set`), which
+  **replaces** an entry in a single call: unlike the `claude` path there is no
+  remove→add window in which the wallet is registered nowhere. `openclaw mcp
+  reload` follows the write, so a session already open stops serving the cached
+  command instead of failing on the next turn; a failed reload warns rather than
+  failing the registration that has already landed.
+
+  One thing worth knowing before you uninstall: OpenClaw refuses a config write
+  made through its own CLI when the file shrinks too far — its message carries
+  the token `size-drop`, and `openclaw config unset` hits the same guard.
+  `rustok uninstall` relays OpenClaw's own words and the recovery that was
+  measured end to end: `openclaw doctor --fix` (it writes the defaults back and
+  raises the size the guard compares against), then repeat `openclaw mcp unset
+  rustok`. Editing the config outside OpenClaw is not gated and also works; it
+  only earns a one-line `Config observe anomaly` notice afterwards.
+
 ### Removed
 - **The donation ask is gone from everything an agent reads.** The server's
   `initialize` instructions and the published skill both asked the model to

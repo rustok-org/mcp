@@ -51,13 +51,21 @@ fresh() {
 plant_docker_stub() { ln -s "$TESTS_DIR/stub-bin/podman" "$WORK/bin/docker"; }
 remove_podman_stub() { rm "$WORK/bin/podman"; }
 plant_claude_stub() { ln -s "$TESTS_DIR/stub-bin/claude" "$WORK/bin/claude"; }
+plant_openclaw_stub() { ln -s "$TESTS_DIR/stub-bin/openclaw" "$WORK/bin/openclaw"; }
 # jq is a host tool (like python3 for the pty driver): planted per-test so its
 # ABSENCE stays a testable state, not an accident of the machine.
 plant_jq() { ln -s "$(command -v jq)" "$WORK/bin/jq"; }
 plant_python3() { ln -s "$(command -v python3)" "$WORK/bin/python3"; }
 seed_wallet() {
-    printf '%s' pw >"$WORK/state/secret-rustok-keyring-claude"
-    : >"$WORK/state/volume-rustok-wallet-tui"
+    # seed_wallet [agent] — default claude, which keeps the historical volume
+    # name (volume_for); any other agent gets its own per-agent volume.
+    seed_agent="${1:-claude}"
+    printf '%s' pw >"$WORK/state/secret-rustok-keyring-$seed_agent"
+    if [ "$seed_agent" = "claude" ]; then
+        : >"$WORK/state/volume-rustok-wallet-tui"
+    else
+        : >"$WORK/state/volume-rustok-$seed_agent"
+    fi
 }
 
 run_shim() {
@@ -620,6 +628,117 @@ run_shim connect claude
 if assert_exit 1 && assert_has "connect needs jq" && ! grep -q '^claude' "$WORK/log"; then
     ok "connect without jq: named refusal before any engine or claude call"
 else not_ok "connect without jq: named refusal before any engine or claude call"; fi
+
+# --- connect: OpenClaw --------------------------------------------------------
+# A third party installing the console edition for the first time had to route
+# around this: generate the command with `rustok connect claude`, then register
+# it in OpenClaw by hand. Unlike claude, OpenClaw's `mcp set` REPLACES an entry
+# in one call, so there is no remove→add window where the wallet is registered
+# nowhere. Contract measured against the real CLI in a `--profile` sandbox.
+
+fresh
+plant_openclaw_stub
+plant_jq
+seed_wallet openclaw
+export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
+export RUSTOK_ALLOWED_CHAINS="1"
+run_shim connect openclaw
+unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
+EXPECTED_JSON='{"command":"podman","args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=openclaw","-v","rustok-openclaw:/data","--secret","rustok-keyring-openclaw,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-openclaw","--secret","rustok-rpc-openclaw-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","ghcr.io/rustok-org/rustok-wallet-tui:v0.8.4"]}'
+if assert_exit 0 \
+    && [ "$(sed -n 's/^openclaw-set-json //p' "$WORK/log")" = "$EXPECTED_JSON" ] \
+    && [ "$(cat "$WORK/state/secret-rustok-rpc-openclaw-1")" = "https://rpc.example/with-key" ]; then
+    ok "connect openclaw: the saved JSON is byte-exact (labels, volume, both secrets, frozen -e, image)"
+else RC="$RC (log: $(grep '^openclaw' "$WORK/log" || echo none))"; not_ok "connect openclaw: the saved JSON is byte-exact (labels, volume, both secrets, frozen -e, image)"; fi
+
+fresh
+plant_openclaw_stub
+plant_jq
+seed_wallet openclaw
+run_shim connect openclaw
+if assert_exit 0 && grep -q '^openclaw mcp reload' "$WORK/log"; then
+    ok "connect openclaw: reload is called so a live session stops serving the cached config"
+else not_ok "connect openclaw: reload is called so a live session stops serving the cached config"; fi
+
+fresh
+plant_openclaw_stub
+plant_jq
+seed_wallet openclaw
+export STUB_OPENCLAW_REGISTERED=1
+run_shim connect openclaw
+unset STUB_OPENCLAW_REGISTERED
+if assert_exit 1 && assert_has "already registered" && ! grep -q '^openclaw mcp set' "$WORK/log"; then
+    ok "connect openclaw over an existing registration: refuses without --force, writes nothing"
+else not_ok "connect openclaw over an existing registration: refuses without --force, writes nothing"; fi
+
+fresh
+plant_openclaw_stub
+plant_jq
+seed_wallet openclaw
+export STUB_OPENCLAW_REGISTERED=1
+run_shim connect openclaw --force
+unset STUB_OPENCLAW_REGISTERED
+if assert_exit 0 \
+    && grep -q '^openclaw mcp set' "$WORK/log" \
+    && ! grep -q '^openclaw mcp unset' "$WORK/log" \
+    && assert_has "return path if needed"; then
+    ok "connect openclaw --force: single replacing write, no unset window, old entry printed"
+else not_ok "connect openclaw --force: single replacing write, no unset window, old entry printed"; fi
+
+fresh
+plant_jq
+seed_wallet openclaw
+# openclaw deliberately NOT planted
+run_shim connect openclaw
+if assert_exit 1 && assert_has "openclaw CLI not found" && ! grep -q '^openclaw' "$WORK/log"; then
+    ok "connect openclaw without the openclaw CLI: named refusal before any write"
+else not_ok "connect openclaw without the openclaw CLI: named refusal before any write"; fi
+
+fresh
+plant_openclaw_stub
+plant_jq
+seed_wallet openclaw
+export STUB_OPENCLAW_REGISTERED=1 STUB_OPENCLAW_UNSET_FAIL=1
+run_shim uninstall
+unset STUB_OPENCLAW_REGISTERED STUB_OPENCLAW_UNSET_FAIL
+# Measured against the real CLI: OpenClaw rejects a config write that shrinks the
+# file too far, so deleting the wallet when it is the ONLY configured server
+# fails — and re-running the same command by hand fails identically. The shim
+# must hand over the recovery that works, not repeat the command that did not.
+# The stub prints the real refusal, so OpenClaw's own token can only appear
+# in the output if the shim actually relays it — asserting the shim's own two
+# lines would have passed with the relay broken.
+if assert_has "openclaw mcp unset rustok' failed" \
+    && assert_has "size-drop:1069->492" \
+    && assert_has "openclaw doctor --fix"; then
+    ok "uninstall: a refused openclaw removal relays OpenClaw's own words and its documented recovery order"
+else not_ok "uninstall: a refused openclaw removal relays OpenClaw's own words and its documented recovery order"; fi
+
+fresh
+plant_jq
+seed_wallet openclaw
+# openclaw NOT planted and no config in the default place: there is no evidence
+# the client exists, so the run must not mention it at all. Removing the path
+# gate made this branch run for everyone — it printed advice about an entry that
+# does not exist, using a command the user does not have.
+run_shim uninstall
+if ! printf '%s' "$OUT" | grep -q "openclaw CLI" \
+    && ! printf '%s' "$OUT" | grep -q "mcp unset" \
+    && ! grep -q "^openclaw" "$WORK/log"; then
+    ok "uninstall stays silent about OpenClaw when neither its CLI nor its config is present"
+else not_ok "uninstall stays silent about OpenClaw when neither its CLI nor its config is present"; fi
+
+fresh
+plant_jq
+seed_wallet openclaw
+mkdir -p "$WORK/home/.openclaw"
+printf '%s' '{"mcp":{"servers":{}}}' >"$WORK/home/.openclaw/openclaw.json"
+# Config present, CLI missing: now there IS evidence, and the warning names the
+# tool that is missing — not jq, which is planted here.
+run_shim uninstall
+if printf '%s' "$OUT" | grep -q "openclaw CLI is not on PATH" && ! printf '%s' "$OUT" | grep -q "without jq"; then
+    ok "uninstall warns about OpenClaw only when its config exists, and names the missing tool exactly"
+else not_ok "uninstall warns about OpenClaw only when its config exists, and names the missing tool exactly"; fi
 
 fresh
 plant_claude_stub
