@@ -41,6 +41,25 @@ all — lives in [docs/CAVEATS.md](https://github.com/rustok-org/mcp/blob/main/d
 **Never claim** the agent (or a prompt-injected agent) "cannot move funds." What is
 true: keys stay local, and **on-chain sends** are human-gated in the console.
 
+### Autonomous mode, and why a send may park once
+
+A wallet can be in **autonomous** mode, in which it sends without asking each
+time. That only happens after a human has confirmed the mode **in the console**:
+press **`c`**, enter the PIN, once per wallet. The agent cannot give that
+confirmation, and neither can an environment variable or a launch flag.
+
+Until it is confirmed, an autonomous wallet **parks every send** exactly like a
+supervised one. The console shows this on every screen and offers the
+confirmation on the Dashboard.
+
+**If a send parks unexpectedly, this is the first thing to check, and the honest
+thing to tell the user:** the wallet is autonomous but unconfirmed, and one
+confirmation in the console clears it for good. Do not describe it as an error
+and do not retry the payment — a retry adds a second parked copy under a
+different nonce, and confirming the mode does not release either of them.
+
+Confirmation from a messenger is not in this release.
+
 ## Prerequisites
 
 - **Podman** (recommended) or **Docker**. **cosign is optional** — the installer

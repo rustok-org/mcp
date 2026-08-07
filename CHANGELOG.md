@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Autonomous mode sends for real — after you confirm it once.** Until now
+  `autonomous` was a mode the wallet could be in and still parked every payment.
+  It now executes, on one condition: a human has confirmed that mode on this
+  wallet. Open the console, press **`c`**, enter your PIN — once per wallet.
+
+  The confirmation is asked for in the console and nowhere else. It cannot be
+  given by the agent, by an environment variable, or by a launch flag.
+
+- **The console says which mode this wallet is in, on every screen.** The mode
+  and whether it is confirmed are one statement, because either half alone
+  misleads: an `autonomous` wallet nobody has confirmed still parks everything.
+  Unconfirmed autonomy is the one state drawn as a warning — it is the one where
+  what you expect and what the wallet does come apart.
+
+- **The audit log records who released a payment** — you at the console, or the
+  wallet acting on autonomy you confirmed — and which payment it was. Before
+  this, a human approval left no row of its own, so after an incident the two
+  could not be told apart.
+
+### Changed
+- **If your wallet is in autonomous mode and you have not confirmed it, the
+  first send after this update will park and wait for you.** This is deliberate
+  and it is the part worth reading twice.
+
+  Wallets created by the pre-console line have a keystore and no PIN record, and
+  that is exactly what the core reads as "autonomous". Such a wallet has never
+  had an approval gate in front of it. Turning on autonomous execution for it
+  silently would mean money moving out of a wallet that was never asked. So it
+  parks once, the console shows a banner saying so, and one confirmation clears
+  it for good.
+
+  Confirming does **not** release payments already in the queue. While the mode
+  was unconfirmed an agent may have retried, so the queue can hold duplicates of
+  one payment under different nonces; they stay for you to decide one by one.
+
+  Confirmation from a messenger is not in this release. It is the next one.
+
 ## [0.8.5] — 2026-08-06
 
 ### Added
