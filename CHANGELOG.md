@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] — 2026-08-08
+
+### Fixed
+- **The wallet said it could not send on its own. It could.** 0.9.0 gave the
+  wallet the ability to execute a payment once a human confirmed autonomous mode
+  at the console — and six texts kept describing the old, unconditional gate.
+  Three of them are read by the agent: the `execute_transaction` tool
+  description, the standing server instruction, and the tool table in the skill
+  card. An agent told the wallet cannot send by itself does not warn the human
+  and does not treat a send as final.
+
+  Every one of those texts now states all three cases in the same breath: a
+  supervised wallet parks the payment; an autonomous wallet whose owner has not
+  yet confirmed the mode parks it the same way; an autonomous wallet whose owner
+  confirmed it releases without asking again. `policy_mode` and `policy_origin`
+  from `get_wallet_context` say which case you are in.
+
+  None of these files changed in 0.9.0 — they became false without being
+  touched, which is why a review that reads a diff did not see them. A guard now
+  fails if any of those texts describes the gate without admitting the mode.
+
+- **The listing description said sending "requires your approval".** It now says
+  the gate is in the console and names both ways through it.
+
 ## [0.9.0] — 2026-08-08
 
 ### Added
