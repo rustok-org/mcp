@@ -12,14 +12,14 @@ Rustok ships **two wallet products** — pick the trust model you want:
 | | `rustok-wallet` (agent edition) | `rustok-wallet-tui` (this repo) |
 |---|---|---|
 | Who signs | the agent, unrestricted | **you**, in a separate terminal (`rustok-console`, y/N + PIN) |
-| Where | [rustokwallet.com](https://rustokwallet.com) · [ClawHub](https://clawhub.ai/temrjan/skills/rustok-wallet) · image `ghcr.io/rustok-org/rustok-wallet` | this repo (`main`) · image `ghcr.io/rustok-org/rustok-wallet-tui` |
+| Where | [rustokwallet.com](https://rustokwallet.com) · [ClawHub](https://clawhub.ai/temrjan/skills/rustok-wallet) · image `ghcr.io/rustok-org/rustok-wallet` | this repo (`main`) · [ClawHub](https://clawhub.ai/rustok/skills/wallet) · image `ghcr.io/rustok-org/rustok-wallet-tui` |
 | Line | 0.4.x (maintained from the `wallet-v0.4.0` tag) | 0.5.x+ |
 
 ## Install (rustok-wallet-tui, self-custody)
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.0/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.1/scripts/install.sh | sh
 
 rustok init             # creates the wallet — prints the 12 words + PIN once
 rustok connect claude   # registers it with your agent (or: cursor / hermes / openclaw)
@@ -54,9 +54,11 @@ hermes skills tap add rustok-org/mcp
 hermes skills install rustok-org/mcp/rustok-wallet-tui
 ```
 
-The **agent edition** skill for OpenClaw is published on
-[ClawHub](https://clawhub.ai/temrjan/skills/rustok-wallet); a ClawHub listing for
-the TUI edition ships separately.
+Both editions are on ClawHub as separate listings: the **agent edition** at
+[`@temrjan/rustok-wallet`](https://clawhub.ai/temrjan/skills/rustok-wallet), and the
+**console edition** — the maintained one — at
+[`@rustok/wallet`](https://clawhub.ai/rustok/skills/wallet), published as
+*Rustok Agentic Wallet*.
 
 ## Registries
 
@@ -64,8 +66,9 @@ the TUI edition ships separately.
   [`io.github.rustok-org/rustok-wallet`](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.rustok-org/rustok-wallet)
   (OCI package `ghcr.io/rustok-org/rustok-wallet`, stdio). A TUI-edition
   registry entry ships separately as `io.github.rustok-org/rustok-wallet-tui`.
-- **ClawHub** — the **agent edition** skill for OpenClaw:
-  [clawhub.ai/temrjan/skills/rustok-wallet](https://clawhub.ai/temrjan/skills/rustok-wallet).
+- **ClawHub** — two listings: the **console edition** (maintained) at
+  [`@rustok/wallet`](https://clawhub.ai/rustok/skills/wallet), and the **agent
+  edition** at [`@temrjan/rustok-wallet`](https://clawhub.ai/temrjan/skills/rustok-wallet).
 
 ## Quick Start (Development)
 

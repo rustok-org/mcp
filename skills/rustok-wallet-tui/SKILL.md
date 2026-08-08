@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet-tui
-description: Self-custody Ethereum agent wallet. Installs with one command and runs entirely on your machine as a single container image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain requires your approval in a separate terminal console, never inside the agent chat; message signing is not console-gated. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.9.0
+description: Self-custody Ethereum agent wallet. Installs with one command and runs entirely on your machine as a single container image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain is gated in a separate terminal console, never inside the agent chat: you approve each payment, or confirm autonomous mode once and the wallet sends on its own after that; message signing is not console-gated. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
+version: 0.9.1
 metadata:
   openclaw:
     emoji: "🦀"
@@ -34,7 +34,7 @@ all — lives in [docs/CAVEATS.md](https://github.com/rustok-org/mcp/blob/main/d
 
 | | |
 |---|---|
-| **Protected** | Private keys stay in the user's **local Docker volume** and never leave the machine. **Sending funds on-chain** (`execute_transaction`) is parked and requires the user's approval in a **separate console window** (`rustok console`, opened by the user — see below), with a PIN for high-risk items. |
+| **Protected** | Private keys stay in the user's **local Docker volume** and never leave the machine. **Sending funds on-chain** (`execute_transaction`) is gated in a **separate console window** (`rustok console`, opened by the user — see below): parked for the user's approval, with a PIN for high-risk items — unless the user has confirmed **autonomous mode** there, a confirmation only they can give, once per wallet. |
 | **Not gated by the console** | `sign_message` (EIP-191) returns a signature **without** console approval. The wallet refuses to sign a **raw hex blob** (which could hide a transaction, an approval, or typed data), but it **will** sign an ordinary plaintext message (e.g. a sign-in or an off-chain order). Treat message signing as unprotected: don't connect this wallet to an agent you wouldn't trust to sign a message. |
 | **Outside the model** | An agent with **shell / `docker exec` access to the container** can read the gateway key and reach the full signing surface (including EIP-712 permits — a classic drain). That is why the console is a **separate window, not an agent command**. Trusting your own agent is the user's call, the same as never pasting a seed phrase into an untrusted tool. |
 
@@ -82,7 +82,7 @@ and one look costs less than that trade.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.0/scripts/install.sh -o install.sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.1/scripts/install.sh -o install.sh
 less install.sh      # ~150 lines of POSIX sh
 sh install.sh
 ```
@@ -96,7 +96,7 @@ publish the script's `sha256` if you would rather check the bytes than read them
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.0/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.1/scripts/install.sh | sh
 ```
 
 Piping to a shell runs whatever the URL serves at that moment, unreviewed. The
@@ -146,7 +146,9 @@ the secret store; on docker, keep it in a private `0600` file and pass its *path
 
 ```bash
 # One-time (podman): the value never touches history, inspect or configs.
-read -r -s -p "Keyring password: " pw && printf '%s' "$pw" | podman secret create rustok-keyring-claude - && unset pw
+read -r -s -p "Keyring password: " pw &&
+  printf '%s' "$pw" | podman secret create rustok-keyring-claude -
+unset pw
 
 podman run -i --rm \
   --label rustok=wallet --label rustok.agent=claude \
@@ -155,13 +157,15 @@ podman run -i --rm \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.0
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.1
 ```
 
 ```bash
 # Docker variant: a 0600 file + RUSTOK_KEYRING_PASSWORD_FILE (path, not value).
 umask 077
-read -r -s -p "Keyring password: " pw && printf '%s' "$pw" > ~/.rustok-keyring-pass && unset pw
+read -r -s -p "Keyring password: " pw &&
+  printf '%s' "$pw" > ~/.rustok-keyring-pass
+unset pw
 
 docker run -i --rm \
   --label rustok=wallet --label rustok.agent=claude \
@@ -170,7 +174,7 @@ docker run -i --rm \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.0
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.1
 ```
 
 > Legacy `--env-file` delivery still works but is deprecated: the value lands in
@@ -220,7 +224,7 @@ password is delivered by the podman secret (or the docker `_FILE` mount) above,
                "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.9.0"],
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.9.1"],
       "env": {
         "RUSTOK_RPC_URLS_1": "https://your-rpc"
       }
@@ -255,7 +259,7 @@ address and every balance. A client may narrow its own session further in
 | `get_balances` | read_wallet | Token balances for the active wallet, or `{address, chain_id}` |
 | `get_positions` | read_wallet | DeFi positions — Aave v3 (collateral/debt/health factor/LTV) + ERC-4626 vaults; optional `{address}` |
 | `preview_transaction` | preview_tx | Preview any transaction `{to, value, chain_id, data?}` → decoded call (who/what is authorized), pre-sign simulation (revert check), gas, risk level |
-| `execute_transaction` | execute_tx | Park a previewed transaction `{preview_id}` for human approval — the wallet never sends it on its own; a `pending` result carries `next_step` for the human |
+| `execute_transaction` | execute_tx | Submit a previewed transaction `{preview_id}` — parked for human approval on a supervised wallet, released by the core on one whose owner confirmed autonomous mode; a `pending` result carries `next_step` for the human |
 | `get_execution_status` | execute_tx | Poll a parked execution `{preview_id}` → `pending` / `executed` (+`tx_hash`) / `denied` / `expired` / `failed` (+`error_reason`), with the `not_after_unix` deadline |
 | `sign_message` | execute_tx | Sign a plaintext message (EIP-191). **Not console-gated** — returns a signature without the approval window; refuses raw hex blobs but signs ordinary messages (see "What's protected"). |
 

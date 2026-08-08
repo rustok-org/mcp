@@ -49,8 +49,11 @@ SERVER_INSTRUCTIONS = (
     "estimated cost, risk level) before executing; never send or sign without the human's "
     "explicit approval; prefer read-only use (RUSTOK_MCP_CAPABILITIES=read_wallet) unless a "
     "transaction is actually needed. txguard flags risky transfers but does not block them.\n\n"
-    "execute_transaction never sends funds by itself: the wallet parks the transaction and "
-    "only the human can release it from the wallet console, in a separate terminal window. "
+    "execute_transaction does not decide on its own whether funds move: a supervised wallet "
+    "parks the transaction and only the human releases it from the wallet console, in a "
+    "separate terminal window; an autonomous wallet releases it itself, but only because its "
+    "owner confirmed that mode at the console beforehand — you cannot grant that, and neither "
+    "can an environment variable or a launch flag. "
     "If they installed with the installer, that is `rustok console`. Otherwise the container "
     "is found by label — it never has a fixed name: "
     '`<engine> exec -it "$(<engine> ps -q --filter label=rustok=wallet)" rustok-console`, '
@@ -416,10 +419,15 @@ def create_protocol_and_registry(
         Tool(
             name="execute_transaction",
             description=(
-                "Submit a previewed transaction for execution. The wallet does NOT send it: "
-                "the request is parked and only the human can release it in the wallet "
-                "console. Before calling, show the human a summary card of the preview "
-                "(recipient, decoded call, amount, estimated cost, risk level). On a "
+                "Submit a previewed transaction for execution. What happens next has three "
+                "cases, and policy_mode + policy_origin from get_wallet_context tell you "
+                "which one you are in: a supervised wallet parks it for the human to "
+                "release in the wallet console; an autonomous wallet whose owner has NOT "
+                "yet confirmed that mode parks it exactly the same way; an autonomous "
+                "wallet whose owner confirmed the mode at the console releases it without "
+                "asking again. Before calling, show the human a summary card of the preview "
+                "(recipient, decoded call, amount, estimated cost, risk level) — in the "
+                "third case that card is the last moment anyone sees it. On a "
                 "'pending' result, relay next_step: the human opens a SEPARATE terminal and "
                 "runs `rustok console` — or, without the installer's shim, the "
                 "label-discovery form spelled out in next_step. Never run or offer to run "
