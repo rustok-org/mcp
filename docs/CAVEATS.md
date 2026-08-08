@@ -88,6 +88,14 @@ runnable. The shim is fetched by commit SHA.
   provenance guarantee covers installation, not the lifecycle.
 - **cosign is optional.** A missing or broken cosign downgrades the run to
   "installed by digest, provenance unchecked" and says so; it does not fail.
+- **Nothing updates on its own, and that cuts both ways.** Pinning a digest is
+  what makes an install reproducible; it is also why a release that fixes a
+  defect does not reach anyone who does not go and get it. **0.9.0 and 0.9.1 can
+  have a payment refused by the network** — they build every transaction as a
+  legacy one, so the fee headroom never applies and a base fee that rises between
+  building and inclusion produces `max fee per gas less than block base fee`.
+  Fixed in **0.9.2**; if you are on an earlier version and you send anything,
+  upgrading is not optional in practice.
 
 ## What we do not verify at all
 

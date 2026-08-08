@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] — 2026-08-08
+
+### Fixed
+- **Payments could be refused by the network, and 0.9.0 and 0.9.1 shipped that.**
+  Every transaction was built as a legacy one. The fee headroom — the margin that
+  absorbs a base fee rising between the moment a transaction is built and the
+  moment a block includes it — was written, unit-tested, and never reached: it
+  lives in the EIP-1559 branch of the pipeline, and nothing in production ever
+  selected that branch. A send priced at the gas price the node quoted is refused
+  the instant the base fee ticks up, with `max fee per gas less than block base
+  fee`. Measured on a real wallet: four refusals.
+
+  Transactions are EIP-1559 by default now, and the legacy path carries the same
+  headroom. Verified on chain rather than only in the suite: a send on Arbitrum
+  went out as `type 0x2` with a `maxFeePerGas` of 40060000 while the effective
+  gas price at inclusion was 20118000 — the base fee had risen 0.44% since the
+  transaction was built, so without the headroom that very send would have been
+  refused.
+
+- **A refused send said nothing about why.** The node's own reason now reaches
+  the operator, through a closed list of six known refusals; every other failure
+  stays masked exactly as before.
+
+- **`create-wallet` let you believe the PIN was your keyring password.** It now
+  names which one it is asking for.
+
+### Changed
+- Core pinned to `v0.4.1`.
+
+  Worth upgrading if you send anything: 0.9.0 and 0.9.1 can have a payment
+  refused on a rising base fee. Nothing updates on its own — the installer pins
+  an exact digest.
+
 ## [0.9.1] — 2026-08-08
 
 ### Fixed
