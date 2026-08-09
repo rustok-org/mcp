@@ -38,6 +38,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused on a rising base fee. Nothing updates on its own — the installer pins
   an exact digest.
 
+### Erratum — added 2026-08-09
+
+The annotation on the `wallet-tui-v0.9.2` tag says this release was accepted on
+the published image. That was not true when it was written. The Arbitrum send
+quoted above was made from a local build of this same commit, not from the
+published artifact — the claim was true of the code and false of the thing you
+download, and telling those two apart is the entire reason this project pins a
+digest.
+
+Acceptance on the published image was completed afterwards, on
+`ghcr.io/rustok-org/rustok-wallet-tui@sha256:996f81a0`: transaction
+`0xb20a32f1e1d078f95bf5743b16b41a18bcb522298f9e2fd064bb2b0578d3012c` on
+Arbitrum, block 492644798, `type 0x2`, `status 0x1`, carrying a `maxFeePerGas`
+of 40020000 and included at an effective 20014000. Both numbers are on chain,
+and together they show the headroom doing its job: the ceiling is twice what
+the node quoted when the transaction was built, so the quote was 20010000 —
+below the 20014000 the block actually charged. Without the headroom the ceiling
+would have been the quote itself and this send would have been refused. Three
+sends, three times the margin was needed, which is why the bug it fixes was a
+systematic refusal rather than an occasional one.
+
+The tag itself is left alone. It points at the right commit, and moving a tag
+that others may already have fetched would trade one wrong claim for a worse
+one. This note is the correction, and it is here rather than in an internal
+record because the claim it corrects is public.
+
 ## [0.9.1] — 2026-08-08
 
 ### Fixed
