@@ -116,6 +116,11 @@ runnable. The shim is fetched by commit SHA.
   disputed in [openclaw/clawhub#3381](https://github.com/openclaw/clawhub/issues/3381)
   with an independent scanner's clean result attached. We say this here rather than
   hoping you do not look.
+- **One of our own release claims was wrong, and we say so where we made it.** The
+  annotation on the `wallet-tui-v0.9.2` tag states an acceptance that had not happened
+  when it was written. The correction, with the transaction it should have rested on,
+  is in the `[0.9.2]` entry of [`CHANGELOG.md`](../CHANGELOG.md). Same rule as the line
+  above: a claim we made in public gets corrected in public.
 
 ---
 

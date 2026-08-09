@@ -38,6 +38,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused on a rising base fee. Nothing updates on its own — the installer pins
   an exact digest.
 
+### Erratum — added 2026-08-09
+
+The annotation on the `wallet-tui-v0.9.2` tag says this release was accepted on
+the published image. That was not true when it was written. The Arbitrum send
+quoted above was made from a local build of this same commit, not from the
+published artifact — the claim was true of the code and false of the thing you
+download, and telling those two apart is the entire reason this project pins a
+digest.
+
+Acceptance on the published image was completed afterwards, on
+`ghcr.io/rustok-org/rustok-wallet-tui@sha256:996f81a0`: transaction
+`0xb20a32f1e1d078f95bf5743b16b41a18bcb522298f9e2fd064bb2b0578d3012c` on
+Arbitrum, block 492644798, `type 0x2`, `status 0x1`, carrying a `maxFeePerGas`
+of 40020000 and included at an effective 20014000. Both numbers are on chain,
+and together they show the headroom doing its job: the ceiling is twice what
+the node quoted when the transaction was built, so the quote was 20010000 —
+below the 20014000 the block actually charged. Without the headroom the ceiling
+would have been the quote itself and this send would have been refused.
+
+The two sends made while testing the fix stand on chain the same way, and the
+same arithmetic applies to both:
+`0x053c917aad0c4e1a42bde84c70f8c71dbd193c4d351e03b7a5ef0a43462dcafa` in block
+492454482, ceiling 40060000 against an effective 20118000, and
+`0xced4b99f4b5c9a4784b0b205cd261327df8cd9659170fc999d613092fdf0e8ae` in block
+492636459, ceiling 40016000 against 20026000. Three sends, and in all three the
+base fee had risen past the quote by the time a block took the transaction —
+which is why the bug this release fixes was a systematic refusal rather than an
+occasional one. Every number here can be checked without taking our word for
+it, which is the point of writing it down this way.
+
+The tag itself is left alone. It points at the right commit, and moving a tag
+that others may already have fetched would trade one wrong claim for a worse
+one. This note is the correction, and it is here rather than in an internal
+record because the claim it corrects is public.
+
 ## [0.9.1] — 2026-08-08
 
 ### Fixed
