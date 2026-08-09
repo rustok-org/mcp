@@ -6,9 +6,11 @@
 #
 # Build (local, against locally-built core/console images):
 #   docker build -f Dockerfile.wallet \
-#     --build-arg CORE_IMAGE=rustok-core:v0.3.2 \
-#     --build-arg CONSOLE_IMAGE=rustok-console:v0.2.0 \
-#     -t rustok-wallet-tui:0.8.3 .
+#     --build-arg CORE_IMAGE=rustok-core:v0.4.1 \
+#     --build-arg CORE_VERSION=v0.4.1 \
+#     --build-arg CONSOLE_IMAGE=rustok-console:v0.3.1 \
+#     --build-arg WALLET_VERSION=0.9.3 \
+#     -t rustok-wallet-tui:0.9.3 .
 # The password rides a file, not the environment — see docs/INSTALL.md. Onboard:
 #   podman run -it --rm -v rustok-wallet-tui:/data \
 #     --secret rustok-keyring,type=mount,target=/run/keyring-pass,mode=0400,uid=1000,gid=1000 \
@@ -17,7 +19,21 @@
 # Run (MCP stdio): the same run without `create-wallet`, plus `-e RUSTOK_RPC_URLS_1=…`.
 
 ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.4.1
-ARG CONSOLE_IMAGE=ghcr.io/rustok-org/rustok-console:v0.3.0
+ARG CONSOLE_IMAGE=ghcr.io/rustok-org/rustok-console:v0.3.1
+
+# What the finished image will say about itself when the console asks. The
+# console is started with `podman exec`, which takes its environment from the
+# image CONFIG — not from the entrypoint's process — so these have to be `ENV`,
+# settled at build time.
+#
+# `CORE_VERSION` is deliberately NOT written by hand: it is checked against the
+# tag of `CORE_IMAGE` below, and a build whose two disagree fails. The first
+# draft tried to derive it by substitution (`${CORE_IMAGE##*:}`) and that was
+# measured, not assumed — buildah passes the reference through untouched, so the
+# panel would have shown the whole `ghcr.io/…` string as a version number. A
+# check that refuses is worth more than an expansion that silently lies.
+ARG WALLET_VERSION=0.9.3
+ARG CORE_VERSION=v0.4.1
 
 # --- Core/Gateway binaries (private source; public binary image) ---
 FROM ${CORE_IMAGE} AS core
@@ -75,6 +91,22 @@ LABEL org.opencontainers.image.title="rustok-wallet-tui" \
 # Ownership annotation for the official MCP registry (validator reads the image
 # config label; value MUST equal server.json `name`).
 LABEL io.modelcontextprotocol.server.name="io.github.rustok-org/rustok-wallet-tui"
+
+# The versions this image states about itself. The check runs in a shell, where
+# suffix stripping actually works, and it fails the build rather than shipping a
+# number nobody verified — the same discipline the publish workflow already
+# applies to `WALLET_VERSION` against `pyproject.toml`.
+ARG CORE_IMAGE
+ARG CORE_VERSION
+ARG WALLET_VERSION
+RUN case "${CORE_IMAGE}" in \
+      *@*) echo "CORE_IMAGE is pinned by digest and carries no tag — pass CORE_VERSION explicitly" >&2; exit 1 ;; \
+    esac; \
+    [ "${CORE_IMAGE##*:}" = "${CORE_VERSION}" ] || { \
+      echo "CORE_VERSION=${CORE_VERSION} disagrees with the CORE_IMAGE tag ${CORE_IMAGE##*:} — the panel would state a version this image is not built from" >&2; \
+      exit 1; }
+ENV RUSTOK_WALLET_VERSION=${WALLET_VERSION} \
+    RUSTOK_CORE_VERSION=${CORE_VERSION}
 
 USER rustok
 ENV RUSTOK_DATA_DIR=/data

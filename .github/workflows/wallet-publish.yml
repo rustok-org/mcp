@@ -143,6 +143,13 @@ jobs:
           context: .
           file: ./Dockerfile.wallet
           platforms: linux/amd64
+          # The version the console will state for the wallet comes from the
+          # input this job already checked against pyproject.toml, so the number
+          # on the panel and the number in the manifest cannot part company.
+          # CORE_VERSION is not passed: its default sits beside CORE_IMAGE in
+          # the Dockerfile, which fails the build if the two disagree.
+          build-args: |
+            WALLET_VERSION=${{ inputs.version }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
