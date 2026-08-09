@@ -123,7 +123,7 @@ run_purge_pty() {
 }
 
 run_console_pty() {
-    # run_console_pty [args…] — drives `console` on a REAL pty. The only way to
+    # run_console_pty — drives `console` on a REAL pty. The only way to
     # observe the screen clear: `run_shim` captures through a pipe, so `[ -t 1 ]`
     # is false there and the escape is correctly never emitted.
     OUT="$(printf '\n' | \
@@ -132,7 +132,7 @@ run_console_pty() {
         STUB_CONTAINERS="$STUB_CONTAINERS" STUB_LEGACY="$STUB_LEGACY" \
         STUB_INFO_FAIL="$STUB_INFO_FAIL" STUB_PS_FAIL="$STUB_PS_FAIL" \
         STUB_STOP_FAIL="$STUB_STOP_FAIL" STUB_EXEC_EXIT="$STUB_EXEC_EXIT" \
-        "$PY3" "$TESTS_DIR/pty-init.py" sh "$SHIM" console "$@" 2>&1)" && RC=0 || RC=$?
+        "$PY3" "$TESTS_DIR/pty-init.py" sh "$SHIM" console 2>&1)" && RC=0 || RC=$?
 }
 
 ok() {
