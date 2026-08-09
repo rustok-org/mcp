@@ -137,7 +137,10 @@ case "$cmd" in
         exit 0
         ;;
     stop)
-        if [ -n "${STUB_STOP_FAIL:-}" ] && [ "$1" = "$STUB_STOP_FAIL" ]; then
+        # ANY: fail whichever container is stopped. The detached id is random,
+        # so a caller that starts the wallet itself cannot name it in advance.
+        if [ -n "${STUB_STOP_FAIL:-}" ] \
+            && { [ "$STUB_STOP_FAIL" = "ANY" ] || [ "$1" = "$STUB_STOP_FAIL" ]; }; then
             echo "Error: no such container $1 (stub)" 1>&2
             exit 1
         fi
@@ -254,7 +257,10 @@ case "$cmd" in
             exit $?
         fi
         echo "EXEC:$id:$1"
-        exit 0
+        # The console's own exit code is load-bearing (1 fatal / 2 upgrade /
+        # 3 no-tty / 6 aborted): the shim must hand it back untouched now that
+        # it does work after the console returns instead of `exec`ing away.
+        exit "${STUB_EXEC_EXIT:-0}"
         ;;
     info)
         [ "${STUB_INFO_FAIL:-0}" = "1" ] && exit 1

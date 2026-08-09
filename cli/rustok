@@ -35,7 +35,9 @@ Usage: rustok [command] [--agent <name>] [--force]
 
 Commands:
   console        open the human approval console (default when no command);
-                 starts the wallet first if an initialized one is not running
+                 starts the wallet first if an initialized one is not running,
+                 and stops it again on exit — a wallet that was ALREADY running
+                 is left alone (an agent may be mid-turn with it)
   init           create a NEW wallet for an agent (interactive; prints the
                  12-word phrase and approval PIN exactly once — run it in your
                  own terminal, never through an agent)
@@ -491,6 +493,54 @@ cmd_stop() {
     esac
 }
 
+# Everything that happens once the console gives the terminal back: clear what
+# it drew, say what closed, and put away the wallet if THIS invocation is the
+# one that took it out.
+#
+# A named function on purpose. An abrupt window close (SIGHUP to the shim) is
+# deliberately NOT covered by this — see the circle's plan — and installing a
+# `trap` later is then one line rather than a rewrite.
+#
+# $1 = container id, $2 = owned|guest
+console_finish() {
+    # The escape, never the `clear` binary: the shim runs in minimal images, and
+    # its own suite is hermetic — a fixed whitelist of tools on PATH, ncurses not
+    # among them. Guarded by an `if`, not `[ -t 1 ] &&`: under `set -e` a false
+    # test as the last command of the function would abort the shim.
+    if [ -t 1 ]; then
+        printf '\033[H\033[2J'
+    fi
+    if [ "$2" = "owned" ]; then
+        if "$engine" stop "$1" >/dev/null 2>&1; then
+            echo "rustok: console closed — wallet stopped"
+        else
+            echo "rustok: console closed — the wallet could NOT be stopped and is still running (see: rustok status)" 1>&2
+        fi
+    else
+        # Attached to a wallet that was already up. Stopping it here would kill
+        # the process an agent is talking to, and a parked approval lives in that
+        # process's memory — the human would destroy the very thing they opened
+        # the console to confirm.
+        echo "rustok: console closed — the wallet it attached to is still running"
+    fi
+}
+
+# Run the console, then finish up. NOT `exec`: that replaces the shim, so nothing
+# would run once the console returns.
+#
+# $1 = container id, $2 = owned|guest
+enter_console() {
+    # `|| status=$?` captures the code in the same step that runs the command:
+    # under `set -e` a bare call would abort before the next line, and any command
+    # in between would overwrite `$?`.
+    console_status=0
+    "$engine" exec -it "$1" rustok-console || console_status=$?
+    console_finish "$1" "$2"
+    # The console's own code, verbatim — 1 fatal, 2 upgrade, 3 no-tty, 6 aborted
+    # (AGENTS.md #7). Tidying up must never report itself as the session's result.
+    exit "$console_status"
+}
+
 cmd_console() {
     ids="$(discover_ids "$AGENT")"
     # shellcheck disable=SC2086  # word-splitting the id list is the point
@@ -515,10 +565,13 @@ cmd_console() {
                 [ "$tries" -gt 30 ] && die "wallet started but the approval socket never appeared — check: rustok status / $engine logs"
                 sleep 1
             done
-            exec "$engine" exec -it "$(discover_ids "$agent")" rustok-console
+            # This invocation started the wallet, so this invocation puts it away.
+            enter_console "$(discover_ids "$agent")" owned
             ;;
         1)
-            exec "$engine" exec -it "$1" rustok-console
+            # It was already running before this console existed — a guest does
+            # not switch off the lights on the way out.
+            enter_console "$1" guest
             ;;
         *)
             list="$(agent_list "$@")"
