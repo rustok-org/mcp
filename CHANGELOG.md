@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Closing the console puts away what it took out, and says what it did.** `q`
+  used to leave two things behind: a wallet still running, and no word about what
+  had just happened. The screen is cleared, one line states the outcome, and a
+  wallet this console started is stopped again.
+
+  A wallet that was *already* running is left alone. Stopping it would kill the
+  process an agent is mid-turn with, and an approval parked there lives in that
+  process's memory — the person would destroy the very thing they opened the
+  console to confirm.
+
+  Closing the terminal window abruptly is still not the same as quitting: the
+  shim is killed before it can tidy up. `rustok stop` remains the way back.
+
 ## [0.9.3] — 2026-08-09
 
 ### Added

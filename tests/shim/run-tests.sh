@@ -45,6 +45,7 @@ fresh() {
     STUB_PULL_FAIL=0
     STUB_STOP_FAIL=""
     STUB_VOLUME_RM_FAIL=""
+    STUB_EXEC_EXIT=0
     TEST_PATH="$WORK/bin"
 }
 
@@ -82,6 +83,7 @@ run_shim() {
         STUB_SECRET_LS_FAIL="$STUB_SECRET_LS_FAIL" \
         STUB_PULL_FAIL="$STUB_PULL_FAIL" \
         STUB_STOP_FAIL="$STUB_STOP_FAIL" STUB_VOLUME_RM_FAIL="$STUB_VOLUME_RM_FAIL" \
+        STUB_EXEC_EXIT="$STUB_EXEC_EXIT" \
         sh "$SHIM" "$@" </dev/null 2>&1)" && RC=0 || RC=$?
 }
 
@@ -118,6 +120,19 @@ run_purge_pty() {
         STUB_PULL_FAIL="$STUB_PULL_FAIL" \
         STUB_STOP_FAIL="$STUB_STOP_FAIL" STUB_VOLUME_RM_FAIL="$STUB_VOLUME_RM_FAIL" \
         "$PY3" "$TESTS_DIR/pty-init.py" sh "$SHIM" uninstall --purge-keys 2>&1)" && RC=0 || RC=$?
+}
+
+run_console_pty() {
+    # run_console_pty — drives `console` on a REAL pty. The only way to
+    # observe the screen clear: `run_shim` captures through a pipe, so `[ -t 1 ]`
+    # is false there and the escape is correctly never emitted.
+    OUT="$(printf '\n' | \
+        HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config" \
+        PATH="$TEST_PATH" STUB_LOG="$WORK/log" STUB_STATE="$WORK/state" \
+        STUB_CONTAINERS="$STUB_CONTAINERS" STUB_LEGACY="$STUB_LEGACY" \
+        STUB_INFO_FAIL="$STUB_INFO_FAIL" STUB_PS_FAIL="$STUB_PS_FAIL" \
+        STUB_STOP_FAIL="$STUB_STOP_FAIL" STUB_EXEC_EXIT="$STUB_EXEC_EXIT" \
+        "$PY3" "$TESTS_DIR/pty-init.py" sh "$SHIM" console 2>&1)" && RC=0 || RC=$?
 }
 
 ok() {
@@ -212,6 +227,77 @@ run_shim console
 if assert_exit 0 && assert_has "EXEC:abc123def456:rustok-console"; then
     ok "console with one wallet execs rustok-console in it"
 else not_ok "console with one wallet execs rustok-console in it"; fi
+
+# --- console: what closing it says, and what it puts away ---------------------
+
+fresh
+printf '%s' pw >"$WORK/state/secret-rustok-keyring-claude"
+: >"$WORK/state/volume-rustok-wallet-tui"
+run_shim console
+if assert_exit 0 && assert_has "EXEC:" \
+    && assert_has "console closed — wallet stopped" \
+    && grep -q '^podman stop ' "$WORK/log"; then
+    ok "console that STARTED the wallet stops it on the way out, and says so"
+else not_ok "console that STARTED the wallet stops it on the way out, and says so"; fi
+
+fresh
+STUB_CONTAINERS="abc123def456;rustok=wallet;rustok.agent=claude;image=img"
+run_shim console
+if assert_exit 0 \
+    && assert_has "console closed — the wallet it attached to is still running" \
+    && assert_not_has "wallet stopped" \
+    && ! grep -q '^podman stop' "$WORK/log"; then
+    ok "console that ATTACHED to a running wallet leaves it alone (agent's parked approval survives)"
+else not_ok "console that ATTACHED to a running wallet leaves it alone (agent's parked approval survives)"; fi
+
+for exec_code in 1 2 3 6; do
+    fresh
+    STUB_CONTAINERS="abc123def456;rustok=wallet;rustok.agent=claude;image=img"
+    STUB_EXEC_EXIT="$exec_code"
+    run_shim console
+    STUB_EXEC_EXIT=0
+    if assert_exit "$exec_code"; then
+        ok "console exit code $exec_code reaches the caller verbatim (fatal/upgrade/no-tty/aborted)"
+    else not_ok "console exit code $exec_code reaches the caller verbatim (fatal/upgrade/no-tty/aborted)"; fi
+done
+
+fresh
+printf '%s' pw >"$WORK/state/secret-rustok-keyring-claude"
+: >"$WORK/state/volume-rustok-wallet-tui"
+STUB_EXEC_EXIT=6
+run_shim console
+STUB_EXEC_EXIT=0
+if assert_exit 6 && grep -q '^podman stop ' "$WORK/log"; then
+    ok "the wallet is still put away when the console exits non-zero, and the code survives it"
+else not_ok "the wallet is still put away when the console exits non-zero, and the code survives it"; fi
+
+fresh
+printf '%s' pw >"$WORK/state/secret-rustok-keyring-claude"
+: >"$WORK/state/volume-rustok-wallet-tui"
+STUB_STOP_FAIL="ANY"
+STUB_EXEC_EXIT=6
+run_shim console
+STUB_STOP_FAIL=""
+STUB_EXEC_EXIT=0
+if assert_exit 6 && assert_has "could NOT be stopped"; then
+    ok "a failed stop warns loudly but never overwrites the console's own exit code"
+else not_ok "a failed stop warns loudly but never overwrites the console's own exit code"; fi
+
+fresh
+# The clear is only observable on a real terminal: through a pipe `[ -t 1 ]` is
+# false and the shim must NOT spray escapes into a caller's captured output.
+STUB_CONTAINERS="abc123def456;rustok=wallet;rustok.agent=claude;image=img"
+run_shim console
+if assert_not_has "[2J"; then
+    ok "no screen-clear escape when stdout is not a terminal"
+else not_ok "no screen-clear escape when stdout is not a terminal"; fi
+
+fresh
+STUB_CONTAINERS="abc123def456;rustok=wallet;rustok.agent=claude;image=img"
+run_console_pty
+if assert_has "[2J" && assert_has "console closed"; then
+    ok "on a real terminal the screen is cleared and one line says what closed"
+else not_ok "on a real terminal the screen is cleared and one line says what closed"; fi
 
 fresh
 # A container with the agent sub-label but WITHOUT rustok=wallet must be

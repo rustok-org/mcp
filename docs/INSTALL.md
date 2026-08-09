@@ -181,11 +181,23 @@ rustok: multiple wallets running: claude, hermes — use --agent <name>
 ## Day to day
 
 ```bash
+rustok              # open the approval console (starts the wallet if none is up)
 rustok status       # which wallets are running, under which image
 rustok doctor       # engine, PATH, jq/PyYAML, running wallets, leftovers
 rustok start        # start this agent's wallet in the background
 rustok stop         # stop it
 ```
+
+**Closing the console puts away what it took out.** If `rustok` started the
+wallet for you, quitting the console (`q`) stops it again and says so. If it
+attached to a wallet that was already running — an agent's, or one you started
+with `rustok start` — it leaves that one alone: stopping it would kill the
+process an agent is talking to, and an approval waiting there lives in that
+process's memory.
+
+Closing the terminal window abruptly is not the same as quitting: the shim is
+killed before it can tidy up, and a wallet it started keeps running. `rustok
+stop` is the way back from that.
 
 `rustok doctor` is the first thing to run when something looks wrong — it checks
 the engine is actually responding, that `~/.local/bin` is on your `PATH`, and
