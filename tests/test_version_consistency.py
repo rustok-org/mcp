@@ -1,9 +1,10 @@
 """Keep every place that names the wallet version telling the same story.
 
-The version is not written once — it is written in five places that must agree:
+The version is not written once — it is written in six places that must agree:
 the package manifest, the skill frontmatter, the ClawHub manifest, the version
-the installer reports, and the image tag the shim launches. They drift silently,
-and a drift is not cosmetic here:
+the installer reports, the image tag the shim launches, and — since 0.9.3 — the
+number the image states about itself for the console's identity panel. They
+drift silently, and a drift is not cosmetic here:
 
 * `wallet-publish.yml` refuses to publish unless its `version` input equals
   `pyproject.toml` — a stale manifest blocks the release outright;
@@ -31,6 +32,7 @@ SKILL_MD = REPO_ROOT / "skills" / "rustok-wallet-tui" / "SKILL.md"
 CLAW_JSON = REPO_ROOT / "skills" / "rustok-wallet-tui" / "claw.json"
 INSTALL_SH = REPO_ROOT / "scripts" / "install.sh"
 SHIM = REPO_ROOT / "cli" / "rustok"
+DOCKERFILE = REPO_ROOT / "Dockerfile.wallet"
 
 
 def _first_match(path: Path, pattern: str) -> str:
@@ -46,7 +48,8 @@ def manifest_version() -> str:
 
 
 def test_every_version_point_matches_the_manifest() -> None:
-    """One version, five homes — a mismatch blocks the release or strands users."""
+    """One version, six homes — a mismatch blocks the release, strands users, or
+    makes the panel that answers "what am I running" answer wrong."""
     expected = manifest_version()
     found = {
         "skills/rustok-wallet-tui/SKILL.md (frontmatter)": _first_match(
@@ -59,6 +62,14 @@ def test_every_version_point_matches_the_manifest() -> None:
         "cli/rustok (DEFAULT_IMAGE tag)": _first_match(
             SHIM, r'^DEFAULT_IMAGE="ghcr\.io/rustok-org/rustok-wallet-tui:v(.+)"$'
         ),
+        # Sixth home, added in 0.9.3: the number the built image states about
+        # itself, which the console reads and shows to a human. A drift here is
+        # the quietest of the six — nothing refuses to build, nothing strands a
+        # user, the panel simply says the wrong thing to the one person who
+        # opened it to find out what they are running.
+        "Dockerfile.wallet (ARG WALLET_VERSION)": _first_match(
+            DOCKERFILE, r"^ARG WALLET_VERSION=(.+)$"
+        ),
     }
     drifted = [
         f"{where}: {value!r} != {expected!r}" for where, value in found.items() if value != expected
@@ -67,6 +78,50 @@ def test_every_version_point_matches_the_manifest() -> None:
         f"version drift against pyproject.toml ({expected!r}) — the publish workflow's "
         "own gate rejects a mismatched manifest, and a stale image tag strands users "
         "on an old wallet:\n  " + "\n  ".join(drifted)
+    )
+
+
+def test_the_core_version_the_panel_states_is_the_core_the_image_is_built_from() -> None:
+    """`CORE_VERSION` is a derived value, and this proves it is still derived.
+
+    The identity panel names the core the wallet is running. That number has to
+    come from the pin the image is actually built from — `CORE_IMAGE` — and not
+    from a second constant that merely happens to agree today. Bump the pin,
+    forget the constant, and the panel keeps stating the previous core with
+    total confidence.
+
+    The Dockerfile enforces this at build time too, in a shell where suffix
+    stripping works. This test is the same invariant one step earlier: a red
+    `pytest` instead of a red image build, and it does not need a builder.
+
+    Why not derive it in the Dockerfile and skip the constant entirely: measured,
+    not assumed — `ENV X=${CORE_IMAGE##*:}` under buildah yields the whole
+    reference, so the panel would have stated `ghcr.io/rustok-org/…` as a
+    version. An expansion that silently lies is worse than a check that refuses.
+    """
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    core_image = _first_match(DOCKERFILE, r"^ARG CORE_IMAGE=(.+)$")
+    core_version = _first_match(DOCKERFILE, r"^ARG CORE_VERSION=(.+)$")
+
+    assert "@" not in core_image, (
+        f"CORE_IMAGE {core_image!r} is pinned by digest and carries no tag, so "
+        "CORE_VERSION cannot be checked against it — the build refuses this too"
+    )
+    tag = core_image.rsplit(":", 1)[-1]
+    assert core_version == tag, (
+        f"ARG CORE_VERSION is {core_version!r} but the image is built from "
+        f"{core_image!r} (tag {tag!r}) — the panel would state a core this "
+        "wallet does not contain"
+    )
+
+    # Guard the guard: the build-time check is what protects a build that passes
+    # --build-arg CORE_VERSION by hand, which this file cannot see. If someone
+    # deletes it, this test alone would still pass while the real protection is
+    # gone — so assert the check exists.
+    assert '[ "${CORE_IMAGE##*:}" = "${CORE_VERSION}" ]' in text, (
+        "the build-time equality check is gone from Dockerfile.wallet — a build "
+        "given a hand-written --build-arg CORE_VERSION would ship a panel "
+        "stating a core it was not built from, and nothing here would notice"
     )
 
 

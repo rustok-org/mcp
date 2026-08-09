@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] — 2026-08-09
+
+### Added
+- **The console answers "what am I actually running".** The identity panel used
+  to show one number — the console's own — which does not move between wallet
+  releases. Someone who installed 0.9.2 opened it, read `console v0.3.0`, and
+  reasonably concluded the update had not happened.
+
+  It now names every layer:
+
+  ```
+  RUSTOK WALLET
+  wallet   v0.9.3
+  console  v0.3.1
+  core     v0.4.1
+  ```
+
+  This is diagnosis, not decoration. In one day of release work there were three
+  separate moments when nobody could answer that question from the screen: an
+  agent silently running a wallet four versions old, a send believed to be on the
+  published image that was not, and the panel misread as a failed update. All
+  three were visible in a container inspection and in none of the places a person
+  actually looks.
+
+  Outside the wallet image — the console run on its own — the panel prints
+  exactly what it printed before: one line, for the binary that knows itself. A
+  layer that says nothing gets no row, never the word `unknown`. Absence is not
+  a value.
+
+### Changed
+- Console pinned to `v0.3.1`.
+- The image now states its own version and the core's, and refuses to be built
+  if the core version it would state disagrees with the core image it is built
+  from. The wallet's number comes from the same input the publish workflow
+  already checks against `pyproject.toml`, so the panel and the manifest cannot
+  part company.
+
 ## [0.9.2] — 2026-08-08
 
 ### Fixed
