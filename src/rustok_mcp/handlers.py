@@ -273,13 +273,26 @@ def _make_get_balances_handler(client: GatewayClient | None) -> Any:
             # (spec: "ветка остаётся нативной").
             with contextlib.suppress(TypeError, ValueError):
                 row["balance_eth"] = _wei_to_eth(balance)
-            return {"balances": [row]}
+            # Empty and accurate: this call either came back with the balance or
+            # raised. Present rather than omitted, so a reader never has to ask
+            # whether the key's absence means "nothing unread" or "not answered".
+            return {"balances": [row], "unavailable": []}
         # Active wallet — balances come with the wallet context.
         context = await client.wallet_context()
         balances = context.get("balances", [])
+        # What could NOT be read travels with what could. Dropping it here is
+        # how "not queried" turns back into "zero": an agent that calls this
+        # tool instead of get_wallet_context — the ordinary choice — would see
+        # an empty list on an unreachable RPC and tell the human there is no
+        # money. That is the confusion the whole registry slice exists to end,
+        # and it does not stop existing because a different tool reports it.
+        unavailable = context.get("unavailable", [])
         if chain_id is not None:
             balances = [b for b in balances if b.get("chain_id") == chain_id]
-        return {"balances": _with_balance_eth(balances)}
+            # Filtered the same way, or the answer would carry warnings about
+            # chains the caller did not ask about.
+            unavailable = [u for u in unavailable if u.get("chain_id") == chain_id]
+        return {"balances": _with_balance_eth(balances), "unavailable": unavailable}
 
     return handler
 
@@ -403,13 +416,24 @@ def create_protocol_and_registry(
             name="get_balances",
             description=(
                 "Get the balances of the active wallet, or the native balance of "
-                "an explicit address. One row is one asset: `balance` is in that "
-                "asset's own raw units and `balance_formatted` is the same amount "
-                "with `decimals` applied — show that one. `balance_eth` appears "
-                "only on a native-coin row, where it equals `balance_formatted`; "
-                "a token never has it, because the amount is not in ETH. "
-                "`token_address` is empty for the native coin and is what tells "
-                "two tokens with the same symbol apart."
+                "an explicit address.\n"
+                "Active wallet (no `address`): one row per asset — `balance` is in "
+                "that asset's own raw units and `balance_formatted` is the same "
+                "amount with `decimals` applied, so show that one. `balance_eth` "
+                "appears only on a native-coin row, where it equals "
+                "`balance_formatted`; a token never has it, because the amount is "
+                "not in ETH. `token_address` is empty for the native coin and is "
+                "what tells two tokens with the same symbol apart.\n"
+                "`unavailable` comes back beside `balances` and lists what could "
+                "NOT be read, with a reason. An asset missing from `balances` "
+                "while `unavailable` is empty holds zero; if it is named in "
+                "`unavailable`, the balance is unknown, not zero — do not report "
+                "it as empty.\n"
+                "With an explicit `address` the answer is different and smaller: "
+                "one native row carrying `balance` (wei) and `balance_eth`, with "
+                "no `balance_formatted`, `decimals` or `token_address`. The token "
+                "registry describes this wallet's own holdings, so tokens are "
+                "never reported for somebody else's address."
             ),
             inputSchema={
                 "type": "object",
