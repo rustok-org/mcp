@@ -7,7 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The wallet can see the tokens it is allowed to hold.** Until now it could
+  send USDC but never show it: balances were the chain's native coin and nothing
+  else, so a wallet holding 22.82 USDC reported an empty Arbitrum balance and an
+  agent reading it concluded there was nothing there.
+
+  Register what you hold — `RUSTOK_TOKENS_42161=USDC:0xaf88…5831:6` — and the
+  token appears everywhere a balance does: in `get_balances`, in
+  `get_wallet_context`, and on the console's balance panel. The registry is
+  explicit on purpose: the wallet shows what you told it about, it does not go
+  hunting for tokens on your behalf.
+
+  A row now carries the asset's own `decimals`, the rendered
+  `balance_formatted`, and the `token_address` that tells native USDC from
+  bridged USDC.e — a symbol alone cannot, and both live on Arbitrum.
+
+  **An asset that could not be read is now said out loud.** A chain with no RPC
+  used to contribute no row, which read as "you have nothing"; `unavailable` now
+  names the asset and why — no RPC configured, the call failed, or the call
+  reverted, which means the address in your registry is not the ERC-20 it was
+  said to be.
+
 ### Changed
+- **`balance_eth` stopped being arithmetic.** It is now an alias of
+  `balance_formatted` on the native row, and it is **absent from a token row**:
+  USDC has six decimals, not eighteen, and a field with `eth` in its name would
+  state a unit the number is not in. Existing readers of the native row see the
+  same name and the same value as before. Use `balance_formatted` for any asset.
+
+  One place still converts wei, and only one: `get_balances{address, chain_id}`
+  for an explicit address, where the core answers with raw wei and renders
+  nothing. That path is native by construction — the registry describes your
+  wallet, not somebody else's address.
+
 - **Closing the console puts away what it took out, and says what it did.** `q`
   used to leave two things behind: a wallet still running, and no word about what
   had just happened. The screen is cleared, one line states the outcome, and a

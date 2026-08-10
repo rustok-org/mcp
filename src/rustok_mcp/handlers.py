@@ -83,22 +83,54 @@ _WEI_PER_ETH = 10**18
 
 
 def _wei_to_eth(wei: Any) -> str:
-    """Render a wei integer string as a plain decimal-ETH string."""
+    """Render a wei integer string as a plain decimal-ETH string.
+
+    The **only** arithmetic left in this module, and it survives for exactly one
+    caller: ``GET /wallet/balance``, the explicit-address branch, answers
+    ``{"balance": <wei>}`` and renders nothing. That path is native by
+    construction — the token registry describes the wallet's own holdings, not
+    an arbitrary address — so eighteen decimals is the right and only reading
+    there.
+
+    Everywhere else the core renders the amount itself and sends
+    ``balance_formatted``; re-deriving it here would be a second opinion about a
+    number that already has one.
+    """
     integral, frac = divmod(int(wei), _WEI_PER_ETH)
     frac_str = f"{frac:018d}".rstrip("0")
     return f"{integral}.{frac_str}" if frac_str else str(integral)
 
 
+def _is_native(entry: dict[str, Any]) -> bool:
+    """Whether a balance row is the chain's own coin rather than a token.
+
+    An empty (or absent) ``token_address`` is what marks a native row on the
+    wire — the same convention the console reads.
+    """
+    return not entry.get("token_address")
+
+
 def _with_balance_eth(balances: Any) -> Any:
-    """Add an explicit ``balance_eth`` next to each wei ``balance`` entry."""
+    """Alias ``balance_eth`` onto the native row — never compute it.
+
+    Every row arrives already rendered (``balance_formatted``), so nothing here
+    divides by anything. The alias stays for one reason: an existing consumer
+    reads ``balance_eth`` on the native row, and neither its name nor its value
+    changes.
+
+    A token row deliberately gets **no** ``balance_eth``. USDC has six decimals,
+    not eighteen, and a field with ``eth`` in its name would be a claim about
+    the unit rather than a convenience — the kind of lie that reads as a number
+    and costs a decision. ``balance_formatted`` is the field to show for any
+    asset.
+    """
     if not isinstance(balances, list):
         return balances
     enriched: list[Any] = []
     for entry in balances:
-        if isinstance(entry, dict) and "balance" in entry:
+        if isinstance(entry, dict) and _is_native(entry) and "balance_formatted" in entry:
             entry = dict(entry)
-            with contextlib.suppress(TypeError, ValueError):
-                entry["balance_eth"] = _wei_to_eth(entry["balance"])
+            entry["balance_eth"] = entry["balance_formatted"]
         enriched.append(entry)
     return enriched
 
@@ -232,11 +264,16 @@ def _make_get_balances_handler(client: GatewayClient | None) -> Any:
             if chain_id is None:
                 raise ValueError("Missing required argument: chain_id (required with address)")
             result = await client.get_balance(address, chain_id)
-            return {
-                "balances": _with_balance_eth(
-                    [{"chain_id": chain_id, "balance": result.get("balance")}]
-                ),
-            }
+            balance = result.get("balance")
+            row: dict[str, Any] = {"chain_id": chain_id, "balance": balance}
+            # The one place the core sends raw wei and renders nothing, so the
+            # one place this module still converts. Native by construction: the
+            # token registry describes the wallet's own holdings, and pointing
+            # it at someone else's address would be a different claim
+            # (spec: "ветка остаётся нативной").
+            with contextlib.suppress(TypeError, ValueError):
+                row["balance_eth"] = _wei_to_eth(balance)
+            return {"balances": [row]}
         # Active wallet — balances come with the wallet context.
         context = await client.wallet_context()
         balances = context.get("balances", [])
@@ -347,7 +384,16 @@ def create_protocol_and_registry(
     registry.register(
         Tool(
             name="get_wallet_context",
-            description="Get the active wallet address and chain balances.",
+            description=(
+                "Get the active wallet: its address, the assets it holds, and the "
+                "assets it could not read. A balance row carries `symbol`, "
+                "`balance` (the asset's own raw units), `decimals`, "
+                "`balance_formatted` (the amount to show) and `token_address` "
+                "(empty for the chain's native coin). `unavailable` lists what "
+                "could not be read and why — so a row missing from `balances` "
+                "while `unavailable` is empty means the balance is zero, not "
+                "unknown."
+            ),
             inputSchema={"type": "object", "properties": {}},
         ),
         _make_get_wallet_context_handler(gateway_client),
@@ -356,8 +402,14 @@ def create_protocol_and_registry(
         Tool(
             name="get_balances",
             description=(
-                "Get token balances for the active wallet, or for an explicit "
-                "address. `balance` is in wei; `balance_eth` is the same value in ETH."
+                "Get the balances of the active wallet, or the native balance of "
+                "an explicit address. One row is one asset: `balance` is in that "
+                "asset's own raw units and `balance_formatted` is the same amount "
+                "with `decimals` applied — show that one. `balance_eth` appears "
+                "only on a native-coin row, where it equals `balance_formatted`; "
+                "a token never has it, because the amount is not in ETH. "
+                "`token_address` is empty for the native coin and is what tells "
+                "two tokens with the same symbol apart."
             ),
             inputSchema={
                 "type": "object",
