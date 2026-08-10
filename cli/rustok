@@ -260,6 +260,12 @@ old_env_names_from_args_json() {
     # "nothing to lose" while the other means "I could not check".
     _oe_in="$(cat)"
     printf '%s' "$_oe_in" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+    # A legacy `--env-file` entry is a well-formed array that carries no `-e`
+    # at all — its config lives in a file this command does not read. Reading
+    # "no names" as "nothing to lose" would be silence in exactly the migration
+    # the shim names by hand one screen above, and the env file is where a
+    # RUSTOK_ALLOWED_CHAINS is most likely to be sitting.
+    printf '%s' "$_oe_in" | jq -e 'index("--env-file")' >/dev/null 2>&1 && return 1
     printf '%s' "$_oe_in" | jq -r '
         . as $a
         | [ range(0; length) | select($a[.] == "-e") | $a[. + 1] ]
@@ -763,7 +769,13 @@ PYEOF
                     # already speaks. The YAML is read a second time on purpose:
                     # leaving the probe above untouched is worth more than one
                     # saved parse of a file that is already in the page cache.
-                    old_env_names="$(python3 - "$cfg" <<'PYEOF' 2>/dev/null)" || old_env_read=failed
+                    # The closing `)"` goes on its OWN line: with it beside
+                    # `<<'PYEOF'`, bash mis-parses the here-document while
+                    # reading the FILE, and every run of every command — even
+                    # `version` — opens with an "unterminated here-document"
+                    # warning. A parse-time defect, not a runtime one.
+                    old_env_names="$(
+                        python3 - "$cfg" <<'PYEOF' 2>/dev/null
 import re
 import sys
 
@@ -786,6 +798,7 @@ names = {
 for name in sorted(n for n in names if NAME.match(n) and not EXCLUDED.match(n)):
     print(name)
 PYEOF
+                    )" || old_env_read=failed
                     ;;
                 1) registered=1 ;;
                 *) die "unreadable YAML in $cfg — fix the Hermes config by hand; connect refuses to write over it" ;;

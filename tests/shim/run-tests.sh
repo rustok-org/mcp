@@ -1780,7 +1780,9 @@ fresh
 plant_claude_stub
 plant_jq
 seed_wallet
-printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","-e","RUSTOK_ALLOWED_CHAINS=1","-e","RUSTOK_TOKENS_1=USDC:0xA0b8:6","img"]}}}' >"$WORK/home/.claude.json"
+# Reverse order on purpose: with the alphabetical pair the assertion held even
+# without the sort, which is the "lucky-green" trap this file names elsewhere.
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","-e","RUSTOK_TOKENS_1=USDC:0xA0b8:6","-e","RUSTOK_ALLOWED_CHAINS=1","img"]}}}' >"$WORK/home/.claude.json"
 run_shim connect claude --force
 if assert_exit 0 && assert_has "RUSTOK_ALLOWED_CHAINS, RUSTOK_TOKENS_1"; then
     ok "two dropped names are listed together, sorted"
@@ -1794,7 +1796,7 @@ plant_jq
 seed_wallet
 printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","-e","RUSTOK_ALLOWED_CHAINS=1","img"]}}}' >"$WORK/home/.claude.json"
 RUSTOK_ALLOWED_CHAINS=1 run_shim connect claude --force
-if assert_exit 0 && ! grep -q "dropping config" "$WORK/log"; then
+if assert_exit 0 && assert_lacks "dropping config"; then
     ok "nothing is dropped, so nothing is said"
 else not_ok "nothing is dropped, so nothing is said"; fi
 
@@ -1806,7 +1808,13 @@ plant_jq
 seed_wallet
 printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","-e","RUSTOK_TOKENS_1=USDC:0xDEADBEEF:6","img"]}}}' >"$WORK/home/.claude.json"
 run_shim connect claude --force
-if assert_exit 0 && assert_has "RUSTOK_TOKENS_1" && ! grep -q "0xDEADBEEF" "$WORK/log"; then
+# The value IS in the output — the pre-existing "replacing the previous entry"
+# dump prints the whole old entry. So the claim is about the warning LINE, and
+# the line is what gets inspected; checking the whole output would pass on a
+# shim with no diff at all.
+warn_line="$(printf '%s\n' "$OUT" | grep 'dropping config' || true)"
+if assert_exit 0 && assert_has "RUSTOK_TOKENS_1" \
+    && [ -n "$warn_line" ] && ! printf '%s' "$warn_line" | grep -q "0xDEADBEEF"; then
     ok "the dropped name is printed, its value is not"
 else not_ok "the dropped name is printed, its value is not"; fi
 
@@ -1819,8 +1827,7 @@ plant_jq
 seed_wallet
 printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","-e","RUSTOK_IMAGE=ghcr.io/x:v1","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/x","img"]}}}' >"$WORK/home/.claude.json"
 run_shim connect claude --force
-if assert_exit 0 && ! grep -q "RUSTOK_IMAGE" "$WORK/log" \
-    && ! grep -q "dropping config" "$WORK/log"; then
+if assert_exit 0 && assert_lacks "dropping config"; then
     ok "the excluded names are not reported as dropped"
 else not_ok "the excluded names are not reported as dropped"; fi
 
@@ -1882,6 +1889,21 @@ if assert_exit 0 && assert_has "dropping config the old registration had" \
     && assert_has "RUSTOK_ALLOWED_CHAINS"; then
     ok "hermes gets the same named diff as the jq clients"
 else not_ok "hermes gets the same named diff as the jq clients"; fi
+
+
+# The legacy --env-file entry: a well-formed array carrying no `-e` at all,
+# because its config lives in a file this command does not read. Reading that
+# as "nothing to lose" was silence in exactly the migration the shim names by
+# hand — and the env file is where a RUSTOK_ALLOWED_CHAINS is most likely to be.
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","--env-file","/x/wallet.env","img"]}}}' >"$WORK/home/.claude.json"
+run_shim connect claude --force
+if assert_exit 0 && assert_has "cannot read the previous entry to compare"; then
+    ok "a legacy --env-file entry is admitted as incomparable, not passed as empty"
+else not_ok "a legacy --env-file entry is admitted as incomparable, not passed as empty"; fi
 
 
 echo "# $PASS passed, $FAIL failed, $N total"
