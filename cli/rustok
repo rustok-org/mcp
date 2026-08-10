@@ -245,6 +245,67 @@ rustok_env_names() {
         | grep -v -E '^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE)$' | LC_ALL=C sort || true
 }
 
+old_env_names_from_args_json() {
+    # Names of the RUSTOK_* config an EXISTING registration carries as literal
+    # `-e NAME=value`, read from that entry's argv array on stdin.
+    #
+    # Same two exclusions as `rustok_env_names`, for the same reasons: the
+    # keyring password never rides a literal, and RUSTOK_IMAGE is the shim's own
+    # knob — warning that either is "lost" would name something this command was
+    # never tracking.
+    #
+    # Returns 1 when the entry exists but its argv is not the shape this parser
+    # knows (legacy or hand-edited). The caller must say so: an empty list and
+    # an unreadable one look identical downstream, and one of them means
+    # "nothing to lose" while the other means "I could not check".
+    _oe_in="$(cat)"
+    printf '%s' "$_oe_in" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+    printf '%s' "$_oe_in" | jq -r '
+        . as $a
+        | [ range(0; length) | select($a[.] == "-e") | $a[. + 1] ]
+        | map(select(type == "string") | split("=")[0])
+        | .[]
+    ' 2>/dev/null \
+        | grep -E '^RUSTOK_[A-Z0-9_]*$' \
+        | grep -v -E '^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE)$' \
+        | LC_ALL=C sort -u
+    return 0
+}
+
+warn_dropped_config() {
+    # `--force` rebuilds the registration from the CURRENT environment, so what
+    # the old entry carried and this shell does not export disappears — silently,
+    # until someone notices a chain is missing along with the money on it. Say it
+    # here, before the write, in the same voice and on the same channel as the
+    # RPC tier note above: stdout carries argv.
+    [ "$registered" -eq 0 ] || return 0
+    if [ "$old_env_read" = "failed" ]; then
+        echo "rustok: warn: cannot read the previous entry to compare — check by hand what config it carried" 1>&2
+        return 0
+    fi
+    [ -n "$old_env_names" ] || return 0
+    _new_names="$(rustok_env_names)"
+    _dropped=""
+    for _old_name in $old_env_names; do
+        printf '%s\n' "$_new_names" | grep -qx "$_old_name" && continue
+        # On podman an RPC URL survives through its per-agent secret even when
+        # the shell does not export it — that is the whole point of the store,
+        # and calling it "dropped" would be a false alarm. On docker there is no
+        # store, so it is as droppable as anything else and falls through.
+        case "$_old_name" in
+            RUSTOK_RPC_URLS_*)
+                if [ "$engine" = "podman" ] && printf '%s\n' "$reg_rpc_secrets" \
+                    | grep -qx "rustok-rpc-$agent-${_old_name#RUSTOK_RPC_URLS_}"; then
+                    continue
+                fi
+                ;;
+        esac
+        _dropped="${_dropped:+$_dropped, }$_old_name"
+    done
+    [ -n "$_dropped" ] || return 0
+    echo "rustok: warn: dropping config the old registration had: $_dropped — export them before --force to keep them, or the new registration will not have them" 1>&2
+}
+
 rpc_env_names() {
     # The RPC subset of the environment — each one is a second-class secret
     # (provider key in the URL) and gets its own per-agent podman secret.
@@ -631,6 +692,10 @@ cmd_connect() {
     # to write over. hermes: same contract via python (an ABSENT config is a
     # missing Hermes install, not a fresh state — its config ships with it).
     registered=1
+    # Filled by the probe below on the --force path; read by warn_dropped_config
+    # once the new set of names exists.
+    old_env_names=""
+    old_env_read=ok
     case "$client" in
         claude | cursor)
             registered=0
@@ -638,6 +703,11 @@ cmd_connect() {
             case "$registered" in
                 0)
                     [ "$FORCE" -eq 1 ] || die "MCP server 'rustok' is already registered — rerun with --force to replace the registration (RPC secrets refresh either way)"
+                    # Snapshot the old config names HERE, where the entry is
+                    # already open; the comparison itself happens after the new
+                    # set is built, which is further down.
+                    old_env_names="$(jq -c '.mcpServers.rustok.args' "$cfg" 2>/dev/null | old_env_names_from_args_json)" \
+                        || old_env_read=failed
                     if [ "$client" = "claude" ] && jq -e '.mcpServers.rustok.args | index("--env-file")' "$cfg" >/dev/null 2>&1; then
                         echo "rustok: replacing an --env-file registration — the plaintext env file itself is NOT deleted; remove it after the new setup is verified" 1>&2
                     fi
@@ -660,6 +730,11 @@ cmd_connect() {
             case "$registered" in
                 0)
                     [ "$FORCE" -eq 1 ] || die "MCP server 'rustok' is already registered — rerun with --force to replace the registration (RPC secrets refresh either way)"
+                    # `openclaw mcp show --json` answers with the same
+                    # {command, args} shape claude and cursor store, so the
+                    # same reader works here.
+                    old_env_names="$(openclaw mcp show rustok --json 2>/dev/null | jq -c '.args' 2>/dev/null | old_env_names_from_args_json)" \
+                        || old_env_read=failed
                     ;;
                 *) registered=1 ;;
             esac
@@ -684,6 +759,33 @@ PYEOF
                 0)
                     registered=0
                     [ "$FORCE" -eq 1 ] || die "MCP server 'rustok' is already registered — rerun with --force to replace the registration (RPC secrets refresh either way)"
+                    # Same snapshot as the jq clients, in the language this one
+                    # already speaks. The YAML is read a second time on purpose:
+                    # leaving the probe above untouched is worth more than one
+                    # saved parse of a file that is already in the page cache.
+                    old_env_names="$(python3 - "$cfg" <<'PYEOF' 2>/dev/null)" || old_env_read=failed
+import re
+import sys
+
+import yaml
+
+EXCLUDED = re.compile(r"^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE)$")
+NAME = re.compile(r"^RUSTOK_[A-Z0-9_]*$")
+
+cfg = yaml.safe_load(open(sys.argv[1]))
+args = cfg.get("mcp_servers", {}).get("rustok", {}).get("args")
+if not isinstance(args, list):
+    # Readable file, unreadable entry: the caller says so rather than reading
+    # an empty list as "nothing to lose".
+    sys.exit(1)
+names = {
+    a.split("=", 1)[0]
+    for prev, a in zip(args, args[1:])
+    if prev == "-e" and isinstance(a, str)
+}
+for name in sorted(n for n in names if NAME.match(n) and not EXCLUDED.match(n)):
+    print(name)
+PYEOF
                     ;;
                 1) registered=1 ;;
                 *) die "unreadable YAML in $cfg — fix the Hermes config by hand; connect refuses to write over it" ;;
@@ -744,6 +846,8 @@ PYEOF
     if [ "$tier_note" -eq 1 ]; then
         echo "rustok: note: docker fallback — RPC URLs ride as plain -e in the agent config (second tier; podman delivers them as secrets)" 1>&2
     fi
+
+    warn_dropped_config
 
     case "$client" in
         claude) connect_write_claude "$@" ;;
