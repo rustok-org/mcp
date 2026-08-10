@@ -1906,5 +1906,32 @@ if assert_exit 0 && assert_has "cannot read the previous entry to compare"; then
 else not_ok "a legacy --env-file entry is admitted as incomparable, not passed as empty"; fi
 
 
+# The same legacy entry, for the client whose reader is python instead of jq.
+# Closing this in the shared jq function left hermes behind — one fix, one
+# client not covered by it, and the identical silence.
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+seed_hermes
+mkdir -p "$WORK/home/.hermes/scripts"
+: >"$WORK/home/.hermes/scripts/rustok-mcp-server.py"
+"$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF'
+import sys, yaml
+p = sys.argv[1]
+c = yaml.safe_load(open(p))
+c["mcp_servers"]["rustok"] = {
+    "command": "podman",
+    "args": ["run", "--env-file", "/x/wallet.env", "img"],
+    "enabled": True,
+}
+yaml.safe_dump(c, open(p, "w"))
+PEOF
+run_shim connect hermes --force
+if assert_exit 0 && assert_has "cannot read the previous entry to compare"; then
+    ok "hermes admits a legacy --env-file entry too, in its own language"
+else not_ok "hermes admits a legacy --env-file entry too, in its own language"; fi
+
+
 echo "# $PASS passed, $FAIL failed, $N total"
 [ "$FAIL" -eq 0 ]

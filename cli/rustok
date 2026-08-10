@@ -790,6 +790,14 @@ if not isinstance(args, list):
     # Readable file, unreadable entry: the caller says so rather than reading
     # an empty list as "nothing to lose".
     sys.exit(1)
+if "--env-file" in args:
+    # Same judgement the jq reader makes for the other three clients: a legacy
+    # env-file entry carries no `-e` at all because its config sits in a file
+    # this command does not read. Zero names here means "could not compare",
+    # never "nothing to lose". The two readers speak different languages and
+    # must not come to different answers — that split is what let this case
+    # through for hermes after it was closed for the rest.
+    sys.exit(1)
 names = {
     a.split("=", 1)[0]
     for prev, a in zip(args, args[1:])
