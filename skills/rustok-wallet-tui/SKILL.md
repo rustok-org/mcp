@@ -254,8 +254,8 @@ address and every balance. A client may narrow its own session further in
 
 | Tool | Capability | What it does |
 |------|-----------|--------------|
-| `get_wallet_context` | read_wallet | Active wallet address, per-chain balances, allowed chains |
-| `get_balances` | read_wallet | Token balances for the active wallet, or `{address, chain_id}` |
+| `get_wallet_context` | read_wallet | Active wallet address, the assets it holds (native coin + registered tokens), the assets it could not read, allowed chains |
+| `get_balances` | read_wallet | Balances of the active wallet — one row per asset, with `balance_formatted` to show and `token_address` to tell two same-named tokens apart — or the native balance of `{address, chain_id}` |
 | `get_positions` | read_wallet | DeFi positions — Aave v3 (collateral/debt/health factor/LTV) + ERC-4626 vaults; optional `{address}` |
 | `preview_transaction` | preview_tx | Preview any transaction `{to, value, chain_id, data?}` → decoded call (who/what is authorized), pre-sign simulation (revert check), gas, risk level |
 | `execute_transaction` | execute_tx | Submit a previewed transaction `{preview_id}` — parked for human approval on a supervised wallet, released by the core on one whose owner confirmed autonomous mode; a `pending` result carries `next_step` for the human |
