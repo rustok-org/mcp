@@ -162,7 +162,7 @@ If it is older than `v0.8.0`, **re-run the installer** — do not stop at
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.3/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.4/scripts/install.sh | sh
 ```
 
 The image version is chosen by the **shim**, and the shim does not update itself.

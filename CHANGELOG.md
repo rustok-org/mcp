@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-08-11
+
 ### Added
 - **The wallet can see the tokens it is allowed to hold.** Until now it could
   send USDC but never show it: balances were the chain's native coin and nothing

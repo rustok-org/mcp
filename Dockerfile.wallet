@@ -6,11 +6,11 @@
 #
 # Build (local, against locally-built core/console images):
 #   docker build -f Dockerfile.wallet \
-#     --build-arg CORE_IMAGE=rustok-core:v0.4.1 \
-#     --build-arg CORE_VERSION=v0.4.1 \
-#     --build-arg CONSOLE_IMAGE=rustok-console:v0.3.1 \
-#     --build-arg WALLET_VERSION=0.9.3 \
-#     -t rustok-wallet-tui:0.9.3 .
+#     --build-arg CORE_IMAGE=rustok-core:v0.4.2 \
+#     --build-arg CORE_VERSION=v0.4.2 \
+#     --build-arg CONSOLE_IMAGE=rustok-console:v0.3.2 \
+#     --build-arg WALLET_VERSION=0.9.4 \
+#     -t rustok-wallet-tui:0.9.4 .
 # The password rides a file, not the environment — see docs/INSTALL.md. Onboard:
 #   podman run -it --rm -v rustok-wallet-tui:/data \
 #     --secret rustok-keyring,type=mount,target=/run/keyring-pass,mode=0400,uid=1000,gid=1000 \
@@ -18,8 +18,8 @@
 #     rustok-wallet-tui:0.8.3 create-wallet
 # Run (MCP stdio): the same run without `create-wallet`, plus `-e RUSTOK_RPC_URLS_1=…`.
 
-ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.4.1
-ARG CONSOLE_IMAGE=ghcr.io/rustok-org/rustok-console:v0.3.1
+ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.4.2
+ARG CONSOLE_IMAGE=ghcr.io/rustok-org/rustok-console:v0.3.2
 
 # What the finished image will say about itself when the console asks. The
 # console is started with `podman exec`, which takes its environment from the
@@ -32,8 +32,8 @@ ARG CONSOLE_IMAGE=ghcr.io/rustok-org/rustok-console:v0.3.1
 # measured, not assumed — buildah passes the reference through untouched, so the
 # panel would have shown the whole `ghcr.io/…` string as a version number. A
 # check that refuses is worth more than an expansion that silently lies.
-ARG WALLET_VERSION=0.9.3
-ARG CORE_VERSION=v0.4.1
+ARG WALLET_VERSION=0.9.4
+ARG CORE_VERSION=v0.4.2
 
 # --- Core/Gateway binaries (private source; public binary image) ---
 FROM ${CORE_IMAGE} AS core
