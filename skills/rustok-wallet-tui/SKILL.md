@@ -88,8 +88,7 @@ sh install.sh
 ```
 
 It pulls the wallet image **by digest** (those bytes or nothing) and verifies who
-built it with cosign when cosign is available. The release notes for that tag
-publish the script's `sha256` if you would rather check the bytes than read them.
+built it with cosign when cosign is available.
 
 <details>
 <summary>The one-liner, if you have already read the script</summary>

@@ -103,21 +103,26 @@ the pins are filled is dead permanently.
 - [ ] Tag `wallet-tui-v<X.Y.Z>` on the step-3 merge commit — **last**, because
       the documented install command fetches `install.sh` through this tag and
       the shim beside it
-- [ ] `sha256` of `install.sh` at that tag published in the release notes
-- [ ] Release notes state compatibility and migration (the shim chooses the image
-      version; an old shim keeps users on an old image whatever `update` prints)
 - [ ] Listings refreshed (ClawHub — then re-check its audit page, Smithery,
-      MCP registry); GHCR tags semver only, no `latest`
+      MCP registry); GHCR tags semver only, no `latest`. **This step is now
+      load-bearing:** the landing page no longer carries an install command of
+      its own, it points here, so a stale listing is a stale install for
+      everyone who arrives through the front door.
 
-**5 — the landing page (ops):** the site is a release surface like any listing,
-and it was missing from this list — which is the whole reason its install command
-sat two versions behind until a third party noticed.
-- [ ] `rustokwallet.com` install command and release-notes link moved to the new
-      tag (`src/components/Install.astro`, both the command and the link beside it)
-- [ ] Merged — and then **check that the deployment actually happened**. A merge
-      is not a deploy: Vercel blocks a build whose commit author is not the
-      project owner (Hobby plan, no collaborators), and a squash merge re-authors
-      the commit to whoever opened the PR. When it blocks, the owner re-triggers
-      it from their side.
-- [ ] Verified on the live page, not in the dashboard:
-      `curl -s https://rustokwallet.com/ | grep wallet-tui-v<X.Y.Z>`
+**5 — the landing page (ops):** the site used to carry its own copy of the
+install command, which is how it came to sit two versions behind until a third
+party noticed. **It no longer names a version at all** — it points at the skill
+page instead — so this step is no longer "update it", it is "confirm it did not
+grow a version again".
+- [ ] The page still names **no** version — this grep must come back **empty**:
+      `curl -s https://rustokwallet.com/ | grep 'wallet-tui-v'`
+      A match here is a regression, not a task: whoever put a version back
+      created the second copy of the truth this arrangement removed.
+- [ ] Nothing else to do here on an ordinary release. A change to the site is
+      only needed when the *skill page link* moves, which is not a version event.
+
+**5-bis — when the site does change (rare):** a merge is not a deploy. Vercel
+blocks a build whose commit author is not the project owner (Hobby plan, no
+collaborators), and a squash merge re-authors the commit to whoever opened the
+PR. Commit directly to `main` with the owner as author, and then **check the
+live page**, not the dashboard.
