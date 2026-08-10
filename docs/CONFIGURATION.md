@@ -13,6 +13,16 @@ All configuration is via environment variables passed to the wallet container.
 | `RUSTOK_ALCHEMY_API_KEY` | No¹ | — | Alchemy key (primary RPC for supported chains). |
 | `RUSTOK_VAULTS_<chain>` | No | — | Comma-separated ERC-4626 vault addresses to track on a chain (opt-in). |
 | `RUSTOK_TOKENS_<chain>` | No | — | ERC-20 tokens to show the balance of on a chain, `SYMBOL:ADDRESS:DECIMALS`, comma-separated — e.g. `RUSTOK_TOKENS_42161=USDC:0xaf88d065e77c8cC2239327C5EDb3A432268e5831:6`. Opt-in and explicit: the wallet shows what you registered, it does not go looking. A malformed entry, a duplicate address on one chain, or a chain absent from `RUSTOK_ALLOWED_CHAINS` **fails startup** with a message naming the chain — a token registry that is quietly half-loaded is worse than one that refuses. The same symbol at two addresses is fine (native USDC and bridged USDC.e both exist). **`SYMBOL` and `DECIMALS` are taken from you, not read from the contract** — both are optional in ERC-20 and a contract is free to call itself `USDC` with 18 places, so the operator's word is what decides how the number reaches the screen. Get `DECIMALS` wrong and the wallet will show a wrong amount confidently: check it against the contract before you register it. |
+
+> **What `connect --force` keeps, and what it rebuilds.** A re-run rebuilds the
+> registration from the environment of **that shell**, so a `RUSTOK_*` you set
+> once and did not export again is not carried over — it is simply absent from
+> the new entry. The exception is engine-specific: on **podman** an RPC URL
+> survives, because it lives in the per-agent secret store rather than in the
+> entry; on **docker** there is no store, so it is a literal like everything
+> else and is rebuilt too. `--force` names what it is about to drop before it
+> writes — read that line.
+
 | `RUSTOK_DATA_DIR` | No | `/data` | Keystore directory inside the container (mount a volume here). |
 | `RUSTOK_MCP_CAPABILITIES` | No | all | Restrict the stdio agent to a comma-separated capability subset (`read_wallet`,`preview_tx`,`execute_tx`). Unset → all (stdio is process-trusted). |
 

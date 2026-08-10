@@ -1757,5 +1757,181 @@ if assert_exit 0 && assert_has "does not re-verify" && assert_has "installer"; t
     ok "update: warns at pull time that it pulls by tag and skips the signature check"
 else not_ok "update: warns at pull time that it pulls by tag and skips the signature check"; fi
 
+# ─────────────── connect --force names the config it drops ───────────────
+# `--force` rebuilds the registration from the CURRENT environment, so anything
+# the old entry carried and the shell does not export vanishes without a word.
+# On 2026-08-10 that silently dropped RUSTOK_ALLOWED_CHAINS — the chain holding
+# the money — from a live registration. These pin the warning, and equally pin
+# its silence when there is nothing to lose.
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","-e","RUSTOK_ALLOWED_CHAINS=1,8453,42161","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/x","img"]}}}' >"$WORK/home/.claude.json"
+run_shim connect claude --force
+if assert_exit 0 && assert_has "dropping config the old registration had" \
+    && assert_has "RUSTOK_ALLOWED_CHAINS" \
+    && assert_has "will not have them"; then
+    ok "connect --force names the config the new registration will not carry"
+else not_ok "connect --force names the config the new registration will not carry"; fi
+
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+# Reverse order on purpose: with the alphabetical pair the assertion held even
+# without the sort, which is the "lucky-green" trap this file names elsewhere.
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","-e","RUSTOK_TOKENS_1=USDC:0xA0b8:6","-e","RUSTOK_ALLOWED_CHAINS=1","img"]}}}' >"$WORK/home/.claude.json"
+run_shim connect claude --force
+if assert_exit 0 && assert_has "RUSTOK_ALLOWED_CHAINS, RUSTOK_TOKENS_1"; then
+    ok "two dropped names are listed together, sorted"
+else not_ok "two dropped names are listed together, sorted"; fi
+
+# The silence half. A warning that fires when nothing is lost is noise, and a
+# noisy warning stops being read — which is how the thing it guards comes back.
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","-e","RUSTOK_ALLOWED_CHAINS=1","img"]}}}' >"$WORK/home/.claude.json"
+RUSTOK_ALLOWED_CHAINS=1 run_shim connect claude --force
+if assert_exit 0 && assert_lacks "dropping config"; then
+    ok "nothing is dropped, so nothing is said"
+else not_ok "nothing is dropped, so nothing is said"; fi
+
+# The VALUE never travels: this file warns by name everywhere else, and a token
+# registry in a log is one more copy of config nobody asked to duplicate.
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","-e","RUSTOK_TOKENS_1=USDC:0xDEADBEEF:6","img"]}}}' >"$WORK/home/.claude.json"
+run_shim connect claude --force
+# The value IS in the output — the pre-existing "replacing the previous entry"
+# dump prints the whole old entry. So the claim is about the warning LINE, and
+# the line is what gets inspected; checking the whole output would pass on a
+# shim with no diff at all.
+warn_line="$(printf '%s\n' "$OUT" | grep 'dropping config' || true)"
+if assert_exit 0 && assert_has "RUSTOK_TOKENS_1" \
+    && [ -n "$warn_line" ] && ! printf '%s' "$warn_line" | grep -q "0xDEADBEEF"; then
+    ok "the dropped name is printed, its value is not"
+else not_ok "the dropped name is printed, its value is not"; fi
+
+# Excluded by construction: the password never rides a literal, and the image is
+# the shim's own knob. Warning about either would name something this command
+# was never tracking.
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","-e","RUSTOK_IMAGE=ghcr.io/x:v1","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/x","img"]}}}' >"$WORK/home/.claude.json"
+run_shim connect claude --force
+if assert_exit 0 && assert_lacks "dropping config"; then
+    ok "the excluded names are not reported as dropped"
+else not_ok "the excluded names are not reported as dropped"; fi
+
+# docker: the RPC secret channel does not exist there, so an RPC URL is a plain
+# literal like everything else — and therefore just as droppable. An implementation
+# that hardcodes "RPC is safe" passes on podman and fails right here.
+fresh
+plant_claude_stub
+plant_jq
+plant_docker_stub
+remove_podman_stub
+mkdir -p "$WORK/home/.config/rustok"
+echo "engine=docker" >"$WORK/home/.config/rustok/config"
+printf '%s' pw >"$WORK/home/.config/rustok/keyring-pass-claude"
+: >"$WORK/state/volume-rustok-wallet-tui"
+printf '%s' '{"mcpServers":{"rustok":{"command":"docker","args":["run","-e","RUSTOK_RPC_URLS_1=https://old","img"]}}}' >"$WORK/home/.claude.json"
+run_shim connect claude --force
+if assert_exit 0 && assert_has "RUSTOK_RPC_URLS_1" && assert_has "dropping config"; then
+    ok "on docker an RPC URL is droppable config and is named like any other"
+else not_ok "on docker an RPC URL is droppable config and is named like any other"; fi
+
+# A readable config whose entry is not the shape the parser expects (legacy, or
+# hand-edited) must say it could not compare, not fall silent — silence here
+# reads as "nothing to lose".
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":"run -e RUSTOK_ALLOWED_CHAINS=1"}}}' >"$WORK/home/.claude.json"
+run_shim connect claude --force
+if assert_exit 0 && assert_has "cannot read the previous entry to compare"; then
+    ok "an entry of an unexpected shape is admitted, not passed over in silence"
+else not_ok "an entry of an unexpected shape is admitted, not passed over in silence"; fi
+
+
+# hermes speaks YAML through python instead of JSON through jq, and a client
+# that stayed silent beside protected ones would be the exact half-fix this
+# change exists to prevent.
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+seed_hermes
+mkdir -p "$WORK/home/.hermes/scripts"
+: >"$WORK/home/.hermes/scripts/rustok-mcp-server.py"
+"$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF'
+import sys, yaml
+p = sys.argv[1]
+c = yaml.safe_load(open(p))
+c["mcp_servers"]["rustok"] = {
+    "command": "podman",
+    "args": ["run", "-e", "RUSTOK_ALLOWED_CHAINS=1,8453,42161", "img"],
+    "enabled": True,
+}
+yaml.safe_dump(c, open(p, "w"))
+PEOF
+run_shim connect hermes --force
+if assert_exit 0 && assert_has "dropping config the old registration had" \
+    && assert_has "RUSTOK_ALLOWED_CHAINS"; then
+    ok "hermes gets the same named diff as the jq clients"
+else not_ok "hermes gets the same named diff as the jq clients"; fi
+
+
+# The legacy --env-file entry: a well-formed array carrying no `-e` at all,
+# because its config lives in a file this command does not read. Reading that
+# as "nothing to lose" was silence in exactly the migration the shim names by
+# hand — and the env file is where a RUSTOK_ALLOWED_CHAINS is most likely to be.
+fresh
+plant_claude_stub
+plant_jq
+seed_wallet
+printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","--env-file","/x/wallet.env","img"]}}}' >"$WORK/home/.claude.json"
+run_shim connect claude --force
+if assert_exit 0 && assert_has "cannot read the previous entry to compare"; then
+    ok "a legacy --env-file entry is admitted as incomparable, not passed as empty"
+else not_ok "a legacy --env-file entry is admitted as incomparable, not passed as empty"; fi
+
+
+# The same legacy entry, for the client whose reader is python instead of jq.
+# Closing this in the shared jq function left hermes behind — one fix, one
+# client not covered by it, and the identical silence.
+fresh
+plant_claude_stub
+plant_jq
+plant_python3
+seed_hermes
+mkdir -p "$WORK/home/.hermes/scripts"
+: >"$WORK/home/.hermes/scripts/rustok-mcp-server.py"
+"$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF'
+import sys, yaml
+p = sys.argv[1]
+c = yaml.safe_load(open(p))
+c["mcp_servers"]["rustok"] = {
+    "command": "podman",
+    "args": ["run", "--env-file", "/x/wallet.env", "img"],
+    "enabled": True,
+}
+yaml.safe_dump(c, open(p, "w"))
+PEOF
+run_shim connect hermes --force
+if assert_exit 0 && assert_has "cannot read the previous entry to compare"; then
+    ok "hermes admits a legacy --env-file entry too, in its own language"
+else not_ok "hermes admits a legacy --env-file entry too, in its own language"; fi
+
+
 echo "# $PASS passed, $FAIL failed, $N total"
 [ "$FAIL" -eq 0 ]
