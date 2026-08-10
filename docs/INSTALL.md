@@ -63,9 +63,6 @@ less install.sh      # ~150 lines of POSIX sh
 sh install.sh
 ```
 
-The release notes for that tag publish the script's `sha256` if you prefer to
-check the bytes instead of reading them.
-
 > **What the tag in that URL is and is not.** It pins a *version* — it is not a
 > cryptographic identity. A git tag can in principle be repointed at a different
 > commit, so treat the tag as "which release", not as proof of content. The
