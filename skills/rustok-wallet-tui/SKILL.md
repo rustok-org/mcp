@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet-tui
 description: Self-custody Ethereum agent wallet. Installs with one command and runs entirely on your machine as a single container image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain is gated in a separate terminal console, never inside the agent chat: you approve each payment, or confirm autonomous mode once and the wallet sends on its own after that; message signing is not console-gated. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.9.4
+version: 0.9.5
 metadata:
   openclaw:
     emoji: "🦀"
@@ -58,7 +58,19 @@ confirmation in the console clears it for good. Do not describe it as an error
 and do not retry the payment — a retry adds a second parked copy under a
 different nonce, and confirming the mode does not release either of them.
 
-Confirmation from a messenger is not in this release.
+Confirmation from a messenger does not exist yet — the console is the only
+place that acknowledgment can be given.
+
+## What changed in 0.9.5
+
+- **Gas limits now carry headroom.** A limit set to exactly the estimate turned
+  any drift between estimating and executing into a burnt fee — a contract call
+  could pay its gas and do nothing. Plain transfers were never affected.
+- **ERC-20 tokens are documented at last** (see below). The wallet has been able
+  to report registered tokens since 0.9.4, but nothing here said so, and an
+  unregistered token reads exactly like an absent one.
+- **`rustok connect --force` names what it is about to drop** instead of quietly
+  rebuilding the registration from the current shell.
 
 ## Prerequisites
 
@@ -82,8 +94,8 @@ and one look costs less than that trade.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.4/scripts/install.sh -o install.sh
-less install.sh      # ~150 lines of POSIX sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.5/scripts/install.sh -o install.sh
+less install.sh      # ~321 lines of POSIX sh
 sh install.sh
 ```
 
@@ -95,7 +107,7 @@ built it with cosign when cosign is available.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.4/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.5/scripts/install.sh | sh
 ```
 
 Piping to a shell runs whatever the URL serves at that moment, unreviewed. The
@@ -156,7 +168,7 @@ podman run -i --rm \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.4
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.5
 ```
 
 ```bash
@@ -173,7 +185,7 @@ docker run -i --rm \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.4
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.5
 ```
 
 > Legacy `--env-file` delivery still works but is deprecated: the value lands in
@@ -223,7 +235,7 @@ password is delivered by the podman secret (or the docker `_FILE` mount) above,
                "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.9.4"],
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.9.5"],
       "env": {
         "RUSTOK_RPC_URLS_1": "https://your-rpc"
       }
@@ -245,9 +257,9 @@ To run a restricted agent, set `RUSTOK_MCP_CAPABILITIES` to a subset
 (`read_wallet` / `preview_tx` / `execute_tx`) — e.g. `read_wallet` for read-only.
 The ceiling is enforced by the gateway, on the path every request takes: it
 covers the MCP tools below **and** the HTTP routes behind them, so a session
-cannot reach past its capabilities by calling the gateway directly. Until this
-release it was checked in the MCP layer only, which left every route reachable
-beside it — on this edition the core refused signing for its own unrelated
+cannot reach past its capabilities by calling the gateway directly. In releases
+before 0.9.0 the ceiling was checked in the MCP layer only, which left every
+route reachable beside it: the core refused signing for its own unrelated
 reasons, but a session narrowed away from `read_wallet` still read the wallet
 address and every balance. A client may narrow its own session further in
 `initialize`, and can never widen it.
@@ -259,8 +271,30 @@ address and every balance. A client may narrow its own session further in
 | `get_positions` | read_wallet | DeFi positions — Aave v3 (collateral/debt/health factor/LTV) + ERC-4626 vaults; optional `{address}` |
 | `preview_transaction` | preview_tx | Preview any transaction `{to, value, chain_id, data?}` → decoded call (who/what is authorized), pre-sign simulation (revert check), gas, risk level |
 | `execute_transaction` | execute_tx | Submit a previewed transaction `{preview_id}` — parked for human approval on a supervised wallet, released by the core on one whose owner confirmed autonomous mode; a `pending` result carries `next_step` for the human |
-| `get_execution_status` | execute_tx | Poll a parked execution `{preview_id}` → `pending` / `executed` (+`tx_hash`) / `denied` / `expired` / `failed` (+`error_reason`), with the `not_after_unix` deadline |
+| `get_execution_status` | execute_tx | Poll a parked execution `{preview_id}` → `pending` / `executed` (+`tx_hash`) / `denied` / `expired` / `failed` (+`error_reason`), with the `not_after_unix` deadline. **`executed` means broadcast, not on-chain success** — see below |
 | `sign_message` | execute_tx | Sign a plaintext message (EIP-191). **Not console-gated** — returns a signature without the approval window; refuses raw hex blobs but signs ordinary messages (see "What's protected"). |
+
+### ERC-20 tokens are opt-in — an empty list is not an empty wallet
+
+The wallet reports the tokens the **user registered**, and never goes looking for
+others. A wallet holding USDC shows no USDC until USDC is registered on that
+chain:
+
+```bash
+-e RUSTOK_TOKENS_1="USDC:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48:6"
+-e RUSTOK_TOKENS_8453="USDC:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913:6"
+```
+
+`SYMBOL:ADDRESS:DECIMALS`, comma-separated, one variable per chain, and the chain
+must be listed in `RUSTOK_ALLOWED_CHAINS`. A malformed entry, a duplicate address
+on one chain, or an unknown chain **fails startup** naming the chain — a
+half-loaded registry is worse than none. Symbol and decimals are taken from the
+user, not read from the contract: get the decimals wrong and the wallet will show
+a wrong amount confidently.
+
+**What this means for you, the agent:** before telling the user they hold none of
+a token, say that it may simply not be registered. Reading an empty list as an
+empty wallet is the likeliest way to be wrong here — and it has already happened.
 
 ## Behavioral guidelines
 
@@ -270,14 +304,20 @@ address and every balance. A client may narrow its own session further in
    releases it in a separate terminal window by running `rustok console` (see
    the onboarding above). Never offer to run the console command yourself
    and never ask the user to paste the approval PIN into this chat.
-3. **Poll `get_execution_status` reasonably**: when the user asks, or every ~15–30
+3. **`executed` means the transaction was broadcast, not that it succeeded.**
+   The wallet reports the hash the moment the network accepted the transaction
+   for inclusion; a transaction that reverts on-chain still costs its gas and
+   still reads as `executed` here. Verify the receipt independently before
+   telling the user their swap or approval went through — an explorer, or
+   `eth_getTransactionReceipt` where `status` must be `0x1`.
+4. **Poll `get_execution_status` reasonably**: when the user asks, or every ~15–30
    seconds until the `not_after_unix` deadline (if it is `null` — only on request).
    Stop on any terminal state: `executed`, `denied`, `expired`, `failed`. A
    `denied` outcome is the human's answer — do not re-submit the same transaction;
    a not-found error means the id is no longer retained — stop polling.
-4. **Surface what the preview decoded** (who/what is authorized, amount, revert check, estimated cost, risk level) before the user acts on it.
-5. **Use `get_wallet_context` first** so you don't hallucinate balances or chains.
-6. If a tool needs a capability the session lacks, it returns an authorization
+5. **Surface what the preview decoded** (who/what is authorized, amount, revert check, estimated cost, risk level) before the user acts on it.
+6. **Use `get_wallet_context` first** so you don't hallucinate balances or chains.
+7. If a tool needs a capability the session lacks, it returns an authorization
    error — explain that to the user rather than retrying.
-7. If the wallet is unreachable, tell the user the wallet container/onboarding may
+8. If the wallet is unreachable, tell the user the wallet container/onboarding may
    not be set up (see onboarding above).
