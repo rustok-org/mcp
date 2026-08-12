@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet-tui
 description: Self-custody Ethereum agent wallet. Installs with one command and runs entirely on your machine as a single container image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain is gated in a separate terminal console, never inside the agent chat: you approve each payment, or confirm autonomous mode once and the wallet sends on its own after that; message signing is not console-gated. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.9.5
+version: 0.9.6
 metadata:
   openclaw:
     emoji: "🦀"
@@ -94,7 +94,7 @@ and one look costs less than that trade.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.5/scripts/install.sh -o install.sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.6/scripts/install.sh -o install.sh
 less install.sh      # ~321 lines of POSIX sh
 sh install.sh
 ```
@@ -107,7 +107,7 @@ built it with cosign when cosign is available.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.5/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.6/scripts/install.sh | sh
 ```
 
 Piping to a shell runs whatever the URL serves at that moment, unreviewed. The
@@ -168,7 +168,7 @@ podman run -i --rm \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.5
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.6
 ```
 
 ```bash
@@ -185,7 +185,7 @@ docker run -i --rm \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.5
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.6
 ```
 
 > Legacy `--env-file` delivery still works but is deprecated: the value lands in
@@ -235,7 +235,7 @@ password is delivered by the podman secret (or the docker `_FILE` mount) above,
                "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.9.5"],
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.9.6"],
       "env": {
         "RUSTOK_RPC_URLS_1": "https://your-rpc"
       }
@@ -321,3 +321,18 @@ empty wallet is the likeliest way to be wrong here — and it has already happen
    error — explain that to the user rather than retrying.
 8. If the wallet is unreachable, tell the user the wallet container/onboarding may
    not be set up (see onboarding above).
+
+## Legal
+
+Provided **as is**, without warranty of any kind, under the MIT-0 license.
+**What an agent does with this wallet is not an act of the authors:** the agent
+driving it is third-party software whose output is unpredictable and may be
+inaccurate, incorrect, or undesirable, and evaluating each proposed transaction
+before approving it is the user's exclusive responsibility. Nothing this wallet
+or the agent driving it produces is investment, accounting, legal, or tax advice.
+Sending funds is gated at the console **unless autonomous mode was confirmed**;
+**`sign_message` is not gated at all**. The risk of loss is substantial and the
+user assumes all of it.
+
+Full terms, and every safeguard's limit named:
+<https://github.com/rustok-org/mcp/blob/main/DISCLAIMER.md>
