@@ -46,9 +46,9 @@ set -eu
 # splits the two fetches in time. A tag moved in between would hand them a
 # different shim while the script they read stayed the same — the hash is what
 # makes "what you read is what runs" true for the shim too.
-WALLET_VERSION="0.9.7"
+WALLET_VERSION="0.9.8"
 WALLET_DIGEST="sha256:ae8f2ef1a7f52a2b3ea133569ddc55bfb52d5f1e74d60ec453c27266ce40a417"
-SHIM_SHA256="687d4a58efe2cebe0bef0cf8d440178554a6be83e35a3915328ea9f0cf9b3017"
+SHIM_SHA256="270d36d7f0ce035a7907c34c03c4249f5cf8a7eeb7cfde4d6e9f1880511ea116"
 
 IMAGE_REPO="ghcr.io/rustok-org/rustok-wallet-tui"
 RAW_BASE="https://raw.githubusercontent.com/rustok-org/mcp"

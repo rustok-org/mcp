@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] — 2026-08-12
+
+### Fixed
+- **`sign_message` is refused outright, and the texts finally say so.** Core
+  policy denies it in every mode, autonomous included, and has since v0.4.0 —
+  `(_, SignMessage | SignTypedData) => Decision::Deny`. Ten published places said
+  it returns a signature without console approval, describing a hole that is
+  closed. It is neither a hole nor a protection: signature parking (`kind:sign`)
+  is planned and not built.
+
+  Live acceptance of 0.9.7 caught it. A spec, a self-check and three review
+  rounds had not, because each of us read our own earlier documents instead of
+  asking the wallet.
+
+### Added
+- **A two-part guard against the same class.** One half asks the shipped image
+  (pinned by digest, since that is the bytes a user runs) and never reads a text;
+  the other requires the true sentence in every text that names the tool and
+  cannot tell true from false. The live half runs as its own CI job, with podman
+  verified present first: a guard that is silently not selected reports the same
+  green as one that ran.
+- **`docs/CAVEATS.md` states that a parked transaction lives exactly as long as
+  the wallet session.** Close the session while something waits and the parked
+  item is gone. Nothing said this anywhere; it was found by losing one.
+
+### Changed
+- `docs/INSTALL.md` no longer promises a 150-line installer that is 321 lines —
+  the rot fixed in SKILL.md last release had survived in the page people actually
+  install from, because the guard read one file instead of the class. It is now
+  parametrised over both.
+
 ## [0.9.7] — 2026-08-12
 
 ### Added

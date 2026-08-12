@@ -1,7 +1,7 @@
 ---
 name: rustok-wallet-tui
 description: Self-custody Ethereum agent wallet. Installs with one command and runs entirely on your machine as a single container image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain is gated in a separate terminal console, never inside the agent chat: you approve each payment, or confirm autonomous mode once and the wallet sends on its own after that; message signing is refused outright, in every mode. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
-version: 0.9.7
+version: 0.9.8
 metadata:
   openclaw:
     emoji: "🦀"
@@ -61,13 +61,20 @@ different nonce, and confirming the mode does not release either of them.
 Confirmation from a messenger does not exist yet — the console is the only
 place that acknowledgment can be given.
 
+## What changed in 0.9.8
+
+- **`sign_message` is refused outright, and these texts finally say so.** Every
+  earlier release described it as an ungated hole you had to guard against. It is
+  not a hole and not a protection: signing is an unfinished capability, and
+  parking a signature for approval is planned and not built. Live acceptance of
+  0.9.7 asked the wallet and got a refusal; nine texts had said otherwise.
+
 ## What changed in 0.9.7
 
 - **The wallet states what it does not promise.** A `## Legal` section below, and
   a full [DISCLAIMER](https://github.com/rustok-org/mcp/blob/main/DISCLAIMER.md)
-  that names the limit of every safeguard — including the two easiest to read as
-  absolute: autonomous mode sends without asking once confirmed, and
-  `sign_message` never reaches the console approval window at all.
+  that names the limit of every safeguard — starting with the one easiest to read
+  as absolute: autonomous mode sends without asking once confirmed.
 
 ## What changed in 0.9.5
 
@@ -102,7 +109,7 @@ and one look costs less than that trade.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.7/scripts/install.sh -o install.sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.8/scripts/install.sh -o install.sh
 less install.sh      # ~321 lines of POSIX sh
 sh install.sh
 ```
@@ -115,7 +122,7 @@ built it with cosign when cosign is available.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.7/scripts/install.sh | sh
+  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.8/scripts/install.sh | sh
 ```
 
 Piping to a shell runs whatever the URL serves at that moment, unreviewed. The
@@ -176,7 +183,7 @@ podman run -i --rm \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.7
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.8
 ```
 
 ```bash
@@ -193,7 +200,7 @@ docker run -i --rm \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
   -e RUSTOK_ALLOWED_CHAINS="1,8453" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.7
+  ghcr.io/rustok-org/rustok-wallet-tui:v0.9.8
 ```
 
 > Legacy `--env-file` delivery still works but is deprecated: the value lands in
@@ -243,7 +250,7 @@ password is delivered by the podman secret (or the docker `_FILE` mount) above,
                "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude",
                "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
                "-e", "RUSTOK_RPC_URLS_1",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.9.7"],
+               "ghcr.io/rustok-org/rustok-wallet-tui:v0.9.8"],
       "env": {
         "RUSTOK_RPC_URLS_1": "https://your-rpc"
       }

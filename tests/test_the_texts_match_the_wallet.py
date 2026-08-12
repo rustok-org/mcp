@@ -29,15 +29,24 @@ TEXTS = (
     REPO_ROOT / "docs" / "CAVEATS.md",
 )
 
-# The claim that was false. `\s+` between the words rather than literal spaces:
-# prose wraps, and a phrase broken across two lines is the shape that already
-# hid from one of our guards for five releases.
+# The claim that was false, in every wording it has actually worn. `\s+` between
+# the words rather than literal spaces: prose wraps, and a phrase broken across
+# two lines is the shape that already hid from one of our guards for five
+# releases.
+#
+# The last alternative is here because the first version of this list was built
+# from the wordings I could remember, and a tenth place — a "what changed" entry
+# saying the tool "never reaches the console approval window" — sailed straight
+# through a green suite. A list of known phrasings is a lower bound on the claim,
+# never the claim itself; it earns its keep only paired with the live half, which
+# does not care how a sentence is worded.
 FALSE_CLAIM = re.compile(
     r"\b(returns?\s+a\s+signature\s+without"
     r"|not\s+console-gated"
     r"|not\s+gated\s+by\s+the\s+console"
     r"|signing\s+is\s+not\s+console-gated"
-    r"|is\s+not\s+gated\s+at\s+all)\b",
+    r"|is\s+not\s+gated\s+at\s+all"
+    r"|never\s+reach(?:es|ing)?\s+the\s+(?:console\s+)?approval\s+window)\b",
     re.IGNORECASE,
 )
 
