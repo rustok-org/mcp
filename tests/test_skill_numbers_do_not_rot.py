@@ -30,7 +30,7 @@ _LINE_CLAIM = re.compile(r"~(\d+) lines of POSIX sh")
 # Prose whose truth expires with the release that shipped it. "this release"
 # reads as "the one you are holding", which is false for every later reader.
 _TIME_RELATIVE = re.compile(
-    r"\b(until this release|in this release|as of this release|this edition)\b",
+    r"\b(until this release|in this release|as of this release|this version|this edition)\b",
     re.IGNORECASE,
 )
 
