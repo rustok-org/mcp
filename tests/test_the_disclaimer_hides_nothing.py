@@ -1,12 +1,14 @@
 """The disclaimer must name every limit of every safeguard, and stay reachable.
 
 A disclaimer exists to not overpromise. That is its only job, and it is the one
-job it kept failing at while being written: the first draft claimed the console
-approval step was the boundary that stops a misled agent, while `sign_message`
-returns a signature without ever reaching that window; the second draft said
-"sending funds is gated at the console" flat, while autonomous mode sends
-without asking once a human has confirmed it. Both were caught in review, one
-paragraph apart, in a text whose entire purpose is to be honest about limits.
+job it kept failing at while being written: one draft said "sending funds is
+gated at the console" flat, while autonomous mode sends without asking once a
+human has confirmed it; another described `sign_message` as an ungated hole,
+which review then sharpened — and which live acceptance of the release then
+refuted outright, because the wallet refuses to sign at all. Three wrong
+sentences about limits, in the one text whose entire purpose is to state them
+correctly, and every one of them was written by someone reading our own earlier
+documents instead of asking the wallet.
 
 So the guards below are POSITIVE requirements, in the shape
 `test_autonomy_is_never_hidden.py` established: a blacklist of forbidden claims
@@ -41,7 +43,7 @@ DISCLAIMER_URL = "https://github.com/rustok-org/mcp/blob/main/DISCLAIMER.md"
 # other two are prose: a limit named with a lowercase letter is still named, and
 # a guard that fails on a legitimate rewording teaches its author to ignore it.
 NAMED_IDENTIFIERS = (
-    "sign_message",  # returns a signature without the console approval window
+    "sign_message",  # refused outright in every mode; parking is planned, not built
     "txguard",  # flags risky transactions, does not block them
 )
 NAMED_IN_PROSE = (

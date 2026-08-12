@@ -48,9 +48,17 @@ are owner-only (`0600`), and installs that predate that are narrowed at startup.
 
 **What does not hold.**
 
-- **`sign_message` is not console-gated.** The wallet refuses a raw hex blob — which
-  could hide a transaction, an approval, or typed data — but it will sign an
-  ordinary plaintext message. Treat message signing as unprotected.
+- **`sign_message` is refused outright**, in every mode, autonomous included. The console never
+  sees a signature request, because signing does not happen at all yet: parking a
+  signature for approval (`kind:sign`) is planned and not built. Do not plan around
+  a signature this wallet can produce — it cannot.
+- **A parked transaction lives exactly as long as the wallet session.** Close the
+  agent session while something waits for your decision and the parked item is gone
+  — it is not queued anywhere, and reopening the console will not find it. That is
+  deliberate: a stale approval that outlives the conversation which proposed it is
+  worse than one that expires. It means the practical rule is "keep the session open
+  until you have decided", and that an agent asking you to approve something should
+  wait for you rather than move on.
 - **Shell access to the container defeats the gate.** Anything that can
   `docker exec` into it reads the gateway key — a `0600` file staged under `/run`
   — and reaches every route the configured `RUSTOK_MCP_CAPABILITIES` ceiling

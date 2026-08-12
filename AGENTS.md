@@ -90,6 +90,11 @@ the pins are filled is dead permanently.
       `.sig` and cost a reviewer an hour
 
 **3 — pin (PR):**
+- [ ] **A text that describes BEHAVIOUR the release changes ships in THIS PR, not in
+      step 1.** The live guard (`tests/e2e/test_signing_is_refused_e2e.py`) holds the
+      texts against the image `WALLET_DIGEST` names, and during step 1 that is still
+      the PREVIOUS release's image. A text that got ahead of the bytes turns the guard
+      red mid-chain, and the honest fix is the order, not the guard
 - [ ] `WALLET_DIGEST` = the digest just published
 - [ ] `SHIM_SHA256` = `sha256sum cli/rustok` — **and it belongs in step 1, not
       here.** A content hash is computable from the working tree, so the shim and

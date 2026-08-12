@@ -25,9 +25,11 @@ before approving it is the user's exclusive responsibility.
 - **Autonomous mode, once confirmed, sends without asking again.** The
   confirmation is given once per wallet, at the console, by the user. After it,
   no per-transaction approval is requested.
-- **`sign_message` is not console-gated.** It returns a signature without the
-  approval window. It refuses a raw hex blob, but it signs an ordinary plaintext
-  message. The console boundary covers sending funds; it does not cover signing.
+- **`sign_message` is refused outright**, in every mode, autonomous included. The
+  console never sees a signature request, because signing does not happen at all
+  yet: parking a signature for approval is planned and not built. This is an
+  unfinished capability, not a protection — do not plan around a signature this
+  wallet can produce, and do not assume the console would catch one.
 
 An agent reads untrusted data — token names, web pages, contract metadata — and
 that data can induce it to propose a transaction, or a message to sign, that the

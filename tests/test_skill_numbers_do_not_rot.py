@@ -20,6 +20,8 @@ can only be true in the release that wrote it.
 import re
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).parent.parent
 SKILL = REPO_ROOT / "skills" / "rustok-wallet-tui" / "SKILL.md"
 INSTALLER = REPO_ROOT / "scripts" / "install.sh"
@@ -29,6 +31,10 @@ DISCLAIMER = REPO_ROOT / "DISCLAIMER.md"
 # because a liability text ages exactly like any other — and it is republished
 # unchanged by definition, which is the condition the rot needs.
 GUARDED_TEXTS = (SKILL, DISCLAIMER)
+
+# Every doc that tells the reader how big install.sh is. Both ask them to read it
+# before running it, so both owe them an honest number.
+SIZE_CLAIMANTS = (SKILL, REPO_ROOT / "docs" / "INSTALL.md")
 
 # "less install.sh      # ~321 lines of POSIX sh"
 _LINE_CLAIM = re.compile(r"~(\d+) lines of POSIX sh")
@@ -54,19 +60,26 @@ _TIME_RELATIVE = re.compile(
 )
 
 
-def test_the_installer_line_count_claim_matches_the_installer() -> None:
-    """The number in the text is checked against the file it is about."""
-    claim = _LINE_CLAIM.search(SKILL.read_text())
+@pytest.mark.parametrize("path", SIZE_CLAIMANTS, ids=lambda p: p.name)
+def test_the_installer_line_count_claim_matches_the_installer(path: Path) -> None:
+    """The number in the text is checked against the file it is about.
+
+    Parametrised over every doc that states the size, because the first version
+    of this guard read SKILL.md alone — and `docs/INSTALL.md`, the page a user
+    actually installs from, went on promising "~150 lines" of a 321-line script
+    for four more releases. One file guarded is not the class guarded.
+    """
+    claim = _LINE_CLAIM.search(path.read_text())
     assert claim, (
-        "SKILL.md no longer states the installer's size. It asks the user to read "
-        "the script before running it; the size is how they judge that cost."
+        f"{path.name} no longer states the installer's size. It asks the user to "
+        "read the script before running it; the size is how they judge that cost."
     )
     claimed = int(claim.group(1))
     actual = len(INSTALLER.read_text().splitlines())
 
     # Rounded prose against an exact file: allow the rounding, not the drift.
     assert abs(claimed - actual) <= 10, (
-        f"SKILL.md claims ~{claimed} lines, install.sh has {actual}. "
+        f"{path.name} claims ~{claimed} lines, install.sh has {actual}. "
         "Update the claim — the number is the reader's estimate of what it costs "
         "to check the script they are about to run as their wallet installer."
     )

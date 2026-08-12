@@ -13,8 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The wallet states what it does not promise.** A `## Legal` section in the
   skill and a full [DISCLAIMER](DISCLAIMER.md) that names the limit of every
   safeguard, including the two easiest to read as absolute: autonomous mode
-  sends without asking once a human has confirmed it, and `sign_message` returns
-  a signature without ever reaching the console approval window.
+  sends without asking once a human has confirmed it, and `sign_message` is
+  refused outright in every mode — signature parking is planned, not built.
+
+  The first published wording of that second limit was wrong in the other
+  direction: it described a hole that is closed. Live acceptance of 0.9.7 caught
+  it, and 0.9.8 corrects every text that said it.
 
   The published texts already disclaimed warranty (MIT-0 "as is") and warned
   that funds are at risk. What none of them said was that the agent is
