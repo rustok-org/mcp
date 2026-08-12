@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] — 2026-08-12
+
+### Added
+- **The wallet states what it does not promise.** A `## Legal` section in the
+  skill and a full [DISCLAIMER](DISCLAIMER.md) that names the limit of every
+  safeguard, including the two easiest to read as absolute: autonomous mode
+  sends without asking once a human has confirmed it, and `sign_message` returns
+  a signature without ever reaching the console approval window.
+
+  The published texts already disclaimed warranty (MIT-0 "as is") and warned
+  that funds are at risk. What none of them said was that the agent is
+  third-party software whose output is unpredictable, and that a transaction it
+  proposes is not an act of the authors.
+
+### Fixed
+- **The rot guard shipped in 0.9.5 read line by line**, so the very phrase it
+  was built to catch slipped past it when that phrase wrapped across two lines —
+  which is how it appeared in the file it was written for. It now matches the
+  whitespace between the words and keeps the exact line number.
+
+### Withdrawn
+- **0.9.6 was tagged and withdrawn — do not install from `wallet-tui-v0.9.6`.**
+  The tag was cut before the image digest was pinned, so its `install.sh` carries
+  the 0.9.5 digest under a 0.9.6 label. That does not fail: the installer pulls
+  by digest, the 0.9.5 image is present and validly signed, so the install
+  completes, reports 0.9.6, and leaves a shim that runs the 0.9.6 tag — the image
+  verified at install is not the image that runs. Our own policy never moves a
+  published tag, and a repository ruleset enforces it, so the release was reissued
+  as 0.9.7 instead. Content of 0.9.6 and 0.9.7 is otherwise identical.
+
+## [0.9.5] — 2026-08-12
+
+### Fixed
+- **Gas limits now carry headroom** (core 0.4.3). A limit set to exactly the
+  estimate turned any drift between estimating and executing into a burnt fee —
+  a contract call could pay its gas and do nothing. Plain transfers were never
+  affected.
+- **`rustok connect --force` names what it is about to drop** instead of quietly
+  rebuilding the registration from the current shell.
+
+### Changed
+- **ERC-20 token registration is documented in the skill at last.** The wallet
+  has been able to report registered tokens since 0.9.4, but the published skill
+  never said so, and an unregistered token reads exactly like an absent one.
+- **`executed` is now stated to mean broadcast, not succeeded.** A transaction
+  that reverts on-chain still reports `executed`; the receipt is what settles it.
+
 ## [0.9.4] — 2026-08-11
 
 ### Added
