@@ -30,6 +30,7 @@ previous image, so a text that got ahead of the bytes turns this red mid-chain.
 """
 
 import re
+import shutil
 import uuid
 from pathlib import Path
 
@@ -62,6 +63,14 @@ def _pinned_image() -> str:
 
 
 @pytest.mark.e2e
+@pytest.mark.skipif(
+    shutil.which("podman") is None,
+    reason=(
+        "needs podman to ask the shipped image — a silent non-selection would let "
+        "this guard 'pass' on a runner that never ran it, and the release it matters "
+        "most for is the one where signing starts working"
+    ),
+)
 def test_the_shipped_wallet_refuses_to_sign_a_message(tmp_path: Path) -> None:
     """`sign_message` is refused, so every text that describes it must say so."""
     image = _pinned_image()

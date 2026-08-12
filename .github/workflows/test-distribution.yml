@@ -100,3 +100,20 @@ jobs:
           docker logs mcp-smoke >&2
           docker rm -f mcp-smoke
           exit 1
+
+  texts-match-the-wallet:
+    name: Texts Match The Wallet
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      # The live half of the two-part guard. Its load-bearing moment is the pin PR
+      # of a release that changes signing: there it must fire by itself, not by
+      # someone remembering to run it. Skipped-because-no-podman would be the one
+      # outcome worse than red, so podman is verified present before pytest is
+      # allowed to make that call.
+      - name: Verify podman is present
+        run: podman --version
+      - uses: astral-sh/setup-uv@v5
+      - name: Ask the shipped image what it does about signing
+        run: uv run pytest tests/e2e/test_signing_is_refused_e2e.py -m e2e -q
