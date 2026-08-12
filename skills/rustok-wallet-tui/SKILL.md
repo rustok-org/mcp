@@ -1,6 +1,6 @@
 ---
 name: rustok-wallet-tui
-description: Self-custody Ethereum agent wallet. Installs with one command and runs entirely on your machine as a single container image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain is gated in a separate terminal console, never inside the agent chat: you approve each payment, or confirm autonomous mode once and the wallet sends on its own after that; message signing is not console-gated. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
+description: Self-custody Ethereum agent wallet. Installs with one command and runs entirely on your machine as a single container image (MCP over stdio); private keys never leave it. Read wallet context, balances and DeFi positions (Aave v3, ERC-4626); preview transactions and sign messages. Sending funds on-chain is gated in a separate terminal console, never inside the agent chat: you approve each payment, or confirm autonomous mode once and the wallet sends on its own after that; message signing is refused outright, in every mode. You assume all risk for funds on the agent wallet — there are no hard-coded spending limits.
 version: 0.9.7
 metadata:
   openclaw:
@@ -35,7 +35,7 @@ all — lives in [docs/CAVEATS.md](https://github.com/rustok-org/mcp/blob/main/d
 | | |
 |---|---|
 | **Protected** | Private keys stay in the user's **local Docker volume** and never leave the machine. **Sending funds on-chain** (`execute_transaction`) is gated in a **separate console window** (`rustok console`, opened by the user — see below): parked for the user's approval, with a PIN for high-risk items — unless the user has confirmed **autonomous mode** there, a confirmation only they can give, once per wallet. |
-| **Not gated by the console** | `sign_message` (EIP-191) returns a signature **without** console approval. The wallet refuses to sign a **raw hex blob** (which could hide a transaction, an approval, or typed data), but it **will** sign an ordinary plaintext message (e.g. a sign-in or an off-chain order). Treat message signing as unprotected: don't connect this wallet to an agent you wouldn't trust to sign a message. |
+| **Refused, not gated** | `sign_message` (EIP-191) is **refused outright** — in every mode, autonomous included. The console never sees a signature request, because signing does not happen at all: parking a signature for approval (`kind:sign`) is planned and not built. A tool that is listed and always refuses is neither a capability to rely on nor a hole to fear. Tell the user that rather than letting them plan around a signature. |
 | **Outside the model** | An agent with **shell / `docker exec` access to the container** can read the gateway key and reach the full signing surface (including EIP-712 permits — a classic drain). That is why the console is a **separate window, not an agent command**. Trusting your own agent is the user's call, the same as never pasting a seed phrase into an untrusted tool. |
 
 **Never claim** the agent (or a prompt-injected agent) "cannot move funds." What is
@@ -280,7 +280,7 @@ address and every balance. A client may narrow its own session further in
 | `preview_transaction` | preview_tx | Preview any transaction `{to, value, chain_id, data?}` → decoded call (who/what is authorized), pre-sign simulation (revert check), gas, risk level |
 | `execute_transaction` | execute_tx | Submit a previewed transaction `{preview_id}` — parked for human approval on a supervised wallet, released by the core on one whose owner confirmed autonomous mode; a `pending` result carries `next_step` for the human |
 | `get_execution_status` | execute_tx | Poll a parked execution `{preview_id}` → `pending` / `executed` (+`tx_hash`) / `denied` / `expired` / `failed` (+`error_reason`), with the `not_after_unix` deadline. **`executed` means broadcast, not on-chain success** — see below |
-| `sign_message` | execute_tx | Sign a plaintext message (EIP-191). **Not console-gated** — returns a signature without the approval window; refuses raw hex blobs but signs ordinary messages (see "What's protected"). |
+| `sign_message` | execute_tx | **Refused outright** in every mode — signature parking is planned, not built. The tool exists and always answers with a policy refusal (see "What's protected"). |
 
 ### ERC-20 tokens are opt-in — an empty list is not an empty wallet
 
@@ -339,8 +339,8 @@ inaccurate, incorrect, or undesirable, and evaluating each proposed transaction
 before approving it is the user's exclusive responsibility. Nothing this wallet
 or the agent driving it produces is investment, accounting, legal, or tax advice.
 Sending funds is gated at the console **unless autonomous mode was confirmed**;
-**`sign_message` is not gated at all**. The risk of loss is substantial and the
-user assumes all of it.
+**`sign_message` is refused outright** in every mode. The risk of loss is
+substantial and the user assumes all of it.
 
 Full terms, and every safeguard's limit named:
 <https://github.com/rustok-org/mcp/blob/main/DISCLAIMER.md>
