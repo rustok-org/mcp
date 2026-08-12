@@ -36,13 +36,14 @@ DOC_PATHS = [
     REPO_ROOT / "docs" / "TROUBLESHOOTING.md",
     REPO_ROOT / "docs" / "CONFIGURATION.md",
     REPO_ROOT / "skills" / "rustok-wallet-tui" / "SKILL.md",
+    REPO_ROOT / "DISCLAIMER.md",
 ]
 
 # The ratified install-URL tag (Gate-1, decision Р-2): the tag line that already
 # ships this product (wallet-tui-v0.5.0 … v0.7.1). The bare `v0.1.x` namespace
 # belongs to the old rustok-mcp python package — reusing it would put two
 # unrelated things in one tag namespace.
-INSTALL_TAG = "wallet-tui-v0.9.5"
+INSTALL_TAG = "wallet-tui-v0.9.6"
 INSTALL_URL = f"https://raw.githubusercontent.com/rustok-org/mcp/{INSTALL_TAG}/scripts/install.sh"
 
 # Any ref in an installer raw-URL, so a drifted tag is caught wherever it hides.
