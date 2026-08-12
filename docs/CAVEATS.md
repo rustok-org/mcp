@@ -79,6 +79,15 @@ keys stay local, and on-chain sends are human-gated *on the console edition*.
 nothing — and verifies who built it with cosign when cosign is present and
 runnable. The shim is fetched by commit SHA.
 
+**Do not install from `wallet-tui-v0.9.6`.** That tag was cut before the release
+pinned its image digest, so the `install.sh` it carries names the 0.9.5 digest
+under a 0.9.6 label. It does not fail: the pull is by digest, the 0.9.5 image is
+present and validly signed, so the install completes and reports success — while
+the shim it leaves behind runs the `v0.9.6` tag, which is a different image than
+the one just verified. **Use 0.9.7**, which is the same content released in the
+order the checklist prescribes. The tag stays where it is because a published tag
+is never moved here, and a repository ruleset enforces that.
+
 **What does not hold.**
 
 - **The git tag in the installer URL pins a version, not bytes.** A tag can in

@@ -32,7 +32,7 @@ ARG CONSOLE_IMAGE=ghcr.io/rustok-org/rustok-console:v0.3.2
 # measured, not assumed — buildah passes the reference through untouched, so the
 # panel would have shown the whole `ghcr.io/…` string as a version number. A
 # check that refuses is worth more than an expansion that silently lies.
-ARG WALLET_VERSION=0.9.6
+ARG WALLET_VERSION=0.9.7
 ARG CORE_VERSION=v0.4.3
 
 # --- Core/Gateway binaries (private source; public binary image) ---
