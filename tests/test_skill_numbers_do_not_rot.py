@@ -35,8 +35,21 @@ _LINE_CLAIM = re.compile(r"~(\d+) lines of POSIX sh")
 
 # Prose whose truth expires with the release that shipped it. "this release"
 # reads as "the one you are holding", which is false for every later reader.
+_TIME_RELATIVE_PHRASES = (
+    "until this release",
+    "in this release",
+    "as of this release",
+    "this version",
+    "this edition",
+)
+
+# `\s+` between the words rather than a literal space: prose wraps. In v0.9.4 the
+# original offender wrapped mid-phrase — line 248 ended on "Until this", line 249
+# began with "release" — so a search for the literal string found the two
+# unwrapped occurrences and missed the one this guard exists to catch. Matching
+# the whitespace instead of collapsing the text keeps the exact line number too.
 _TIME_RELATIVE = re.compile(
-    r"\b(until this release|in this release|as of this release|this version|this edition)\b",
+    r"\b(" + "|".join(r"\s+".join(phrase.split()) for phrase in _TIME_RELATIVE_PHRASES) + r")\b",
     re.IGNORECASE,
 )
 
@@ -60,24 +73,18 @@ def test_the_installer_line_count_claim_matches_the_installer() -> None:
 
 
 def _offending_phrases(text: str) -> list[str]:
-    """Find the phrases in `text`, reading it as prose rather than as lines.
+    """Find the phrases anywhere in `text`, wrapped across lines or not.
 
-    Read line by line, this misses the case it was built for. In v0.9.4 the
-    original offender wrapped — line 248 ended on "Until this", line 249 began
-    with "release" — so a per-line search found the two unwrapped occurrences
-    and not the one the guard exists to catch. The mutation that proved the
-    guard inserted the phrase on a single line, which is why it looked proven:
-    a mutation has to reproduce the SHAPE of the original, not only its text.
-
-    Collapsing whitespace costs the line number, so each hit carries its own
-    surrounding prose instead — "there is a violation" without "where" is a
-    guard that has to be re-investigated by hand every time it fires.
+    The mutation that first "proved" this guard inserted the phrase on a single
+    line, so it never exercised the wrapped shape the original had — a mutation
+    has to reproduce the SHAPE of what it stands in for, not only its text.
     """
-    flat = re.sub(r"\s+", " ", text)
-    return [
-        f"…{flat[max(0, m.start() - 60) : m.end() + 60].strip()}…"
-        for m in _TIME_RELATIVE.finditer(flat)
-    ]
+    offenders = []
+    for match in _TIME_RELATIVE.finditer(text):
+        line_number = text.count("\n", 0, match.start()) + 1
+        phrase = " ".join(match.group().split())
+        offenders.append(f"line {line_number}: {phrase}")
+    return offenders
 
 
 def test_the_skill_makes_no_claim_that_expires_with_its_release() -> None:

@@ -61,6 +61,14 @@ different nonce, and confirming the mode does not release either of them.
 Confirmation from a messenger does not exist yet — the console is the only
 place that acknowledgment can be given.
 
+## What changed in 0.9.6
+
+- **The wallet states what it does not promise.** A `## Legal` section below, and
+  a full [DISCLAIMER](https://github.com/rustok-org/mcp/blob/main/DISCLAIMER.md)
+  that names the limit of every safeguard — including the two easiest to read as
+  absolute: autonomous mode sends without asking once confirmed, and
+  `sign_message` never reaches the console approval window at all.
+
 ## What changed in 0.9.5
 
 - **Gas limits now carry headroom.** A limit set to exactly the estimate turned

@@ -35,11 +35,18 @@ DISCLAIMER_URL = "https://github.com/rustok-org/mcp/blob/main/DISCLAIMER.md"
 # Every safeguard whose limit the wallet has, named the way the reader meets it.
 # Dropping one turns "here is every limit" into a lie of omission — which is the
 # failure mode a disclaimer is written to avoid in the first place.
-NAMED_LIMITS = (
-    "spending limits",  # there are none: no budget, no per-transaction cap
-    "txguard",  # flags risky transactions, does not block them
-    "Autonomous mode",  # once confirmed, sends without asking again
+#
+# Split by what the token IS. `sign_message` and `txguard` are identifiers that
+# exist in the code, and a reader has to be able to grep for exactly them. The
+# other two are prose: a limit named with a lowercase letter is still named, and
+# a guard that fails on a legitimate rewording teaches its author to ignore it.
+NAMED_IDENTIFIERS = (
     "sign_message",  # returns a signature without the console approval window
+    "txguard",  # flags risky transactions, does not block them
+)
+NAMED_IN_PROSE = (
+    "spending limits",  # there are none: no budget, no per-transaction cap
+    "autonomous mode",  # once confirmed, sends without asking again
 )
 
 
@@ -61,7 +68,8 @@ def test_the_disclaimer_names_every_limit() -> None:
     """The honesty list may grow. It may not quietly shrink."""
     assert DISCLAIMER.exists(), "DISCLAIMER.md is the canonical text and must exist"
     text = _read(DISCLAIMER)
-    missing = [limit for limit in NAMED_LIMITS if limit not in text]
+    missing = [name for name in NAMED_IDENTIFIERS if name not in text]
+    missing += [name for name in NAMED_IN_PROSE if name not in text.lower()]
     assert not missing, (
         "DISCLAIMER.md stopped naming: "
         + ", ".join(missing)
