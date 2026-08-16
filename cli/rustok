@@ -181,7 +181,9 @@ agent_list() {
 refuse_many_wallets() {
     # refuse_many_wallets <command> <id…> — the N>1 refusal, in ONE place for
     # console and set-pin, and it ALWAYS carries a hint. Three, by case, and
-    # they stack (`claude, claude, hermes` earns two):
+    # they can stack (`claude, test, old-unlabeled` earns the default AND the
+    # label nudge; `claude, claude, hermes` earns only the duplicate one — two
+    # claudes is not exactly one):
     #   1. exactly one wallet is `claude` → name the default and the flag;
     #   2. two or more carry the SAME name → that is two containers on one
     #      keystore (the storage-lock hazard, in words until the lock lands);
