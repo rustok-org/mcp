@@ -147,7 +147,7 @@ refuses too — a regenerated password could not open the keystore that is there
 | What | Where | Protected by |
 |---|---|---|
 | Your keys (`keystore.json`) | the wallet **volume** | AES-256-GCM under a 32-byte random password (Argon2id, 64 MiB × 3), file mode `0600` |
-| That password | podman **secret store** / `0600` file in `~/.config/rustok` (docker) | your user account on this machine |
+| That password | podman **secret store** / `0600` file in `~/.config/rustok` (docker) | your user account on this machine — nothing defends against code already running as you ([CAVEATS](CAVEATS.md#keys-and-the-approval-gate)) |
 | Your approval PIN | only its Argon2id **hash**, in the volume | three tries, then a five-minute lockout — while the wallet runs |
 | The 12 words | **nowhere** — the wallet does not store them | you: write them down offline |
 
