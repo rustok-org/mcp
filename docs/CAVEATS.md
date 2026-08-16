@@ -45,6 +45,21 @@ failure timeouts.
 `execute_transaction` is parked and needs your approval in a **separate console
 window**, with a PIN for high-risk items. `keystore.json` and `approval-pin.json`
 are owner-only (`0600`), and installs that predate that are narrowed at startup.
+The keyring password that encrypts the keystore is 32 random bytes the shim
+generates — stronger than anything a person would type — and lives in the
+engine's secret store, outside the volume.
+
+**The PIN is yours to choose — and that is a trade.** It used to be minted at
+random; now you choose the PIN at `rustok init`, so there is one code instead of two.
+The cost is named here rather than hidden: a chosen 6-digit PIN is not uniformly
+random. The wallet refuses the obvious ones (`000000`, `123456`, `121212`,
+`123123` and their kind) but **does not refuse dates** — a birthday is the one
+PIN the person next to you already knows, and the console grants three tries
+before a five-minute lockout. Pick something that is not a date. The offline case
+is unchanged: a copy of `approval-pin.json` can be brute-forced at leisure (it is
+an Argon2id hash, 64 MiB × 3, but six digits are six digits) — and a guessed PIN
+without the keystore's password opens nothing, which is why that password is now
+random rather than yours.
 
 **What does not hold.**
 

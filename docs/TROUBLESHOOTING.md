@@ -88,9 +88,9 @@ The wallet has not been created for this agent yet:
 rustok init                  # or: rustok init --agent hermes
 ```
 
-It prints the 12-word recovery phrase and the approval PIN exactly once — run it
-in your own terminal, never through an agent. Back both up, then start the agent
-again.
+You choose a 6-digit approval PIN and it prints the 12-word recovery phrase
+exactly once — run it in your own terminal, never through an agent. Back the
+words up, then start the agent again.
 
 ## `multiple wallets running: claude, hermes — use --agent <name>`
 
@@ -201,17 +201,44 @@ of hanging on a missing password:
 
 ## Wrong password
 
-Unlock fails with a wrong password. There is no reset — use the correct password,
-or recover from the 12-word phrase into a fresh wallet.
+Unlock fails with a wrong keyring password. Through the shim this cannot happen
+by typing — `rustok init` generates and stores that password itself and you never
+enter it. If you see it anyway, the stored secret and the keystore volume have
+been separated: the volume was copied to another machine without its secret, or
+the secret was removed and re-created. There is no reset for the password — the
+way back is the 12 words: `rustok restore` onto a fresh volume.
+
+If you run the container by hand (no shim) and typed the password yourself, use
+the one you typed at `create-wallet`.
 
 ## Forgot the approval PIN
 
-The PIN is printed only when the wallet is created. If you lost it, reset it in
-the running wallet (this needs the keyring password and an interactive TTY):
+Choose a new one — the old PIN is not needed, the wallet checks its own keyring
+password instead:
 
 ```bash
-docker exec -it "$(docker ps -q --filter label=rustok=wallet --filter label=rustok.agent=claude)" core-server set-pin
+rustok set-pin                  # or: rustok set-pin --agent hermes
 ```
+
+Run it in your own terminal, with the wallet running (`rustok console` starts
+it). By hand, without the shim: `docker exec -i <id> core-server set-pin` with
+the new PIN on its stdin; with nothing on stdin it generates one and prints it
+once. Either way the wallet proves it holds the keyring password before it
+changes anything, so a copy of the volume without the secret cannot rotate the PIN.
+
+## Lost the machine, or the volume — bringing a wallet back
+
+Your backup is the 12 words. On the new machine, after installing:
+
+```bash
+rustok restore                  # or: rustok restore --agent hermes
+```
+
+It asks for the phrase on one line, then for a new PIN, and prints the address
+it restored — check it against the one you expect. Same address, same funds; the
+payment journal and settings do not travel with the words. A copy of the wallet
+volume by itself is **not** a backup: the password that opens it lives outside
+the volume and is not something you know.
 
 ## "container name already in use" / cannot create container
 
@@ -239,9 +266,9 @@ causes for you; by hand, they are:
 
 ## After an update the wallet looks empty / the agent still runs the old version
 
-The wallet lives in the volume, not in the image: the same volume brings your
-address, keys and PIN back. A different volume name is a different (empty)
-wallet.
+The wallet lives in the volume, not in the image: the same volume (with its
+secret still in the store) brings your address, keys and PIN back. A different
+volume name is a different (empty) wallet.
 
 - A wallet that was **running** during `rustok update` keeps the previous image
   until its agent's next session (or until `rustok stop`) — restart the agent.

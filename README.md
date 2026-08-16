@@ -21,7 +21,7 @@ Rustok ships **two wallet products** — pick the trust model you want:
 curl --proto '=https' --tlsv1.2 -fsSL \
   https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.9.8/scripts/install.sh | sh
 
-rustok init             # creates the wallet — prints the 12 words + PIN once
+rustok init             # creates the wallet — you choose a PIN, it prints the 12 words once
 rustok connect claude   # registers it with your agent (or: cursor / hermes / openclaw)
 ```
 
