@@ -164,12 +164,36 @@ case "$cmd" in
         done
         # one-shot onboarding: register the volume, print the banner the human
         # must back up (the REAL one prints on the tty; the marker proves the
-        # shim let it through untouched)
+        # shim let it through untouched).
+        #
+        # Whatever the shim put on our STDIN is captured to a state file — that
+        # is how a test proves the PIN (and phrase) reached the core over the
+        # pipe and NOT as an argument or an env var. `cat` on a closed or empty
+        # stdin yields an empty file, which is the "no shim / minted" case. The
+        # real core prints a PIN banner only when it minted one; the stub does
+        # the same, so a test can tell "chosen, not printed" from "minted,
+        # printed" exactly as the real thing would show it.
         case "$*" in
-            *create-wallet)
+            *create-wallet | *restore-wallet)
+                # the subcommand is the LAST argv token
+                for one_shot in "$@"; do :; done
+                cat >"${STUB_STATE:?}/stdin-$one_shot" 2>/dev/null || :
+                # the core refusing (a PIN it will not take): exit 2, its own
+                # words on stderr, and NO volume registered — a refused PIN
+                # leaves the data dir empty, that is the core's contract
+                if [ -n "${STUB_RUN_EXIT:-}" ]; then
+                    echo "approval PIN refused: too predictable (stub)" 1>&2
+                    exit "$STUB_RUN_EXIT"
+                fi
                 [ -n "$volume" ] && : >"${STUB_STATE:?}/volume-$volume"
-                echo "STUB-SEED-BANNER twelve words here"
-                echo "STUB-PIN-BANNER 123456"
+                if [ "$one_shot" = "create-wallet" ]; then
+                    echo "STUB-SEED-BANNER twelve words here"
+                else
+                    echo "STUB-RESTORED-BANNER 0xSTUBADDRESS"
+                fi
+                if [ ! -s "${STUB_STATE:?}/stdin-$one_shot" ]; then
+                    echo "STUB-PIN-BANNER 123456"
+                fi
                 exit 0
                 ;;
         esac
@@ -255,6 +279,16 @@ case "$cmd" in
         if [ "$1" = "test" ]; then
             [ -f "${STUB_STATE:?}/socket-$id" ]
             exit $?
+        fi
+        # `exec -i <id> core-server set-pin`: the new PIN arrives on stdin, same
+        # capture as the one-shot `run` forms above, same reason.
+        if [ "$1" = "core-server" ] && [ "${2:-}" = "set-pin" ]; then
+            cat >"${STUB_STATE:?}/stdin-set-pin" 2>/dev/null || :
+            echo "EXEC:$id:$1"
+            if [ ! -s "${STUB_STATE:?}/stdin-set-pin" ]; then
+                echo "STUB-PIN-BANNER 654321"
+            fi
+            exit "${STUB_EXEC_EXIT:-0}"
         fi
         echo "EXEC:$id:$1"
         # The console's own exit code is load-bearing (1 fatal / 2 upgrade /

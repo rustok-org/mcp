@@ -38,9 +38,13 @@ Commands:
                  starts the wallet first if an initialized one is not running,
                  and stops it again on exit — a wallet that was ALREADY running
                  is left alone (an agent may be mid-turn with it)
-  init           create a NEW wallet for an agent (interactive; prints the
-                 12-word phrase and approval PIN exactly once — run it in your
-                 own terminal, never through an agent)
+  init           create a NEW wallet for an agent (interactive: you choose a
+                 6-digit approval PIN, it prints the 12-word phrase exactly
+                 once — run it in your own terminal, never through an agent)
+  restore        bring a wallet back from its 12 (or 24) words onto a fresh
+                 volume; you choose a new PIN (interactive, own terminal only)
+  set-pin        choose a new approval PIN for the RUNNING wallet
+                 (interactive, own terminal only; the old PIN stops working)
   connect        register the wallet as an MCP server with an agent client:
                  rustok connect claude|cursor|hermes|openclaw (the wallet
                  defaults to that client's own — --agent overrides);
@@ -64,9 +68,11 @@ Commands:
 
 Options:
   --agent <name>   the agent this wallet belongs to (default: claude)
-  --force          init: re-store the keyring password secret when it already
-                   exists (the keystore volume is never touched);
-                   connect: replace an existing MCP registration
+  --force          init: replace an orphaned keyring secret (one whose wallet
+                   volume is gone); over a LIVE volume init always refuses —
+                   the keyring password is generated, so re-storing it could
+                   not open the existing keystore. connect: replace an
+                   existing MCP registration
   --purge-keys     uninstall only: ALSO delete the keystore volumes after an
                    interactive confirmation on your terminal — this destroys
                    the keys; without your seed phrase backup the funds are
@@ -374,35 +380,105 @@ store_rpc_secrets() {
 
 # --- commands ----------------------------------------------------------------
 
-read_password_twice() {
-    # The gate: stdin must BE a terminal (a pipe or an agent shell fails
-    # `-t 0` deterministically — some agent sandboxes still carry a readable
-    # /dev/tty, so probing /dev/tty alone is not a reliable refusal). Then the
-    # password is read from /dev/tty itself, immune to later redirections
-    # (Rule of two windows).
+open_tty_or_die() {
+    # THE gate, in one place: stdin must BE a terminal (a pipe or an agent shell
+    # fails `-t 0` deterministically — some agent sandboxes still carry a
+    # readable /dev/tty, so probing /dev/tty alone is not a reliable refusal).
+    # Then fd 3 is opened on /dev/tty itself, immune to later redirections
+    # (Rule of two windows). Every secret a person types — password, PIN,
+    # phrase — comes in through this and only this; three copies of it would
+    # be three places obliged to agree with nothing making them.
+    # $1: the command name, for the refusal text.
     if [ ! -t 0 ]; then
-        die "init needs your own terminal — never run it through an agent or a pipe: the recovery phrase would leak into its context"
+        die "$1 needs your own terminal — never run it through an agent or a pipe: what you type here would leak into its context"
     fi
     if ! { exec 3</dev/tty; } 2>/dev/null; then
-        die "init needs your own terminal (no /dev/tty here) — never run it through an agent or a pipe: the recovery phrase would leak into its context"
+        die "$1 needs your own terminal (no /dev/tty here) — never run it through an agent or a pipe: what you type here would leak into its context"
     fi
-    # Restore echo (and drop the password) on Ctrl-C / kill during entry —
+    # Restore echo (and drop whatever was typed) on Ctrl-C / kill during entry —
     # otherwise the terminal is left with echo off.
-    trap 'stty echo </dev/tty 2>/dev/null || true; PW="" PW2=""; exit 130' INT TERM HUP
-    printf 'Keyring password (unlocks the keystore): ' >/dev/tty
-    stty -echo </dev/tty 2>/dev/null || true
-    IFS= read -r PW <&3 || PW=""
-    stty echo </dev/tty 2>/dev/null || true
-    printf '\n' >/dev/tty
-    printf 'Repeat the password: ' >/dev/tty
-    stty -echo </dev/tty 2>/dev/null || true
-    IFS= read -r PW2 <&3 || PW2=""
-    stty echo </dev/tty 2>/dev/null || true
-    printf '\n' >/dev/tty
+    trap 'stty echo </dev/tty 2>/dev/null || true; PW="" PIN="" PIN2="" PHRASE=""; exit 130' INT TERM HUP
+}
+
+close_tty() {
     trap - INT TERM HUP
     exec 3<&-
-    [ -n "$PW" ] || die "empty password — nothing stored"
-    [ "$PW" = "$PW2" ] || die "passwords do not match — nothing stored"
+}
+
+read_hidden_line() {
+    # read_hidden_line <prompt> → REPLY_LINE. Echo off for the duration; the
+    # line is read from fd 3 (the tty), never from stdin. `stty -echo` goes
+    # BEFORE the prompt: the old order (prompt, then -echo) left a window in
+    # which a fast typist — or a paste, or a pty driver — got their digits
+    # echoed to the screen before echo was off. Measured under a pty: the PIN
+    # appeared twice in the captured output.
+    stty -echo </dev/tty 2>/dev/null || true
+    printf '%s' "$1" >/dev/tty
+    IFS= read -r REPLY_LINE <&3 || REPLY_LINE=""
+    stty echo </dev/tty 2>/dev/null || true
+    printf '\n' >/dev/tty
+}
+
+read_pin_twice() {
+    # The one secret the person chooses. Six digits, typed twice on their own
+    # terminal. Shape is checked HERE only so a typo is caught before any engine
+    # call; the core checks it again — and the weak-pattern list, which lives
+    # ONLY there — before anything is written, so a caller that skips the shim
+    # gets the same answer. A PIN the core refuses (too predictable) comes back
+    # as its exit 2 with its own message, and the person runs the command
+    # again: the core leaves nothing behind on a refusal, so the retry is clean.
+    # $1: the command name, for the refusal text.
+    open_tty_or_die "$1"
+    read_hidden_line 'Choose a 6-digit approval PIN (you will enter it in the wallet console): '
+    PIN="$REPLY_LINE"
+    read_hidden_line 'Repeat the PIN: '
+    PIN2="$REPLY_LINE"
+    close_tty
+    REPLY_LINE=""
+    [ -n "$PIN" ] || die "empty PIN — nothing stored"
+    case "$PIN" in
+        [0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+        *) PIN="" PIN2=""; die "the PIN must be exactly 6 digits — nothing stored" ;;
+    esac
+    [ "$PIN" = "$PIN2" ] || { PIN="" PIN2=""; die "PINs do not match — nothing stored"; }
+    PIN2=""
+}
+
+read_phrase_once() {
+    # The recovery phrase: ONE line, echo ON. Twelve to twenty-four words typed
+    # blind is how typos happen, and the terminal already showed these words at
+    # create-wallet — no new exposure. Read once, not twice: the BIP-39
+    # checksum catches a wrong word, and the address the core prints back
+    # confirms the result; a second entry would take the person's time and
+    # give nothing the first did not.
+    # $1: the command name, for the refusal text.
+    open_tty_or_die "$1"
+    printf 'Recovery phrase (12 or 24 words) — paste or type them all on ONE line, spaces between: ' >/dev/tty
+    IFS= read -r PHRASE <&3 || PHRASE=""
+    close_tty
+    [ -n "$PHRASE" ] || die "empty phrase — nothing restored"
+}
+
+generate_password() {
+    # The keyring password is the shim's now, not the person's: 32 random bytes,
+    # base64. Stronger than anything typed, and never shown — the person's one
+    # secret is the PIN, their one backup is the phrase. `od` over /dev/urandom
+    # is POSIX; `openssl` may not be installed on a minimal host.
+    PW="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | \
+        awk '{
+            b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+            hex = $0; out = ""
+            for (i = 1; i <= length(hex); i += 6) {
+                chunk = substr(hex, i, 6)
+                while (length(chunk) < 6) chunk = chunk "0"
+                n = 0
+                for (j = 1; j <= 6; j++) n = n * 16 + index("0123456789abcdef", substr(chunk, j, 1)) - 1
+                out = out substr(b64, int(n / 262144) % 64 + 1, 1) substr(b64, int(n / 4096) % 64 + 1, 1) \
+                          substr(b64, int(n / 64) % 64 + 1, 1) substr(b64, n % 64 + 1, 1)
+            }
+            print out
+        }')"
+    [ "${#PW}" -ge 40 ] || die "could not generate a keyring password (is /dev/urandom readable?)"
 }
 
 store_password() {
@@ -425,6 +501,40 @@ remove_stored_password() {
     fi
 }
 
+run_one_shot() {
+    # run_one_shot <agent> <volume> <subcommand> — launch a one-shot core command
+    # (create-wallet, restore-wallet) with the volume, the password mount and
+    # the image, in ONE place. Our stdin — the PIN, or phrase+PIN, on the pipe —
+    # is inherited by the engine untouched. `-i`, not `-it`: a pty on top of a
+    # pipe is not a thing, and the banners the core prints go to stderr and
+    # need no tty. Two copies of this argv would be two places obliged to agree.
+    _agent="$1" _volume="$2" _sub="$3"
+    if [ "$engine" = "podman" ]; then
+        "$engine" run -i --rm -v "$_volume:/data" \
+            --secret "$(keyring_secret_mount "$_agent")" \
+            -e "RUSTOK_KEYRING_PASSWORD_FILE=$(keyring_secret_path "$_agent")" \
+            "$(image_ref)" "$_sub"
+    else
+        "$engine" run -i --rm -v "$_volume:/data" \
+            -v "$(password_file_for "$_agent"):/run/keyring-pass:ro" \
+            -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
+            "$(image_ref)" "$_sub"
+    fi
+}
+
+undo_secret_and_exit() {
+    # undo_secret_and_exit <agent> <status> — the core refused (a PIN it will
+    # not take, exit 2, its own words on stderr) or failed outright. Either way
+    # it left the data dir empty — that is its contract — so the secret the
+    # shim stored a moment ago is now an orphan, and left there it turns the
+    # person's very next retry into "secret already exists, use --force": two
+    # refusals for one typo. Roll our half back too; the retry is then clean.
+    # The exit code is the core's, handed back untouched.
+    PIN="" PIN2="" PHRASE="" PW=""
+    remove_stored_password "$1" 2>/dev/null || true
+    exit "$2"
+}
+
 cmd_init() {
     agent="${AGENT:-claude}"
     volume="$(volume_for "$agent")"
@@ -432,40 +542,93 @@ cmd_init() {
     volume_exists=0
     "$engine" volume exists "$volume" 2>/dev/null && volume_exists=1
 
-    if [ "$volume_exists" -eq 1 ] && [ "$FORCE" -eq 0 ]; then
-        die "wallet volume '$volume' already exists — init creates NEW wallets and never touches keystores. To re-store a changed keyring password: rustok init --force (secret only; your keys stay put)"
+    # Two different gates that used to share one flag. With the password now
+    # generated by the shim, "re-store it over a LIVE keystore" can never open
+    # that keystore again — there is no outcome in which the command reaches
+    # its goal, so it is refused outright, --force or not. An ORPHAN secret (the
+    # volume is gone, the secret stayed) is the opposite: nothing left to open,
+    # regenerating is exactly right, and --force is what asks for it.
+    if [ "$volume_exists" -eq 1 ]; then
+        if [ "$FORCE" -eq 1 ]; then
+            die "wallet volume '$volume' already exists — a regenerated password would make the existing keystore unreadable, so this is refused. To bring a wallet back from its 12 words on a fresh volume: rustok restore"
+        fi
+        die "wallet volume '$volume' already exists — init creates NEW wallets and never touches keystores. To bring a wallet back from its 12 words: rustok restore (on a fresh volume)"
     fi
     if secret_present "$agent" && [ "$FORCE" -eq 0 ]; then
         die "a stored keyring password for agent '$agent' already exists — rerun with --force to replace it (the keystore volume is never touched)"
     fi
 
-    read_password_twice
+    read_pin_twice init
+    generate_password
     if secret_present "$agent"; then
         remove_stored_password "$agent"
     fi
     store_password "$agent"
-    PW="" PW2=""
-    echo "rustok: keyring password stored for agent '$agent' ($engine)"
+    PW=""
 
-    if [ "$volume_exists" -eq 1 ]; then
-        echo "rustok: keystore volume '$volume' already present — password re-stored, wallet untouched"
-        return 0
+    # Onboarding prints the 12 words ONCE, on the inherited tty — the shim adds
+    # no capture, no tee, no log around it. The PIN goes IN on the pipe and is
+    # not printed back: the person just typed it.
+    echo "rustok: creating the wallet — back up the 12 words it prints:"
+    printf '%s\n' "$PIN" | run_one_shot "$agent" "$volume" create-wallet || undo_secret_and_exit "$agent" $?
+    PIN=""
+    echo "rustok: wallet created for agent '$agent' — your PIN is the one you chose. Next: rustok start (or connect your agent), then fund the address"
+}
+
+cmd_restore() {
+    agent="${AGENT:-claude}"
+    volume="$(volume_for "$agent")"
+
+    if "$engine" volume exists "$volume" 2>/dev/null; then
+        die "wallet volume '$volume' already exists — restore only writes to a fresh volume. If that wallet is the one you want, it is already here (rustok console); if not, remove the volume first (this loses whatever is in it unless you hold its phrase)"
     fi
 
-    # Onboarding prints the 12 words + PIN ONCE, on the inherited tty — the
-    # shim adds no capture, no tee, no log around it.
-    echo "rustok: creating the wallet — back up the 12 words and the PIN it prints:"
-    set -- run -it --rm -v "$volume:/data"
-    if [ "$engine" = "podman" ]; then
-        set -- "$@" --secret "$(keyring_secret_mount "$agent")" \
-            -e "RUSTOK_KEYRING_PASSWORD_FILE=$(keyring_secret_path "$agent")"
-    else
-        set -- "$@" -v "$(password_file_for "$agent"):/run/keyring-pass:ro" \
-            -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass
+    read_phrase_once restore
+    read_pin_twice restore
+    # restore-wallet encrypts the keystore under a keyring password like
+    # create-wallet does; an orphan secret (volume gone, secret stayed) is
+    # replaced without asking — there is no keystore it could still open.
+    generate_password
+    if secret_present "$agent"; then
+        remove_stored_password "$agent"
     fi
-    set -- "$@" "$(image_ref)" create-wallet
-    "$engine" "$@"
-    echo "rustok: wallet created for agent '$agent' — next: rustok start (or connect your agent), then fund the address"
+    store_password "$agent"
+    PW=""
+
+    echo "rustok: restoring the wallet — check the address it prints against the one you expect:"
+    # Line 1 the phrase, line 2 the PIN — the order restore-wallet reads them.
+    printf '%s\n%s\n' "$PHRASE" "$PIN" | run_one_shot "$agent" "$volume" restore-wallet || undo_secret_and_exit "$agent" $?
+    PHRASE="" PIN=""
+    echo "rustok: wallet restored for agent '$agent' — your PIN is the one you chose. Next: rustok start (or connect your agent)"
+}
+
+cmd_set_pin() {
+    # A new PIN into the RUNNING wallet, over the exec's stdin. The container is
+    # found by label exactly as the console finds it; N>1 is a named refusal
+    # that lists the choices, never a guess. The core proves keyring-password
+    # possession by unlocking before it writes — that is its check, not ours.
+    ids="$(discover_ids "$AGENT")"
+    # shellcheck disable=SC2086  # word-splitting the id list is the point
+    set -- $ids
+    case $# in
+        0)
+            if [ -n "$AGENT" ]; then
+                die "no wallet running for agent '$AGENT' — start it first (rustok console --agent $AGENT), then set-pin"
+            fi
+            die "no wallet running — start it first (rustok console), then set-pin"
+            ;;
+        1) ;;
+        *)
+            list="$(agent_list "$@")"
+            die "multiple wallets running: $list — use --agent <name>"
+            ;;
+    esac
+    read_pin_twice set-pin
+    # `-i` only: no tty on top of the pipe. The core's exit code comes back
+    # untouched — a refused PIN is its 2, and the person should see it as such.
+    printf '%s\n' "$PIN" | "$engine" exec -i "$1" core-server set-pin || { status=$?; PIN=""; exit "$status"; }
+    PIN=""
+    echo "rustok: approval PIN changed — the previous one no longer works"
 }
 
 wallet_run_args() {
@@ -1524,7 +1687,7 @@ CONNECT_TARGET=""
 
 if [ $# -gt 0 ]; then
     case "$1" in
-        console | status | doctor | init | start | stop | update | uninstall)
+        console | status | doctor | init | restore | set-pin | start | stop | update | uninstall)
             COMMAND="$1"
             shift
             ;;
@@ -1614,6 +1777,8 @@ case "$COMMAND" in
     status) cmd_status ;;
     doctor) cmd_doctor ;;
     init) cmd_init ;;
+    restore) cmd_restore ;;
+    set-pin) cmd_set_pin ;;
     connect) cmd_connect ;;
     start) cmd_start ;;
     stop) cmd_stop ;;

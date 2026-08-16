@@ -31,7 +31,7 @@ fresh() {
     : >"$WORK/log.tokens"
     # env hygiene: a previous test's exported wallet config must not leak in
     unset RUSTOK_RPC_URLS_1 RUSTOK_KEYRING_PASSWORD RUSTOK_IMAGE 2>/dev/null || true
-    for tool in sh cat sed head sort awk mkdir basename cut tr rm mv grep env sleep stty date cp; do
+    for tool in sh cat sed head sort awk mkdir basename cut tr rm mv grep env sleep stty date cp od; do
         ln -s "$(command -v "$tool")" "$WORK/bin/$tool"
     done
     ln -s "$TESTS_DIR/stub-bin/podman" "$WORK/bin/podman"
@@ -46,6 +46,7 @@ fresh() {
     STUB_STOP_FAIL=""
     STUB_VOLUME_RM_FAIL=""
     STUB_EXEC_EXIT=0
+    STUB_RUN_EXIT=""
     TEST_PATH="$WORK/bin"
 }
 
@@ -89,18 +90,29 @@ run_shim() {
 
 PY3="$(command -v python3)"
 
-run_init_pty() {
-    # run_init_pty <pw1> <pw2> [shim args…] — drives init on a real pty (the
-    # /dev/tty gate) feeding the two password lines like a human would.
-    pw1="$1"
-    pw2="$2"
-    shift 2
-    OUT="$(printf '%s\n%s\n' "$pw1" "$pw2" | \
+run_pty() {
+    # run_pty <lines-newline-joined> <shim args…> — drives the shim on a real
+    # pty (the /dev/tty gate), feeding one line per prompt like a human would.
+    # The first argument is the whole feed, lines separated by \n, so a caller
+    # can offer two PIN lines, or a phrase and then two PIN lines.
+    feed="$1"
+    shift
+    OUT="$(printf '%s\n' "$feed" | \
         HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config" \
         PATH="$TEST_PATH" STUB_LOG="$WORK/log" STUB_STATE="$WORK/state" \
         STUB_CONTAINERS="$STUB_CONTAINERS" STUB_LEGACY="$STUB_LEGACY" \
         STUB_INFO_FAIL="$STUB_INFO_FAIL" STUB_PS_FAIL="$STUB_PS_FAIL" \
-        "$PY3" "$TESTS_DIR/pty-init.py" sh "$SHIM" init "$@" 2>&1)" && RC=0 || RC=$?
+        STUB_EXEC_EXIT="$STUB_EXEC_EXIT" STUB_RUN_EXIT="$STUB_RUN_EXIT" \
+        "$PY3" "$TESTS_DIR/pty-init.py" sh "$SHIM" "$@" 2>&1)" && RC=0 || RC=$?
+}
+
+run_init_pty() {
+    # run_init_pty <pin1> <pin2> [shim args…] — init on a pty with the two PIN
+    # lines (kept as a thin wrapper: the existing tests read better this way).
+    pin1="$1"
+    pin2="$2"
+    shift 2
+    run_pty "$(printf '%s\n%s' "$pin1" "$pin2")" init "$@"
 }
 
 count_secrets() { set -- "$WORK/state"/secret-*; [ -e "$1" ] && echo $# || echo 0; }
@@ -432,9 +444,9 @@ if assert_exit 0 && assert_has "warn: 1 wallet(s) without a rustok.agent label";
 else not_ok "doctor warns about pre-label wallets"; fi
 
 # --- init: the trust boundary ---------------------------------------------------
-
-# shellcheck disable=SC2016  # literal $x is the point: the password must NOT expand
-PW_QUOTED='pa"ss$x'
+# One PIN. The person types a 6-digit PIN twice on their own terminal; the shim
+# generates the keyring password itself and never shows it. The PIN reaches the
+# core over STDIN — a state file the stub fills from its stdin is the witness.
 
 fresh
 run_shim init
@@ -444,46 +456,207 @@ if assert_exit 1 && assert_has "needs your own terminal" \
 else not_ok "init without a tty: named refusal (Rule of two windows)"; fi
 
 fresh
-run_init_pty "$PW_QUOTED" "$PW_QUOTED"
-if assert_exit 0 && assert_has "keyring password stored" \
-    && assert_has "STUB-SEED-BANNER" && assert_has "wallet created" \
-    && [ "$(cat "$WORK/state/secret-rustok-keyring-claude")" = "$PW_QUOTED" ] \
-    && ! grep -qF "$PW_QUOTED" "$WORK/log"; then
-    ok "init: quote-safe password stored byte-exact, never in engine argv; seed banner passes through"
-else not_ok "init: quote-safe password stored byte-exact, never in engine argv; seed banner passes through"; fi
+run_init_pty "402913" "402913"
+if assert_exit 0 && assert_has "STUB-SEED-BANNER" && assert_has "wallet created" \
+    && [ "$(cat "$WORK/state/stdin-create-wallet")" = "402913" ] \
+    && ! grep -qF "402913" "$WORK/log" \
+    && [ -s "$WORK/state/secret-rustok-keyring-claude" ] \
+    && ! grep -qF "$(cat "$WORK/state/secret-rustok-keyring-claude")" "$WORK/log" \
+    && assert_lacks "402913" \
+    && assert_lacks "STUB-PIN-BANNER"; then
+    ok "init: the PIN reaches the core on stdin, never in argv or output; a password is generated and stored, never printed"
+else not_ok "init: the PIN reaches the core on stdin, never in argv or output; a password is generated and stored, never printed"; fi
 
 fresh
-run_init_pty "one-password" "different-password"
-if assert_exit 1 && assert_has "passwords do not match — nothing stored" \
+run_init_pty "402913" "402913"
+pw="$(cat "$WORK/state/secret-rustok-keyring-claude")"
+if [ "${#pw}" -ge 40 ] && printf '%s' "$pw" | grep -qE '^[A-Za-z0-9+/=]+$'; then
+    ok "init: the generated password is long and base64 — not something a person typed"
+else not_ok "init: the generated password is long and base64 — not something a person typed (got ${#pw} chars)"; fi
+
+fresh
+run_init_pty "402913" "402914"
+if assert_exit 1 && assert_has "PINs do not match — nothing stored" \
+    && [ ! -f "$WORK/state/secret-rustok-keyring-claude" ] \
+    && [ ! -f "$WORK/state/stdin-create-wallet" ]; then
+    ok "init: PIN mismatch refuses, stores no password, calls no create-wallet"
+else not_ok "init: PIN mismatch refuses, stores no password, calls no create-wallet"; fi
+
+fresh
+run_init_pty "12345" "12345"
+if assert_exit 1 && assert_has "exactly 6 digits" \
     && [ ! -f "$WORK/state/secret-rustok-keyring-claude" ]; then
-    ok "init: password mismatch refuses and stores nothing"
-else not_ok "init: password mismatch refuses and stores nothing"; fi
+    ok "init: a PIN that is not six digits is refused before anything is stored"
+else not_ok "init: a PIN that is not six digits is refused before anything is stored"; fi
 
 fresh
 : >"$WORK/state/volume-rustok-wallet-tui"
 run_shim init
 if assert_exit 1 && assert_has "wallet volume 'rustok-wallet-tui' already exists" \
-    && assert_has "never touches keystores"; then
-    ok "init refuses when the keystore volume exists (no password even asked)"
-else not_ok "init refuses when the keystore volume exists (no password even asked)"; fi
+    && assert_has "rustok restore"; then
+    ok "init refuses when the keystore volume exists and points at restore (no PIN even asked)"
+else not_ok "init refuses when the keystore volume exists and points at restore (no PIN even asked)"; fi
 
 fresh
 printf 'old-password' >"$WORK/state/secret-rustok-keyring-claude"
 run_shim init
 if assert_exit 1 && assert_has "stored keyring password for agent 'claude' already exists" \
     && assert_has "--force"; then
-    ok "init refuses when the secret exists without --force"
-else not_ok "init refuses when the secret exists without --force"; fi
+    ok "init refuses when an orphan secret exists without --force"
+else not_ok "init refuses when an orphan secret exists without --force"; fi
 
+# --force after the design change: the password is generated, so re-generating it
+# over a LIVE keystore could never open that keystore again — a trap with no use.
+# The two gates that used to share one flag are told apart by whether the volume
+# exists.
 fresh
 : >"$WORK/state/volume-rustok-wallet-tui"
 printf 'old-password' >"$WORK/state/secret-rustok-keyring-claude"
-run_init_pty "new-password" "new-password" --force
-if assert_exit 0 && assert_has "password re-stored, wallet untouched" \
-    && [ "$(cat "$WORK/state/secret-rustok-keyring-claude")" = "new-password" ] \
-    && ! grep -qE '(run .*create-wallet|volume rm)' "$WORK/log"; then
-    ok "init --force re-stores the secret ONLY: no create-wallet, no volume rm"
-else not_ok "init --force re-stores the secret ONLY: no create-wallet, no volume rm"; fi
+run_init_pty "402913" "402913" --force
+if assert_exit 1 && assert_has "would make the existing keystore unreadable" \
+    && assert_has "rustok restore" \
+    && [ "$(cat "$WORK/state/secret-rustok-keyring-claude")" = "old-password" ] \
+    && ! grep -qE '(run .*create-wallet|volume rm|secret rm)' "$WORK/log"; then
+    ok "init --force over a LIVE volume refuses, keeps the old secret, touches nothing"
+else not_ok "init --force over a LIVE volume refuses, keeps the old secret, touches nothing"; fi
+
+fresh
+printf 'old-password' >"$WORK/state/secret-rustok-keyring-claude"
+run_init_pty "402913" "402913" --force
+if assert_exit 0 && assert_has "wallet created" \
+    && [ "$(cat "$WORK/state/secret-rustok-keyring-claude")" != "old-password" ] \
+    && [ "$(cat "$WORK/state/stdin-create-wallet")" = "402913" ]; then
+    ok "init --force with an ORPHAN secret (no volume) replaces it and creates the wallet"
+else not_ok "init --force with an ORPHAN secret (no volume) replaces it and creates the wallet"; fi
+
+# The core refuses a PIN it finds too predictable (exit 2, its own message). By
+# then the shim has already stored a freshly generated secret. Left there, the
+# person's retry — with a better PIN, one command later — hits "secret already
+# exists, use --force": two refusals for one typo. So a core refusal rolls the
+# shim's half back, and the retry on the same agent is clean.
+fresh
+STUB_RUN_EXIT=2
+run_init_pty "402913" "402913"
+if assert_exit 2 && [ ! -f "$WORK/state/secret-rustok-keyring-claude" ] \
+    && grep -q '^podman secret rm rustok-keyring-claude' "$WORK/log"; then
+    ok "init: when the core refuses the PIN, the shim removes the secret it just stored — the retry is clean"
+else not_ok "init: when the core refuses the PIN, the shim removes the secret it just stored — the retry is clean"; fi
+STUB_RUN_EXIT=""
+
+# --- restore: the phrase comes back, on the same terms as init ------------------
+# One line for the phrase (echo on — twelve words blind is how typos happen, and
+# the terminal already saw them at create-wallet), then the PIN twice. Same tty
+# gate as init. The shim generates and stores a keyring password exactly as init
+# does — restore-wallet needs one to encrypt the keystore.
+
+PHRASE_12="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+
+fresh
+run_shim restore
+if assert_exit 1 && assert_has "needs your own terminal" \
+    && assert_has "never run it through an agent"; then
+    ok "restore without a tty: named refusal, same gate as init"
+else not_ok "restore without a tty: named refusal, same gate as init"; fi
+
+fresh
+run_pty "$(printf '%s\n%s\n%s' "$PHRASE_12" "715048" "715048")" restore
+if assert_exit 0 && assert_has "STUB-RESTORED-BANNER" \
+    && [ "$(cat "$WORK/state/stdin-restore-wallet")" = "$(printf '%s\n%s' "$PHRASE_12" "715048")" ] \
+    && ! grep -qF "abandon" "$WORK/log" && ! grep -qF "715048" "$WORK/log" \
+    && [ -s "$WORK/state/secret-rustok-keyring-claude" ] \
+    && [ -f "$WORK/state/volume-rustok-wallet-tui" ] \
+    && assert_lacks "715048" && assert_lacks "STUB-PIN-BANNER"; then
+    ok "restore: phrase then PIN reach the core on stdin (two lines), never in argv or output; password generated; volume created"
+else not_ok "restore: phrase then PIN reach the core on stdin (two lines), never in argv or output; password generated; volume created"; fi
+
+fresh
+run_pty "$(printf '%s\n%s\n%s' "$PHRASE_12" "715048" "715049")" restore
+if assert_exit 1 && assert_has "PINs do not match — nothing stored" \
+    && [ ! -f "$WORK/state/stdin-restore-wallet" ] \
+    && [ ! -f "$WORK/state/secret-rustok-keyring-claude" ]; then
+    ok "restore: PIN mismatch refuses before any engine call, stores no password"
+else not_ok "restore: PIN mismatch refuses before any engine call, stores no password"; fi
+
+fresh
+: >"$WORK/state/volume-rustok-wallet-tui"
+run_shim restore
+if assert_exit 1 && assert_has "wallet volume 'rustok-wallet-tui' already exists" \
+    && assert_lacks "needs your own terminal"; then
+    ok "restore refuses over an existing volume BEFORE asking for the phrase (no tty even needed to be told)"
+else not_ok "restore refuses over an existing volume BEFORE asking for the phrase (no tty even needed to be told)"; fi
+
+fresh
+printf 'orphan' >"$WORK/state/secret-rustok-keyring-claude"
+run_pty "$(printf '%s\n%s\n%s' "$PHRASE_12" "715048" "715048")" restore
+if assert_exit 0 && [ "$(cat "$WORK/state/secret-rustok-keyring-claude")" != "orphan" ]; then
+    ok "restore replaces an orphan secret without being asked — there is no keystore it could have opened"
+else not_ok "restore replaces an orphan secret without being asked — there is no keystore it could have opened"; fi
+
+fresh
+run_pty "$(printf '%s\n%s\n%s' "$PHRASE_12" "715048" "715048")" restore --agent hermes
+if assert_exit 0 && [ -f "$WORK/state/volume-rustok-hermes" ] \
+    && [ -s "$WORK/state/secret-rustok-keyring-hermes" ]; then
+    ok "restore --agent <name>: the existing convention, its own volume and secret"
+else not_ok "restore --agent <name>: the existing convention, its own volume and secret"; fi
+
+fresh
+run_shim restore hermes
+if assert_exit 2 && assert_has "unknown option 'hermes'"; then
+    ok "restore <agent> positional is NOT a thing — the option loop refuses it like any stray word"
+else not_ok "restore <agent> positional is NOT a thing — the option loop refuses it like any stray word"; fi
+
+fresh
+STUB_RUN_EXIT=2
+run_pty "$(printf '%s\n%s\n%s' "$PHRASE_12" "402913" "402913")" restore
+if assert_exit 2 && [ ! -f "$WORK/state/secret-rustok-keyring-claude" ] \
+    && grep -q '^podman secret rm rustok-keyring-claude' "$WORK/log"; then
+    ok "restore: when the core refuses the PIN, the shim removes the secret it just stored — the retry is clean"
+else not_ok "restore: when the core refuses the PIN, the shim removes the secret it just stored — the retry is clean"; fi
+STUB_RUN_EXIT=""
+
+# --- set-pin: a new PIN into the RUNNING wallet, over exec -i ------------------
+# The container is found by label like the console does; the PIN goes over the
+# exec's stdin. No file, no argument. Empty when no wallet is running.
+
+fresh
+STUB_CONTAINERS="abc123;rustok=wallet;rustok.agent=claude;image=img"
+run_pty "$(printf '%s\n%s' "715048" "715048")" set-pin
+if assert_exit 0 && [ "$(cat "$WORK/state/stdin-set-pin")" = "715048" ] \
+    && grep -q "^podman exec -i abc123 core-server set-pin" "$WORK/log" \
+    && ! grep -qF "715048" "$WORK/log" && assert_lacks "715048"; then
+    ok "set-pin: the new PIN reaches core-server set-pin over exec -i stdin, targeted by label"
+else not_ok "set-pin: the new PIN reaches core-server set-pin over exec -i stdin, targeted by label"; fi
+
+fresh
+STUB_CONTAINERS="abc123;rustok=wallet;rustok.agent=claude;image=img"
+run_shim set-pin
+if assert_exit 1 && assert_has "needs your own terminal"; then
+    ok "set-pin without a tty: same named refusal"
+else not_ok "set-pin without a tty: same named refusal"; fi
+
+fresh
+STUB_CONTAINERS=""
+run_pty "$(printf '%s\n%s' "715048" "715048")" set-pin
+if assert_exit 1 && assert_has "no wallet running" && assert_has "rustok console" \
+    && [ ! -f "$WORK/state/stdin-set-pin" ]; then
+    ok "set-pin with no wallet running: named refusal that says how to start one, no PIN sent anywhere"
+else not_ok "set-pin with no wallet running: named refusal that says how to start one, no PIN sent anywhere"; fi
+
+fresh
+STUB_CONTAINERS="abc123;rustok=wallet;rustok.agent=claude;image=img def456;rustok=wallet;rustok.agent=hermes;image=img"
+run_pty "$(printf '%s\n%s' "715048" "715048")" set-pin
+if assert_exit 1 && assert_has "multiple wallets running" && assert_has "use --agent <name>"; then
+    ok "set-pin with two wallets: names them, does not pick one"
+else not_ok "set-pin with two wallets: names them, does not pick one"; fi
+
+fresh
+STUB_CONTAINERS="abc123;rustok=wallet;rustok.agent=claude;image=img"
+STUB_EXEC_EXIT=2
+run_pty "$(printf '%s\n%s' "715048" "715048")" set-pin
+if assert_exit 2; then
+    ok "set-pin hands back the core's exit code untouched (a refused PIN is the core's 2)"
+else not_ok "set-pin hands back the core's exit code untouched (a refused PIN is the core's 2)"; fi
+STUB_EXEC_EXIT=""
 
 fresh
 run_shim status --force
@@ -1574,15 +1747,16 @@ plant_docker_stub
 remove_podman_stub
 mkdir -p "$WORK/home/.config/rustok"
 echo "engine=docker" >"$WORK/home/.config/rustok/config"
-run_init_pty "$PW_QUOTED" "$PW_QUOTED"
+run_init_pty "402913" "402913"
 PWFILE="$WORK/home/.config/rustok/keyring-pass-claude"
-if assert_exit 0 && [ -f "$PWFILE" ] \
-    && [ "$(cat "$PWFILE")" = "$PW_QUOTED" ] \
+if assert_exit 0 && [ -f "$PWFILE" ] && [ -s "$PWFILE" ] \
     && [ "$(stat -c '%a' "$PWFILE")" = "600" ] \
     && ! grep -q 'secret create' "$WORK/log" \
-    && ! grep -qF "$PW_QUOTED" "$WORK/log"; then
-    ok "docker init: 0600 password file, byte-exact, no secret store, argv clean"
-else not_ok "docker init: 0600 password file, byte-exact, no secret store, argv clean"; fi
+    && ! grep -qF "$(cat "$PWFILE")" "$WORK/log" \
+    && grep -q -- '-v .*keyring-pass-claude:/run/keyring-pass:ro' "$WORK/log" \
+    && grep -q 'RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass' "$WORK/log"; then
+    ok "docker init: generated password in a 0600 file, mounted read-only, no secret store, argv clean"
+else not_ok "docker init: generated password in a 0600 file, mounted read-only, no secret store, argv clean"; fi
 
 # --- static invariant: init/start never destroy keystore volumes ------------------
 

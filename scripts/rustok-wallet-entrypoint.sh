@@ -83,20 +83,27 @@ fi
 # the file was still in the exited container's layer.
 trap cleanup_staged_password EXIT INT TERM
 
-if [ "$1" = "create-wallet" ]; then
+case "$1" in
+create-wallet | restore-wallet)
     # `exec`, for the same reason the serving path ends in one: `/proc/1/environ`
     # is the environment this process was *started* with, so the `unset` above
     # did not reach it, and onboarding — argon2 over a fresh keystore — is long
     # enough to be worth reading. The replacement is a shell rather than
     # core-server itself because the staged file still has to go afterwards, and
     # a trap does not survive `exec`.
+    #
+    # Both one-shot commands take the person's typed secrets on STDIN (the PIN;
+    # for restore, the phrase then the PIN). Neither `exec` nor `sh -c` touches
+    # fd 0, so the pipe the shim opened reaches core-server as is — no staging,
+    # no file, nothing to remove afterwards. Only the password is a file.
     exec sh -c '
-        RUSTOK_KEYRING_PASSWORD_FILE="$1" core-server create-wallet
+        RUSTOK_KEYRING_PASSWORD_FILE="$1" core-server "$3"
         status=$?
         [ -z "$2" ] || rm -f "$2"
         exit $status
-    ' rustok-wallet-entrypoint "$PASSWORD_FILE" "$STAGED_PASSWORD_FILE"
-fi
+    ' rustok-wallet-entrypoint "$PASSWORD_FILE" "$STAGED_PASSWORD_FILE" "$1"
+    ;;
+esac
 
 # Backend in the background; stdout -> stderr so it never pollutes the MCP channel.
 # Core MUST be up before the Gateway starts — the Gateway connects to Core once
