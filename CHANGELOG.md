@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **One PIN.** `rustok init` asks you to choose a 6-digit approval PIN and
+  generates the keyring password itself; it prints only the 12-word phrase.
+  There used to be two secrets — a password you typed and a PIN the wallet
+  minted and printed beside the phrase — and the console asked for the second
+  while people brought the first (reported live, 2026-08-08). The PIN and the
+  phrase reach the wallet over a pipe, never as an argument or a variable, and
+  the wallet checks the PIN's shape and refuses the obvious patterns (`000000`,
+  `123456`, `121212`, `123123` and their kind) before it writes anything.
+  Requires the core that ships with this release; against an older image
+  `init` still works and the wallet mints a PIN as before.
+- **`rustok init --force` over a live wallet volume now refuses.** It used to
+  re-store a password you typed; with the password generated, re-storing would
+  make the existing keystore unreadable, so there is no outcome in which the
+  command does what it says. Over an orphaned secret (the volume is gone) it
+  does what it always did. The refusal names `rustok restore`.
+- **The PIN you choose is not as random as the one that was minted — said
+  plainly.** The wallet refuses the obvious patterns but not dates; a birthday
+  is the one PIN the person next to you already knows, and the console allows
+  three tries before a five-minute lockout. CAVEATS says so, INSTALL says pick
+  something that is not a date. The keystore itself is under a random 32-byte
+  password now rather than a typed one — stronger than before, and the reason a
+  guessed PIN opens nothing without it.
+
+### Added
+- **`rustok restore`** — bring a wallet back from its 12 (or 24) words onto a
+  fresh volume: the phrase on one line, then a new PIN; it prints the address
+  it restored so you can check it is the one you expect. Same address, same
+  funds; the payment journal and settings do not travel with the words.
+- **`rustok set-pin`** — choose a new approval PIN for the running wallet, in
+  your own terminal. The old PIN is not needed; the wallet proves it holds the
+  keyring password before it changes anything.
+- **A guard on the texts.** No published text may describe the two-secret flow
+  again — a printed PIN, a typed password, the volume offered as a backup — and
+  every text that teaches `rustok init` says you choose the PIN. Same shape as
+  the signing guard: it holds the description still and knows nothing about
+  what the wallet does; the binary's own tests hold the behaviour.
+
+### Fixed
+- **A copy of the wallet volume was described as a backup. It is not.** The
+  password that opens it lives outside the volume and, through the shim, is not
+  something you know. Every place that said "back up the volume" now says the
+  12 words are the backup, and INSTALL carries a table of where each thing
+  lives and what protects it.
+- **A fast typist could see their PIN.** `stty -echo` came after the prompt, so
+  digits typed — or pasted, or fed by a terminal driver — before echo went off
+  were shown. Measured under a pty: the PIN appeared twice in the capture. Echo
+  now goes off before the prompt. This was true of the old password prompt too;
+  the test that would have caught it only looked at the engine's log, not at
+  what the shim printed.
+- **A refused PIN no longer leaves a half-made wallet behind.** The keystore was
+  written before the PIN was read; a PIN the wallet refused left a wallet whose
+  phrase had never been shown and whose PIN was never set, and the retry said
+  "already exists". The PIN is checked first now, and a refusal leaves the data
+  dir empty. On the shim's side, the secret it had just stored is removed on a
+  refusal too, so the retry does not run into "secret already exists".
+
 ## [0.9.8] — 2026-08-12
 
 ### Fixed

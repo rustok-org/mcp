@@ -16,7 +16,7 @@
 #
 # What it deliberately does NOT do (epic invariant #1): it never touches a
 # secret, a keystore volume or your wallet. Creating the wallet — the 12-word
-# phrase and the approval PIN — is a separate step YOU run in your own terminal
+# phrase, and asks you to choose an approval PIN — is a separate step YOU run in your own terminal
 # afterwards: `rustok init`. The installer runs over a pipe; the recovery phrase
 # must never pass through one.
 #
@@ -314,7 +314,7 @@ main() {
         say "you have the right bytes (pinned by digest), but not proof of who built them."
         say "to check provenance later, install cosign 3 or newer and run the verify command printed above."
     fi
-    say "next (in YOUR terminal, never through an agent): rustok init   — creates the wallet and prints your 12-word phrase + PIN once"
+    say "next (in YOUR terminal, never through an agent): rustok init   — you choose a 6-digit PIN, it prints your 12-word phrase once"
     say "to roll back to a previous version, re-run the installer from that version's tag: $RAW_BASE/wallet-tui-v<older>/scripts/install.sh"
 }
 
