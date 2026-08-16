@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-08-16
+
 ### Changed
 - **One PIN.** `rustok init` asks you to choose a 6-digit approval PIN and
   generates the keyring password itself; it prints only the 12-word phrase.
