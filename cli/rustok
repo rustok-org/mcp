@@ -178,6 +178,41 @@ agent_list() {
     done | LC_ALL=C sort | awk 'NR > 1 { printf ", " } { printf "%s", $0 } END { print "" }'
 }
 
+refuse_many_wallets() {
+    # refuse_many_wallets <command> <id…> — the N>1 refusal, in ONE place for
+    # console and set-pin, and it ALWAYS carries a hint. Three, by case, and
+    # they can stack (`claude, test, old-unlabeled` earns the default AND the
+    # label nudge; `claude, claude, hermes` earns only the duplicate one — two
+    # claudes is not exactly one):
+    #   1. exactly one wallet is `claude` → name the default and the flag;
+    #   2. two or more carry the SAME name → that is two containers on one
+    #      keystore (the storage-lock hazard, in words until the lock lands);
+    #   3. `(unlabeled)` → the label-migration nudge, as before.
+    # Names are compared whole, per wallet — `claude2` is not `claude`.
+    cmd="$1"
+    shift
+    list="$(agent_list "$@")"
+    echo "rustok: multiple wallets running: $list — use --agent <name>" 1>&2
+    # One awk pass over the sorted names: count exact `claude`, collect names
+    # seen more than once. awk and sort are already in the shim's toolset;
+    # `uniq -d` would be one more coreutil to require for a single line.
+    names="$(for id in "$@"; do agent_of "$id"; done | LC_ALL=C sort)"
+    claude_n="$(printf '%s\n' "$names" | awk '$0 == "claude" { n++ } END { print n + 0 }')"
+    dupes="$(printf '%s\n' "$names" | awk 'seen[$0]++ == 1 { printf "%s%s", (d++ ? ", " : ""), $0 } END { print "" }')"
+    if [ "$claude_n" -eq 1 ]; then
+        echo "rustok: hint: your default agent is claude — rustok $cmd --agent claude" 1>&2
+    fi
+    if [ -n "$dupes" ]; then
+        echo "rustok: hint: two wallets carry the same name ($dupes) — that is two containers on one keystore. Stop one: rustok status lists them, then podman stop <id>" 1>&2
+    fi
+    case "$list" in
+        *"(unlabeled)"*)
+            echo "rustok: hint: an '(unlabeled)' wallet predates the label model — add --label rustok.agent=<name> to its launch config (see docs/INSTALL.md)" 1>&2
+            ;;
+    esac
+    exit 1
+}
+
 # --- per-agent naming ----------------------------------------------------------
 
 volume_for() {
@@ -618,10 +653,7 @@ cmd_set_pin() {
             die "no wallet running — start it first (rustok console), then set-pin"
             ;;
         1) ;;
-        *)
-            list="$(agent_list "$@")"
-            die "multiple wallets running: $list — use --agent <name>"
-            ;;
+        *) refuse_many_wallets set-pin "$@" ;;
     esac
     read_pin_twice set-pin
     # `-i` only: no tty on top of the pipe. The core's exit code comes back
@@ -803,16 +835,7 @@ cmd_console() {
             # not switch off the lights on the way out.
             enter_console "$1" guest
             ;;
-        *)
-            list="$(agent_list "$@")"
-            echo "rustok: multiple wallets running: $list — use --agent <name>" 1>&2
-            case "$list" in
-                *"(unlabeled)"*)
-                    echo "rustok: hint: an '(unlabeled)' wallet predates the label model — add --label rustok.agent=<name> to its launch config (see docs/INSTALL.md)" 1>&2
-                    ;;
-            esac
-            exit 1
-            ;;
+        *) refuse_many_wallets console "$@" ;;
     esac
 }
 

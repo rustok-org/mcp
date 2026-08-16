@@ -117,3 +117,9 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Ask the shipped image what it does about signing
         run: uv run pytest tests/e2e/test_signing_is_refused_e2e.py -m e2e -q
+      # Same shape, second pair: the texts say the person chooses the PIN and
+      # the twelve words bring the wallet back — this asks the pinned image
+      # whether that is so. Named here by file, like its sibling: a guard that
+      # is silently not selected reports the same green as one that ran.
+      - name: Ask the shipped image whether it takes the PIN the person chose
+        run: uv run pytest tests/e2e/test_one_pin_is_what_the_image_does_e2e.py -m e2e -q

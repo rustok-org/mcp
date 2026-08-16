@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A data dir the wallet cannot write is a named refusal, not a crash.** `set-pin`
+  and `create-wallet` used to panic (exit 101, a backtrace) when the PIN record
+  could not be written — wrong owner on `/data`, a read-only mount, a full disk.
+  They now say what to fix and exit 2; on `set-pin` the previous PIN stands.
+  Found live, through a volume copy that left `/data` owned by root.
+
+### Added
+- **The refusal to pick between several wallets now says which is yours.** With
+  a second agent running, `rustok console` (and `set-pin`) refused with
+  "claude, test — use --agent <name>" and no more; with two containers on ONE
+  keystore it refused with "claude, claude" and said nothing at all. Both now
+  carry a hint: the first names your default (`--agent claude`); the second says
+  two wallets share a name — that is two containers on one keystore — and how to
+  stop one. Until the storage lock lands, that hint is the lock in words.
+- **A live twin for the one-PIN text guard.** The texts say you choose the PIN
+  and the twelve words bring the wallet back; a new e2e asks the pinned image
+  whether that is so — `create-wallet` with a PIN on stdin, `restore-wallet`
+  with the reference phrase — and runs in the same CI job as the signing guard.
+  Neither half is worth much alone.
+- TROUBLESHOOTING says it plainly: `set-pin` needs the wallet running, and the
+  console stops the wallet it started when you leave — `rustok start` first, or
+  a second terminal.
+
 ## [0.10.0] — 2026-08-16
 
 ### Changed

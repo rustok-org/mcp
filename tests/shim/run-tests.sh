@@ -436,6 +436,62 @@ if assert_exit 1 \
     ok "refusal names (unlabeled) and hints at the label migration"
 else not_ok "refusal names (unlabeled) and hints at the label migration"; fi
 
+# --- the N>1 refusal always carries a hint, one of three by case (16.08) -------
+# Live acceptance of 0.10.0: with a test wallet beside the real one, `console`
+# refused with "claude, test" and no hint that claude is the default; with two
+# containers on ONE keystore it refused with "claude, claude" and said nothing
+# at all — and that second case is the storage-lock hazard in disguise.
+
+fresh
+STUB_CONTAINERS="a1;rustok=wallet;rustok.agent=claude;image=img b2;rustok=wallet;rustok.agent=test;image=img"
+run_shim console
+if assert_exit 1 && assert_has "multiple wallets running: claude, test" \
+    && assert_has "hint: your default agent is claude — rustok console --agent claude" \
+    && assert_lacks "same name"; then
+    ok "N>1 with exactly one claude: the hint names the default"
+else not_ok "N>1 with exactly one claude: the hint names the default"; fi
+
+fresh
+STUB_CONTAINERS="a1;rustok=wallet;rustok.agent=claude;image=img b2;rustok=wallet;rustok.agent=claude;image=img"
+run_shim console
+if assert_exit 1 && assert_has "multiple wallets running: claude, claude" \
+    && assert_has "hint: two wallets carry the same name" \
+    && assert_has "two containers on one keystore" \
+    && assert_has "podman stop" \
+    && assert_lacks "your default agent is claude"; then
+    ok "N>1 with a duplicated name: the hint says two containers share one keystore, and how to stop one"
+else not_ok "N>1 with a duplicated name: the hint says two containers share one keystore, and how to stop one"; fi
+
+fresh
+STUB_CONTAINERS="a1;rustok=wallet;rustok.agent=claude;image=img b2;rustok=wallet;rustok.agent=claude;image=img c3;rustok=wallet;rustok.agent=hermes;image=img"
+run_shim console
+if assert_exit 1 && assert_has "same name" && assert_lacks "your default agent is claude"; then
+    ok "claude, claude, hermes: the duplicate hint fires; claude is not exactly one, so the default hint does not"
+else not_ok "claude, claude, hermes: the duplicate hint fires; claude is not exactly one, so the default hint does not"; fi
+
+fresh
+STUB_CONTAINERS="a1;rustok=wallet;rustok.agent=hermes;image=img b2;rustok=wallet;rustok.agent=cursor;image=img"
+run_shim console
+if assert_exit 1 && assert_has "multiple wallets running: cursor, hermes" \
+    && assert_lacks "your default agent" && assert_lacks "same name"; then
+    ok "N>1 without claude and without duplicates: the bare refusal, no hint that would mislead"
+else not_ok "N>1 without claude and without duplicates: the bare refusal, no hint that would mislead"; fi
+
+fresh
+STUB_CONTAINERS="a1;rustok=wallet;rustok.agent=claude2;image=img b2;rustok=wallet;rustok.agent=test;image=img"
+run_shim console
+if assert_exit 1 && assert_lacks "your default agent is claude"; then
+    ok "claude2 is not claude: the default hint matches the whole name, not a prefix"
+else not_ok "claude2 is not claude: the default hint matches the whole name, not a prefix"; fi
+
+fresh
+STUB_CONTAINERS="a1;rustok=wallet;rustok.agent=claude;image=img b2;rustok=wallet;rustok.agent=test;image=img"
+run_pty "$(printf '%s\n%s' "715048" "715048")" set-pin
+if assert_exit 1 && assert_has "multiple wallets running" \
+    && assert_has "hint: your default agent is claude — rustok set-pin --agent claude"; then
+    ok "set-pin shares the hint, worded for set-pin"
+else not_ok "set-pin shares the hint, worded for set-pin"; fi
+
 fresh
 STUB_CONTAINERS="old111;rustok=wallet;image=img"
 run_shim doctor
