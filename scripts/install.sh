@@ -48,7 +48,7 @@ set -eu
 # makes "what you read is what runs" true for the shim too.
 WALLET_VERSION="0.10.0"
 WALLET_DIGEST="sha256:36f9535a0f2bdf3ab6f727517080f9d17781e1bb078a29f4689904b52e71880f"
-SHIM_SHA256="931ed1945410c34c5b90d6960c4f56da2eb4cf478af84536d7f1a6f8ad177562"
+SHIM_SHA256="ce22d667e7177b60ffb41b85254dc34b3e1c91f0117849458a7000e9f4f0b50c"
 
 IMAGE_REPO="ghcr.io/rustok-org/rustok-wallet-tui"
 RAW_BASE="https://raw.githubusercontent.com/rustok-org/mcp"

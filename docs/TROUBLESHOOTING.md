@@ -220,8 +220,10 @@ password instead:
 rustok set-pin                  # or: rustok set-pin --agent hermes
 ```
 
-Run it in your own terminal, with the wallet running (`rustok console` starts
-it). By hand, without the shim: `docker exec -i <id> core-server set-pin` with
+Run it in your own terminal, **with the wallet running**. Note that `rustok console`
+starts the wallet but also stops it again when you leave — so either run
+`rustok start --agent <name>` first and then `set-pin`, or run `set-pin` from a
+second terminal while the console is open. By hand, without the shim: `docker exec -i <id> core-server set-pin` with
 the new PIN on its stdin; with nothing on stdin it generates one and prints it
 once. Either way the wallet proves it holds the keyring password before it
 changes anything, so a copy of the volume without the secret cannot rotate the PIN.
