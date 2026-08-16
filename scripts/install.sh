@@ -47,7 +47,7 @@ set -eu
 # different shim while the script they read stayed the same — the hash is what
 # makes "what you read is what runs" true for the shim too.
 WALLET_VERSION="0.10.0"
-WALLET_DIGEST="sha256:c44644e34550bc6dfa443137fc188922cd34b74d9cf079b47772967011fba7e6"
+WALLET_DIGEST="sha256:36f9535a0f2bdf3ab6f727517080f9d17781e1bb078a29f4689904b52e71880f"
 SHIM_SHA256="931ed1945410c34c5b90d6960c4f56da2eb4cf478af84536d7f1a6f8ad177562"
 
 IMAGE_REPO="ghcr.io/rustok-org/rustok-wallet-tui"
