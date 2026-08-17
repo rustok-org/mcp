@@ -1,0 +1,140 @@
+name: Release Shelf
+
+# A tag is the moment a release actually happened — everything else (version
+# bumps, the image, its signature, the pins) is already done by then, and the tag
+# lands last, on the commit that carries the filled pins. So this is where the
+# GitHub Release gets written, and NOT inside `wallet-publish.yml`: that workflow
+# runs BEFORE the tag exists, so there would be nothing to attach a release to.
+#
+# Why it exists at all: releases 0.9.8 and 0.10.0 were tagged, published, signed
+# and listed — and never appeared on the releases page, because creating one was
+# a step that lived only in someone's memory. It is not in the checklist either
+# (2026-08-17). This workflow is that memory, made mechanical.
+#
+# It deliberately does NOT touch the image, the tags, or the signature. The worst
+# it can do is write a wrong body or badge, both fixable with `gh release edit`.
+
+on:
+  push:
+    tags:
+      - "wallet-tui-v*"
+
+permissions:
+  contents: write # create a release; nothing else is needed, nothing else is granted
+
+concurrency:
+  # Per tag, and never cancelled: a half-written release is worse than a slow one.
+  group: release-shelf-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-release:
+    name: Announce the tag as a release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      # Every value that comes from outside (the tag name) travels through `env`,
+      # never through `${{ }}` inside the script body: a tag is attacker-writable
+      # in principle, and a substitution would put it into the shell's text.
+      - name: Read the version out of the tag
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#wallet-tui-v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag '$TAG' does not carry a version this workflow understands (expected wallet-tui-vX.Y.Z)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "read version $VERSION from $TAG"
+
+      # Idempotent by design: a tag can be pushed twice (a retry, a mirror), and
+      # the second run must not rewrite a body someone has since edited by hand —
+      # WITHDRAWN notices are exactly that kind of edit.
+      - name: Stop early if this tag already has a release
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --json tagName >/dev/null 2>&1; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "a release for $TAG already exists — leaving it untouched"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The body is the CHANGELOG section, verbatim. No auto-generated commit
+      # list: that looks like a description of the release without being one.
+      # A missing section fails the run — the image is already published and
+      # signed by now, so this refusal breaks nothing; it says "write the
+      # CHANGELOG", and that is one commit away.
+      - name: Take the release notes from CHANGELOG.md
+        if: steps.existing.outputs.already == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          awk -v version="$VERSION" '
+            $0 == "## [" version "]" || index($0, "## [" version "] ") == 1 { inside = 1; next }
+            inside && /^## / { exit }
+            inside { print }
+          ' CHANGELOG.md > /tmp/release-notes.md
+          if [ ! -s /tmp/release-notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for $VERSION — the release would have no description. Add '## [$VERSION] — <date>' and re-push the tag."
+            exit 1
+          fi
+          echo "notes: $(wc -l < /tmp/release-notes.md) lines"
+
+      # Whether this release is "Latest" is COMPUTED, never assumed. Tags do not
+      # arrive in increasing order: a hotfix to the previous line (0.9.9 after
+      # 0.10.0), a retrospective backfill, or a break-glass republish of an older
+      # version (`allow_existing_tag` in wallet-publish.yml) would otherwise
+      # hand the badge to the older release and tell every visitor that the old
+      # one is current — the very defect this workflow exists to prevent.
+      - name: Decide whether this is the latest release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        if: steps.existing.outputs.already == 'false'
+        run: |
+          set -euo pipefail
+          # An empty shelf answers with an ERROR, not an empty string — so the
+          # absence of a current latest is a branch of its own, not a fallthrough.
+          if ! CURRENT_TAG=$(gh release view --json tagName --jq .tagName 2>/dev/null); then
+            echo "flag=--latest" >> "$GITHUB_OUTPUT"
+            echo "no release carries the latest badge yet — this one takes it"
+            exit 0
+          fi
+          CURRENT="${CURRENT_TAG#wallet-tui-v}"
+          HIGHEST=$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -n 1)
+          if [ "$HIGHEST" = "$VERSION" ] && [ "$CURRENT" != "$VERSION" ]; then
+            echo "flag=--latest" >> "$GITHUB_OUTPUT"
+            echo "$VERSION is above the current latest ($CURRENT) — taking the badge"
+          else
+            echo "flag=--latest=false" >> "$GITHUB_OUTPUT"
+            echo "$VERSION is not above the current latest ($CURRENT) — leaving the badge where it is"
+          fi
+
+      - name: Create the release
+        if: steps.existing.outputs.already == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          LATEST_FLAG: ${{ steps.latest.outputs.flag }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --title "$VERSION" \
+            --notes-file /tmp/release-notes.md \
+            "$LATEST_FLAG"
+          echo "released $TAG ($LATEST_FLAG)" >> "$GITHUB_STEP_SUMMARY"
