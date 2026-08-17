@@ -143,6 +143,17 @@ is never moved here, and a repository ruleset enforces that.
   [`core/docs/ARCHITECTURE-EDGES.md`](https://github.com/rustok-org/core) — it is a
   second line behind the compiler, aimed at drift rather than at someone determined
   to get around it.
+- **We take the network's word about the queue number, and bound the damage rather
+  than remove it.** Before signing, the wallet asks the node what number its next
+  transaction should carry, and it has no way to tell a truthful answer from a
+  wrong one — a wallet is usually configured with a single RPC endpoint, so there
+  is nothing to compare against. A wrong answer that is too high produces a
+  transaction the chain accepts into its pool and never mines, and until 2026-08-17
+  the wallet would keep building on that number for the life of the process:
+  every later payment reported as sent, none of them arriving, curable only by a
+  restart. The wallet now forgets what it remembered after a minute, so it corrects
+  itself. Inside that minute the payments still go nowhere. Pick an endpoint you
+  have some reason to trust.
 - **Scanner findings on our storefront listing are not all ours.** A `Critical`
   currently shown against the skill points at a line that contains no secret; it is
   disputed in [openclaw/clawhub#3381](https://github.com/openclaw/clawhub/issues/3381)
