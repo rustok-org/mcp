@@ -31,11 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   console stops the wallet it started when you leave — `rustok start` first, or
   a second terminal.
 
-## [0.0.0-shelf-test] — 2026-08-17
-
-### Added
-- Temporary section for a live test of the release automation. Removed in the same pass.
-
 ## [0.10.0] — 2026-08-16
 
 ### Changed
