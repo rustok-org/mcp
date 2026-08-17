@@ -32,6 +32,18 @@ SEND_WEI = 1_000_000_000_000_000  # 0.001 ETH
 
 # v0.2 outcome notice (console `ui.rs::notice_line`): "APPROVED — 0x<tx hash>".
 _EXECUTED_HASH_RE = re.compile(r"APPROVED\s+—\s+(0x[0-9a-fA-F]{64})")
+def _has_queue_row(screen: str) -> bool:
+    """Whether a parked item is drawn in the queue.
+
+    Matched by the one thing every row has: an operation pointing at a recipient
+    (`● send 0.001 ETH → 0x709979…79C8 …`, console `ui.rs::queue_row`). The
+    amount deliberately cannot be used — a token operation sends zero native wei
+    and the console does NOT headline it as "0 ETH" (`ui.rs:1484-1490`), so an
+    approve row carries no amount at all. This wait was `" wei"` until
+    2026-08-17 and had been failing the suite since native amounts started
+    rendering human-first; the row was there all along, in another unit.
+    """
+    return any("→" in line and "0x" in line for line in screen.splitlines())
 # The resident session's normal end (console `main.rs::EXIT_ABORTED`): decisions
 # are notices on a living console, `q` is the only everyday way out (ADR #7).
 EXIT_ABORTED = 6
@@ -55,14 +67,15 @@ def unlock_to_queue(console: Console, wallet: Wallet, pending: int = 1) -> None:
     """Walk the console to the queue with the parked item(s) on screen.
 
     v0.2 home is the Dashboard; the tab bar rides every view and carries the
-    live queue count, so it doubles as the "item arrived" signal. The row
-    itself (`… wei`) must be on screen before Enter can open a card.
+    live queue count, so it doubles as the "item arrived" signal. The row itself
+    must be on screen before Enter can open a card — see `_has_queue_row` for
+    what counts as one, and why it is no longer matched by the amount.
     """
     console.wait_for_text("PIN")
     console.submit_pin(wallet.pin)
     console.wait_for_text(f"Queue·{pending} [a]")
     console.send("a")
-    console.wait_for_text(" wei")
+    console.wait_for(_has_queue_row, "a parked item drawn in the queue")
 
 
 def unlock_and_open_card(console: Console, wallet: Wallet, pending: int = 1) -> None:
