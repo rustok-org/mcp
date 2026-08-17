@@ -256,27 +256,27 @@ def test_s7_approve_without_auth_is_unauthorized(wallet: Wallet) -> None:
     assert wallet.status(preview_id)["state"] == "pending", "the item must still be parked"
 
 
-def test_s8_a_rejected_broadcast_surfaces_as_failed_on_both_sides(wallet: Wallet) -> None:
+def test_s8_a_rejected_broadcast_surfaces_as_failed_on_both_sides(
+    wallet: Wallet, chain: Chain
+) -> None:
     """S8: approved, but the chain said no — the agent's polling contract owes a `failed`.
 
-    Stage 5 published `executed/denied/expired/failed` + `error_reason` to agents. Two
-    previews taken before either is broadcast BOTH carry nonce 0 (the nonce is frozen in
-    the preview — core `pipeline::execute` signs `nonce: preview.nonce`), so approving
-    the second one after the first is mined is rejected by the chain. Nothing is mocked:
-    the failure comes from the node.
+    Stage 5 published `executed/denied/expired/failed` + `error_reason` to agents.
+    Nothing is mocked: the refusal comes from the node.
+
+    How that refusal is arranged matters. Until 2026-08-17 this scenario got one for
+    free out of a defect — two payments parked together were both signed with the
+    number frozen into their preview, so the chain refused the second as a duplicate.
+    That defect is fixed (the number is taken at send time), and a suite still leaning
+    on it would have been pinning the bug as a feature. The refusal is now arranged
+    honestly: the wallet is emptied while the payment waits for its human, and a node
+    will not carry a send that cannot pay for itself.
     """
-    first_id = wallet.park_send(RECIPIENT, SEND_WEI)
-    second_id = wallet.park_send(RECIPIENT, SEND_WEI)
+    preview_id = wallet.park_send(RECIPIENT, SEND_WEI)
 
-    with Console(wallet.name) as console:
-        unlock_and_open_card(console, wallet, pending=2)
-        console.send("y")
-        console.wait_for_text("APPROVED")
-        assert_resident(console, remaining=1)
-        assert console.quit() == EXIT_ABORTED
+    # The human took their time, and the wallet was emptied meanwhile.
+    chain.anvil.set_balance(wallet.address, 0)
 
-    # The queue order is not deterministic (the core stores pending items in a map), so
-    # the second console approves whichever item is left — the outcome is what matters.
     with Console(wallet.name) as console:
         unlock_and_open_card(console, wallet, pending=1)
         console.send("y")
@@ -290,17 +290,43 @@ def test_s8_a_rejected_broadcast_surfaces_as_failed_on_both_sides(wallet: Wallet
         f"a failed broadcast is a notice, not a fatal — quitting must exit 6, got {exit_code}"
     )
 
-    outcomes = {wallet.status(first_id)["state"], wallet.status(second_id)["state"]}
-    assert outcomes == {"executed", "failed"}, (
-        f"one send must land and the stale-nonce one must fail, got {outcomes}"
-    )
-    failed = next(
-        status
-        for status in (wallet.status(first_id), wallet.status(second_id))
-        if status["state"] == "failed"
-    )
+    failed = wallet.status(preview_id)
+    assert failed["state"] == "failed", f"the node refused this send, got {failed}"
     assert failed["error_reason"], "a failed execution must tell the agent WHY"
     assert failed["tx_hash"] is None, "nothing was mined — there is no hash to show"
+
+
+def test_s10_two_payments_parked_together_both_go_out(wallet: Wallet, chain: Chain) -> None:
+    """S10: two payments waiting side by side are two payments, not one and a casualty.
+
+    Both are previewed before either is sent, so both are decided against the same
+    chain state — the case that used to hand them one queue number and let the chain
+    refuse the second. The number now belongs to the moment of sending, so each gets
+    its own. The chain is the witness: two transactions, two different numbers.
+    """
+    first_id = wallet.park_send(RECIPIENT, SEND_WEI)
+    second_id = wallet.park_send(RECIPIENT, SEND_WEI)
+
+    for remaining in (1, 0):
+        with Console(wallet.name) as console:
+            unlock_and_open_card(console, wallet, pending=remaining + 1)
+            console.send("y")
+            console.wait_for_text("APPROVED")
+            assert_resident(console, remaining=remaining)
+            assert console.quit() == EXIT_ABORTED
+
+    first = wait_status(wallet, first_id, "executed")
+    second = wait_status(wallet, second_id, "executed")
+    assert first["tx_hash"] != second["tx_hash"], "two payments must be two transactions"
+
+    numbers = sorted(
+        int(chain.anvil.transaction(status["tx_hash"])["nonce"], 16)
+        for status in (first, second)
+    )
+    assert numbers[0] != numbers[1], (
+        f"both transactions went out under queue number {numbers[0]} — "
+        "the second one only survived because nothing checked"
+    )
 
 
 def test_s9_a_card_the_human_cannot_read_cannot_be_approved(wallet: Wallet) -> None:
