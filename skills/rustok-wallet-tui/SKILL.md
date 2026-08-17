@@ -55,8 +55,9 @@ confirmation on the Dashboard.
 **If a send parks unexpectedly, this is the first thing to check, and the honest
 thing to tell the user:** the wallet is autonomous but unconfirmed, and one
 confirmation in the console clears it for good. Do not describe it as an error
-and do not retry the payment — a retry adds a second parked copy under a
-different nonce, and confirming the mode does not release either of them.
+and do not retry the payment — a retry adds a second parked copy that will be
+paid separately if released, and confirming the mode does not release either of
+them.
 
 Confirmation from a messenger does not exist yet — the console is the only
 place that acknowledgment can be given.
