@@ -120,6 +120,10 @@ the pins are filled is dead permanently.
 - [ ] **Withdrawing a version** (`0.9.6 — WITHDRAWN, use 0.9.7` is the precedent)
       stays a human edit AFTER the automation: the workflow writes an ordinary
       release and knows nothing about a decision usually taken a day later
+- [ ] **The title is the bare version number** (`0.10.0`), not the descriptive
+      line earlier releases carry by hand. Deliberate: guessing a headline from
+      the CHANGELOG would be an unreliable heuristic, and honest automation beats
+      a clever one. Want a descriptive title — `gh release edit` it afterwards
 - [ ] Listings refreshed (ClawHub — then re-check its audit page, Smithery,
       MCP registry); GHCR tags semver only, no `latest`. **This step is now
       load-bearing:** the landing page no longer carries an install command of
