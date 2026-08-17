@@ -32,6 +32,8 @@ SEND_WEI = 1_000_000_000_000_000  # 0.001 ETH
 
 # v0.2 outcome notice (console `ui.rs::notice_line`): "APPROVED — 0x<tx hash>".
 _EXECUTED_HASH_RE = re.compile(r"APPROVED\s+—\s+(0x[0-9a-fA-F]{64})")
+
+
 def _has_queue_row(screen: str) -> bool:
     """Whether a parked item is drawn in the queue.
 
@@ -44,6 +46,8 @@ def _has_queue_row(screen: str) -> bool:
     rendering human-first; the row was there all along, in another unit.
     """
     return any("→" in line and "0x" in line for line in screen.splitlines())
+
+
 # The resident session's normal end (console `main.rs::EXIT_ABORTED`): decisions
 # are notices on a living console, `q` is the only everyday way out (ADR #7).
 EXIT_ABORTED = 6
@@ -332,10 +336,15 @@ def test_s10_two_payments_parked_together_both_go_out(wallet: Wallet, chain: Cha
     second = wait_status(wallet, second_id, "executed")
     assert first["tx_hash"] != second["tx_hash"], "two payments must be two transactions"
 
-    numbers = sorted(
-        int(chain.anvil.transaction(status["tx_hash"])["nonce"], 16)
-        for status in (first, second)
-    )
+    numbers = []
+    for status in (first, second):
+        onchain = chain.anvil.transaction(status["tx_hash"])
+        assert onchain is not None, (
+            f"the wallet reported {status['tx_hash']} as sent, but the chain has never "
+            "seen it — a hash on screen is not a transaction"
+        )
+        numbers.append(int(onchain["nonce"], 16))
+
     assert numbers[0] != numbers[1], (
         f"both transactions went out under queue number {numbers[0]} — "
         "the second one only survived because nothing checked"
