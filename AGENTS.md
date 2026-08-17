@@ -108,6 +108,18 @@ the pins are filled is dead permanently.
 - [ ] Tag `wallet-tui-v<X.Y.Z>` on the step-3 merge commit — **last**, because
       the documented install command fetches `install.sh` through this tag and
       the shim beside it
+- [ ] The GitHub Release writes itself from that tag (`release-shelf.yml`): body
+      from the `CHANGELOG.md` section, "Latest" computed against the current one.
+      **Nothing to do here on an ordinary release — but check it appeared.** It
+      is a step that used to live in memory alone, and memory lost 0.9.8 and
+      0.10.0 (both tagged, published, signed, and invisible on the releases page
+      until 2026-08-17). If the run failed, the usual cause is a missing
+      CHANGELOG section: add it and re-push the tag
+- [ ] **Break-glass / manual publish:** no tag push means no release — create it
+      by hand, body from the same CHANGELOG section
+- [ ] **Withdrawing a version** (`0.9.6 — WITHDRAWN, use 0.9.7` is the precedent)
+      stays a human edit AFTER the automation: the workflow writes an ordinary
+      release and knows nothing about a decision usually taken a day later
 - [ ] Listings refreshed (ClawHub — then re-check its audit page, Smithery,
       MCP registry); GHCR tags semver only, no `latest`. **This step is now
       load-bearing:** the landing page no longer carries an install command of
@@ -131,3 +143,29 @@ blocks a build whose commit author is not the project owner (Hobby plan, no
 collaborators), and a squash merge re-authors the commit to whoever opened the
 PR. Commit directly to `main` with the owner as author, and then **check the
 live page**, not the dashboard.
+
+## What holds each release point
+
+The checklist above says what to do and in what order. This table answers a
+different question — **what happens if you forget** — and the two are not the
+same list. Written 2026-08-17, after two releases went missing from the releases
+page: the step that lost them was in nobody's list, and nothing noticed for
+eleven days.
+
+| Point | Step | Held by |
+|---|---|---|
+| version in `pyproject.toml`, SKILL frontmatter, `claw.json`, `WALLET_VERSION`, `DEFAULT_IMAGE` | 1 | `tests/test_version_consistency.py` + the publish workflow's own gate (it refuses to run on a mismatch) |
+| the version the image states about itself | 1 | `test_the_core_version_the_panel_states_is_the_core_the_image_is_built_from` + a check inside `Dockerfile.wallet` (the build fails) |
+| `CHANGELOG.md` section for the release | 1 | **`release-shelf.yml`** — no section, no release, and the run is red |
+| docs carry no stale image tag | 1 | `test_every_image_tag_a_reader_can_copy_matches_the_manifest` |
+| `CORE_IMAGE` / `CONSOLE_IMAGE` versions | 1 | **half** — the guard checks the shape (`:vX.Y.Z`), never whether the number is right. That part is human, deliberately |
+| dispatch with `--ref main` | 2 | human; a mistake surfaces later, as `cosign verify` rejecting the image for users |
+| signature, and that it verifies | 2 | the publish workflow itself (anti-vacuous step) |
+| `WALLET_DIGEST`, `SHIM_SHA256`, no placeholders left | 3 | `tests/test_installer_pins.py` |
+| tag on the step-3 commit | 4 | human — and a tag cut before the pins are filled is **permanently** dead |
+| **GitHub Release** | 4 | **`release-shelf.yml`** (since 2026-08-17; before that: nothing) |
+| listings — ClawHub, Smithery, MCP registry | 4 | **nothing.** External services; a tag cannot reach them. Stays human |
+| the landing page names no version | 5 | **nothing automatic** — a `curl … \| grep` run by hand |
+
+Two points are held by nothing at all, and both are the last things anyone does.
+Treat them as the ones most likely to be skipped, because they are.
