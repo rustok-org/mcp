@@ -28,6 +28,10 @@ TEXTS = (
     REPO_ROOT / "skills" / "rustok-wallet-tui" / "claw.json",
     REPO_ROOT / "DISCLAIMER.md",
     REPO_ROOT / "docs" / "CAVEATS.md",
+    # Added 2026-08-18: the capability table here named the tool with no refusal
+    # beside it and was not on this list, so the sweep found it and the guard did
+    # not. A guard's blind spot is the list it was given.
+    REPO_ROOT / "docs" / "CONFIGURATION.md",
 )
 
 # The claim that was false, in every wording it has actually worn. `\s+` between

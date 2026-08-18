@@ -292,7 +292,6 @@ address and every balance. A client may narrow its own session further in
 | `preview_transaction` | preview_tx | Preview any transaction `{to, value, chain_id, data?}` → decoded call (who/what is authorized), pre-sign simulation (revert check), gas, risk level |
 | `execute_transaction` | execute_tx | Submit a previewed transaction `{preview_id}` — parked for human approval on a supervised wallet, released by the core on one whose owner confirmed autonomous mode; a `pending` result carries `next_step` for the human |
 | `get_execution_status` | execute_tx | Poll a parked execution `{preview_id}` → `pending` / `executed` (+`tx_hash`) / `denied` / `expired` / `failed` (+`error_reason`), with the `not_after_unix` deadline. **`executed` means broadcast, not on-chain success** — see below |
-| `sign_message` | execute_tx | **Refused outright** in every mode — signature parking is planned, not built. The tool exists and always answers with a policy refusal (see "What's protected"). |
 
 ### ERC-20 tokens are opt-in — an empty list is not an empty wallet
 
