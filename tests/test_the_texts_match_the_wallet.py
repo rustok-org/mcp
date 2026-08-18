@@ -22,6 +22,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 
+# Scope: this repository. Texts that live elsewhere are covered by the sweep
+# described in the round plan, by hand, on every change to the behaviour they
+# describe — a green run here says nothing about them.
+
 # Every text a human or an agent reads about what this wallet will sign.
 TEXTS = (
     REPO_ROOT / "skills" / "rustok-wallet-tui" / "SKILL.md",
