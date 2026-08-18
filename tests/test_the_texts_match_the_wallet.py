@@ -16,10 +16,15 @@ not know what the wallet does, so it would happily guard a lie. Together the
 sentence can neither drift nor go missing.
 """
 
+import json
 import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
+
+# Scope: this repository. Texts that live elsewhere are covered by the sweep
+# described in the round plan, by hand, on every change to the behaviour they
+# describe — a green run here says nothing about them.
 
 # Every text a human or an agent reads about what this wallet will sign.
 TEXTS = (
@@ -27,6 +32,10 @@ TEXTS = (
     REPO_ROOT / "skills" / "rustok-wallet-tui" / "claw.json",
     REPO_ROOT / "DISCLAIMER.md",
     REPO_ROOT / "docs" / "CAVEATS.md",
+    # Added 2026-08-18: the capability table here named the tool with no refusal
+    # beside it and was not on this list, so the sweep found it and the guard did
+    # not. A guard's blind spot is the list it was given.
+    REPO_ROOT / "docs" / "CONFIGURATION.md",
 )
 
 # The claim that was false, in every wording it has actually worn. `\s+` between
@@ -88,4 +97,77 @@ def test_every_text_that_names_sign_message_says_it_is_refused() -> None:
         "these texts name sign_message without saying it is refused: "
         + ", ".join(offenders)
         + ". A tool listed with no stated limit reads as a tool that works."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Part B2: the listing description, where a capability list and a refusal clause
+# spell the same word.
+#
+# The guard above is keyed to the token `sign_message`. The listing does not use
+# it: it writes "sign messages", two words. One character of difference — an
+# underscore against a space — and the check never looked at the file at all. It
+# was not satisfied by a nearby refusal; it never fired.
+#
+# Reading prose cannot separate "we do this" from "we refuse this" when both
+# spell `sign`. That is a job for a language, not for a test, and any heuristic
+# has a counterexample. So the check is inverted: every mention of signing in the
+# description must lie INSIDE one sanctioned clause, and no other mention may
+# exist. Rigid on purpose — the clause is a load-bearing public claim, and moving
+# it should cost a deliberate edit here.
+#
+# Scope is the description field only. DISCLAIMER.md and CAVEATS.md discuss
+# signing in prose at length and legitimately so; the presence/absence pair above
+# is their guard. This one guards the string that a marketplace truncates.
+#
+# What this cannot do: it does not know whether the sanctioned clause is TRUE.
+# `tests/e2e/test_signing_is_refused_e2e.py` asks the image that question.
+
+SANCTIONED_CLAUSE = "message signing is refused outright, in every mode"
+
+# `\bsign\w*` catches sign, signs, signing, sign_message; the word boundary keeps
+# it off "design" and "assign".
+SIGN_WORD = re.compile(r"\bsign\w*", re.IGNORECASE)
+
+
+def _claw_description() -> str:
+    description = json.loads(_read(REPO_ROOT / "skills" / "rustok-wallet-tui" / "claw.json"))[
+        "description"
+    ]
+    assert isinstance(description, str), "claw.json description must be a string"
+    return description
+
+
+def _skill_description() -> str:
+    for line in _read(REPO_ROOT / "skills" / "rustok-wallet-tui" / "SKILL.md").splitlines():
+        if line.startswith("description:"):
+            return line.removeprefix("description:").strip()
+    raise AssertionError("SKILL.md front matter has no description field")
+
+
+DESCRIPTIONS = (("claw.json", _claw_description), ("SKILL.md", _skill_description))
+
+
+def test_the_listing_description_mentions_signing_only_to_refuse_it() -> None:
+    """A capability list that names signing is a promise, whatever follows it."""
+    offenders = []
+    for name, load in DESCRIPTIONS:
+        outside = load().replace(SANCTIONED_CLAUSE, "")
+        for match in SIGN_WORD.finditer(outside):
+            offenders.append(f"{name}: {match.group()}")
+    assert not offenders, (
+        "the listing description mentions signing outside the refusal clause: "
+        + ", ".join(offenders)
+        + f". The only sanctioned mention is {SANCTIONED_CLAUSE!r}. The wallet "
+        "refuses sign_message in every mode; naming it anywhere else is a promise."
+    )
+
+
+def test_the_listing_description_still_carries_the_refusal() -> None:
+    """Without this, deleting the clause would make the check above pass empty."""
+    missing = [name for name, load in DESCRIPTIONS if SANCTIONED_CLAUSE not in load()]
+    assert not missing, (
+        "the refusal clause is gone from: "
+        + ", ".join(missing)
+        + f". Expected verbatim: {SANCTIONED_CLAUSE!r}"
     )

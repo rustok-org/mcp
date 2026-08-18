@@ -6,7 +6,6 @@ import httpx
 import pytest
 
 from rustok_mcp.gateway import DEFAULT_GATEWAY_TIMEOUT_SECONDS, GatewayClient
-from rustok_mcp.handlers import create_protocol_and_registry
 from rustok_mcp.protocol import (
     ERR_CORE_UNAVAILABLE,
     ERR_INTERNAL,
@@ -33,20 +32,6 @@ async def test_preview_transaction_success() -> None:
     client = GatewayClient("http://gateway", transport=transport)
     result = await client.preview_transaction("0x123", "1.0", 1)
     assert result == {"preview_id": "abc", "estimated_gas": "21000"}
-    await client.close()
-
-
-async def test_sign_message_success() -> None:
-    """sign_message returns signature on 200."""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/wallet/sign_message"
-        return httpx.Response(200, json={"signature": "0xsig"})
-
-    transport = httpx.MockTransport(handler)
-    client = GatewayClient("http://gateway", transport=transport)
-    result = await client.sign_message("hello", "eip191")
-    assert result == {"signature": "0xsig"}
     await client.close()
 
 
@@ -288,15 +273,15 @@ async def test_501_not_supported_maps_to_actionable_error() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             501,
-            json={"error": "not_supported", "message": "EIP-712 signing is not supported"},
+            json={"error": "not_supported", "message": "that operation is not supported"},
         )
 
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
-        await client.sign_message("hello", "eip712")
+        await client.execute_transaction("abc")
     assert exc_info.value.code == ERR_NOT_SUPPORTED
-    assert "EIP-712 signing is not supported" in str(exc_info.value)
+    assert "that operation is not supported" in str(exc_info.value)
     await client.close()
 
 
@@ -330,7 +315,7 @@ async def test_500_internal_error_is_masked() -> None:
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
-        await client.sign_message("hello", "eip191")
+        await client.execute_transaction("abc")
     assert exc_info.value.code == ERR_INTERNAL
     assert "secret" not in str(exc_info.value)
     assert "Gateway internal error" in str(exc_info.value)
@@ -361,7 +346,7 @@ async def test_5xx_unrecognized_body_is_masked() -> None:
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
-        await client.sign_message("hello", "eip191")
+        await client.execute_transaction("abc")
     assert exc_info.value.code == ERR_INTERNAL
     await client.close()
 
@@ -450,20 +435,10 @@ async def test_5xx_body_not_leaked_to_client() -> None:
     transport = httpx.MockTransport(handler)
     client = GatewayClient("http://gateway", transport=transport)
     with pytest.raises(McpError) as exc_info:
-        await client.sign_message("hello", "eip191")
+        await client.execute_transaction("abc")
     assert exc_info.value.code == ERR_INTERNAL
     assert "secret" not in str(exc_info.value)
     await client.close()
-
-
-async def test_sign_message_description_contains_phishing_warning() -> None:
-    """The sign_message tool description warns about arbitrary signatures."""
-    _, registry = create_protocol_and_registry()
-    schemas = {schema["name"]: schema for schema in registry.get_tool_schemas()}
-    schema = schemas["sign_message"]
-    assert "arbitrary bytes" in schema["description"]
-    assert "DRAIN" in schema["description"]
-    assert "EIP-712" in schema["description"]
 
 
 def test_default_gateway_timeout() -> None:
