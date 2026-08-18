@@ -1,6 +1,7 @@
 """MCP handler tests."""
 
 import json
+import re
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -246,7 +247,6 @@ async def test_initialize_read_only_mode_hides_write_tools() -> None:
     assert "preview_transaction" in names
     assert "get_wallet_context" in names
     assert "execute_transaction" not in names
-    assert "sign_message" not in names
 
 
 async def test_initialize_supervised_mode_keeps_the_full_ceiling() -> None:
@@ -269,14 +269,6 @@ async def test_initialize_gateway_error_falls_back_to_seeded() -> None:
     assert context["capabilities"] == set(Capability)
 
 
-async def test_sign_message_schema_allows_only_eip191() -> None:
-    """The sign_type enum matches the documented EIP-191-only contract."""
-    _protocol, registry = create_protocol_and_registry()
-    schemas = {t["name"]: t for t in registry.get_tool_schemas()}
-    sign_type = schemas["sign_message"]["inputSchema"]["properties"]["sign_type"]
-    assert sign_type["enum"] == ["eip191"]
-
-
 async def test_tools_list_handler() -> None:
     """tools/list returns registered stub tools."""
     protocol, _registry = create_protocol_and_registry()
@@ -287,7 +279,7 @@ async def test_tools_list_handler() -> None:
     assert response is not None
     assert response.result is not None
     tools = response.result["tools"]
-    assert len(tools) == 7
+    assert len(tools) == 6
     names = {t["name"] for t in tools}
     assert "get_wallet_context" in names
     assert "get_positions" in names
@@ -697,27 +689,6 @@ async def test_preview_transaction_falls_back_to_stub() -> None:
     assert "stub-preview-id" in response.result["content"][0]["text"]
 
 
-async def test_sign_message_uses_gateway_client() -> None:
-    """sign_message tool delegates to GatewayClient when provided."""
-    mock_client = AsyncMock(spec=GatewayClient)
-    mock_client.sign_message = AsyncMock(return_value={"signature": "0xreal"})
-
-    protocol, _registry = create_protocol_and_registry(mock_client)
-    context = {"capabilities": set(Capability)}
-    request = JsonRpcRequest(
-        jsonrpc="2.0",
-        id=7,
-        method="tools/call",
-        params={"name": "sign_message", "arguments": {"message": "hello", "sign_type": "eip191"}},
-    )
-    response = await protocol.handle(request, context)
-
-    assert response is not None
-    assert response.result is not None
-    assert "0xreal" in response.result["content"][0]["text"]
-    mock_client.sign_message.assert_awaited_once_with(message="hello", sign_type="eip191")
-
-
 async def test_preview_transaction_missing_arg_returns_invalid_params() -> None:
     """Missing required argument maps to -32602 (Invalid params), not -32603."""
     mock_client = AsyncMock(spec=GatewayClient)
@@ -739,26 +710,6 @@ async def test_preview_transaction_missing_arg_returns_invalid_params() -> None:
     assert response.error.code == -32602
     assert "to" in response.error.message
     mock_client.preview_transaction.assert_not_awaited()
-
-
-async def test_sign_message_missing_arg_returns_invalid_params() -> None:
-    """sign_message without message maps to -32602, Gateway not called."""
-    mock_client = AsyncMock(spec=GatewayClient)
-    protocol, _registry = create_protocol_and_registry(mock_client)
-    context = {"capabilities": set(Capability)}
-    request = JsonRpcRequest(
-        jsonrpc="2.0",
-        id=10,
-        method="tools/call",
-        params={"name": "sign_message", "arguments": {"sign_type": "eip191"}},  # missing "message"
-    )
-    response = await protocol.handle(request, context)
-
-    assert response is not None
-    assert response.error is not None
-    assert response.error.code == -32602
-    assert "message" in response.error.message
-    mock_client.sign_message.assert_not_awaited()
 
 
 def _tool_result(response: Any) -> Any:
@@ -1044,3 +995,50 @@ async def test_execute_tools_hidden_without_execute_tx_capability() -> None:
     assert call_response is not None
     assert call_response.error is not None
     assert call_response.error.code == -32001
+
+
+# A tool that always refuses is not a neutral leftover: its description teaches an
+# agent how to use a capability, so the agent tries, retries, and reports failure
+# as ours. `\bsign\w*` rather than the exact name — a tool called something else
+# whose description offers a signature is the same promise wearing another name.
+_SIGN_WORD = re.compile(r"\bsign\w*", re.IGNORECASE)
+
+# Same shape as the listing guard: sanctioned literals are removed first, and
+# whatever still spells `sign` is an offence. A blunt regex called `pre-sign
+# simulation` a promise on its first run — that phrase says WHEN a simulation
+# happens, it does not offer a signature. Allow-listing it is a deliberate edit,
+# which is the point: the list is short and each entry has to earn its place.
+_SANCTIONED_IN_TOOL_TEXT = ("pre-sign simulation",)
+
+
+def _unsanctioned(text: str) -> str:
+    for phrase in _SANCTIONED_IN_TOOL_TEXT:
+        text = text.replace(phrase, "")
+    return text
+
+
+async def test_no_tool_offers_to_sign_anything() -> None:
+    """Core denies SignMessage in every mode, so the surface must not offer it."""
+    protocol, _registry = create_protocol_and_registry()
+    context: dict[str, Any] = {"capabilities": set(Capability)}
+    await protocol.handle(JsonRpcRequest(jsonrpc="2.0", id=1, method="initialize"), context)
+    response = await protocol.handle(
+        JsonRpcRequest(jsonrpc="2.0", id=2, method="tools/list"), context
+    )
+    assert response is not None
+    offenders = [
+        f"{tool['name']}: {hit.group()}"
+        for tool in response.result["tools"]
+        for hit in [
+            _SIGN_WORD.search(_unsanctioned(tool["name"]))
+            or _SIGN_WORD.search(_unsanctioned(tool.get("description", "")))
+        ]
+        if hit
+    ]
+    assert not offenders, (
+        "the MCP surface offers signing: "
+        + ", ".join(offenders)
+        + ". The core answers PermissionDenied for SignMessage in every mode "
+        "(policy/src/lib.rs, `(_, SignMessage | SignTypedData) => Deny`), so a "
+        "tool for it can only ever fail. See tests/e2e/test_signing_is_refused_e2e.py."
+    )

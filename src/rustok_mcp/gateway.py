@@ -69,12 +69,6 @@ class GatewayClient:
             {"to": to, "data": data, "value": value, "chain_id": chain_id},
         )
 
-    async def sign_message(self, message: str, sign_type: str) -> Any:
-        return await self._post(
-            "/api/v1/wallet/sign_message",
-            {"message": message, "sign_type": sign_type},
-        )
-
     async def execute_transaction(self, preview_id: str) -> Any:
         # The deprecated `approval` field is intentionally not sent: no valid
         # token is issuable in production — Core parks the request as PENDING

@@ -123,9 +123,11 @@ SIGN_WORD = re.compile(r"\bsign\w*", re.IGNORECASE)
 
 
 def _claw_description() -> str:
-    return json.loads(_read(REPO_ROOT / "skills" / "rustok-wallet-tui" / "claw.json"))[
+    description = json.loads(_read(REPO_ROOT / "skills" / "rustok-wallet-tui" / "claw.json"))[
         "description"
     ]
+    assert isinstance(description, str), "claw.json description must be a string"
+    return description
 
 
 def _skill_description() -> str:

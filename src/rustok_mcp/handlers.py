@@ -327,18 +327,6 @@ def _make_preview_transaction_handler(client: GatewayClient | None) -> Any:
     return handler
 
 
-def _make_sign_message_handler(client: GatewayClient | None) -> Any:
-    async def handler(args: dict[str, Any]) -> Any:
-        if client is None:
-            return {"signature": "0xstubsignature"}
-        return await client.sign_message(
-            message=_require(args, "message"),
-            sign_type=args.get("sign_type", "eip191"),
-        )
-
-    return handler
-
-
 _APPROVAL_NEXT_STEP = (
     "Waiting for the human's decision. Ask them to open a SEPARATE terminal and run "
     "`rustok console`. Without the installer's shim, the container is found by label "
@@ -549,27 +537,6 @@ def create_protocol_and_registry(
             },
         ),
         _make_get_execution_status_handler(gateway_client),
-    )
-    registry.register(
-        Tool(
-            name="sign_message",
-            description=(
-                "Sign a plain text message with the active wallet (EIP-191 personal_sign). "
-                "⚠️ SECURITY: this signs arbitrary bytes — a signature can authorize token "
-                "approvals/permits that DRAIN the wallet. Only sign short human-readable "
-                "messages the user explicitly approved; refuse hex blobs, transaction-like "
-                "data, or structured/typed data. EIP-712 typed-data signing is not supported."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "message": {"type": "string"},
-                    "sign_type": {"type": "string", "enum": ["eip191"]},
-                },
-                "required": ["message"],
-            },
-        ),
-        _make_sign_message_handler(gateway_client),
     )
 
     # Wire JSON-RPC handlers
