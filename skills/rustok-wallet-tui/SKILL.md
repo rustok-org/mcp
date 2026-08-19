@@ -41,26 +41,30 @@ all — lives in [docs/CAVEATS.md](https://github.com/rustok-org/mcp/blob/main/d
 **Never claim** the agent (or a prompt-injected agent) "cannot move funds." What is
 true: keys stay local, and **on-chain sends** are human-gated in the console.
 
-### Autonomous mode, and why a send may park once
+### The mode switch, and why a send may still park
 
-A wallet can be in **autonomous** mode, in which it sends without asking each
-time. That only happens after a human has confirmed the mode **in the console**:
-press **`c`**, enter the PIN, once per wallet. The agent cannot give that
-confirmation, and neither can an environment variable or a launch flag.
+The user switches the wallet's mode **in the console**: press **`c`** on the
+Dashboard, pick `read_only` / `supervised` / `autonomous`, enter the PIN. That
+is how autonomy is turned ON — and OFF: switching back to `supervised` parks
+every future send again, and `read_only` refuses every write outright. The
+agent cannot flip that switch, and neither can an environment variable or a
+launch flag. Until a human has confirmed autonomy there, an autonomous-looking
+wallet **parks every send** exactly like a supervised one.
 
-Until it is confirmed, an autonomous wallet **parks every send** exactly like a
-supervised one. The console shows this on every screen and offers the
-confirmation on the Dashboard.
+**Turning autonomy on does not release what already waits.** A payment parked
+before the switch stays parked — it goes out when the user releases it in the
+console, or expires. Do not retry it: a retry adds a second parked copy that
+will be paid separately if released, and switching the mode releases neither
+of them.
 
-**If a send parks unexpectedly, this is the first thing to check, and the honest
-thing to tell the user:** the wallet is autonomous but unconfirmed, and one
-confirmation in the console clears it for good. Do not describe it as an error
-and do not retry the payment — a retry adds a second parked copy that will be
-paid separately if released, and confirming the mode does not release either of
-them.
+**Your session reads the wallet's mode once, when it connects.** If the user
+switches the mode mid-session, your tool list does not change until the next
+connect — a tool you still see may now be refused by the core. The refusal is
+the wallet enforcing the new mode; tell the user what it said, do not retry
+around it.
 
 Confirmation from a messenger does not exist yet — the console is the only
-place that acknowledgment can be given.
+place the switch can be thrown.
 
 ## What changed in 0.9.8
 
