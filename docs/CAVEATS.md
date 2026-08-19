@@ -63,6 +63,12 @@ random rather than yours.
 
 **What does not hold.**
 
+- **Switching the mode does not touch what already waits.** Turning autonomy on
+  releases nothing: a payment parked before the switch stays parked until you
+  release it in the console or it expires. And an agent session reads the
+  wallet's mode once, at connect — switch the mode mid-session and the agent's
+  tool list lags until its next connect, while the core already enforces the
+  new mode on every call. The lag is cosmetic; the enforcement is not.
 - **`sign_message` is refused outright**, in every mode, autonomous included. The console never
   sees a signature request, because signing does not happen at all yet: parking a
   signature for approval (`kind:sign`) is planned and not built. Do not plan around
