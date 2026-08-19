@@ -392,7 +392,7 @@ this config file**. With podman the secret above does the delivery:
                "-v", "rustok-wallet-tui:/data",
                "--secret", "rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000",
                "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude",
-               "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
+               "-e", "RUSTOK_ALLOWED_CHAINS=1,8453,42161",
                "-e", "RUSTOK_RPC_URLS_1=https://ethereum-rpc.publicnode.com",
                "ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0"]
     }
@@ -409,7 +409,7 @@ With **docker**, swap the `--secret` argument pair for the `0600`-file mount:
          "-v", "rustok-wallet-tui:/data",
          "-v", "/home/you/.rustok-keyring-pass:/run/keyring-pass:ro",
          "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass",
-         "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
+         "-e", "RUSTOK_ALLOWED_CHAINS=1,8453,42161",
          "-e", "RUSTOK_RPC_URLS_1=https://ethereum-rpc.publicnode.com",
          "ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0"]
 ```
