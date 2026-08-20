@@ -74,9 +74,7 @@ def test_the_texts_say_a_named_list_replaces_the_carried_one() -> None:
 def test_the_agent_text_separates_the_two_arbitrum_usdcs() -> None:
     """Two rows with one symbol is the shape an agent silently sums."""
     offenders = [
-        str(path.relative_to(REPO_ROOT))
-        for path in AGENT_TEXTS
-        if BRIDGED_CLAIM not in _read(path)
+        str(path.relative_to(REPO_ROOT)) for path in AGENT_TEXTS if BRIDGED_CLAIM not in _read(path)
     ]
     assert not offenders, (
         f"the agent text does not name the bridged token: {offenders}. On chain it calls "
