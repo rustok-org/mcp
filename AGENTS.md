@@ -148,11 +148,21 @@ grow a version again".
 - [ ] Nothing else to do here on an ordinary release. A change to the site is
       only needed when the *skill page link* moves, which is not a version event.
 
-**5-bis — when the site does change (rare):** a merge is not a deploy. Vercel
-blocks a build whose commit author is not the project owner (Hobby plan, no
-collaborators), and a squash merge re-authors the commit to whoever opened the
-PR. Commit directly to `main` with the owner as author, and then **check the
-live page**, not the dashboard.
+**5-bis — when the site does change (rare):** a merge is not a deploy, and the
+**merge method** decides whether it becomes one. Vercel blocks a build whose
+commit author is not the project owner (Hobby plan, no collaborators), and the
+merge button chooses that author: a **squash** merge re-authors the commit to
+whoever opened the PR and the deploy blocks; a **rebase** merge keeps the
+original author, so a commit already authored by the owner deploys on its own.
+Measured both ways on the same page in one day: squash → `Deployment was
+blocked`, rebase → `Deployment has completed`, with no dashboard visit at all.
+- [ ] The commit is authored by the owner, and the PR is merged with **rebase,
+      not squash**. Rebase preserves an author it does not fix — a commit
+      authored by someone else still blocks, whichever button is used
+- [ ] It blocked anyway → the owner re-triggers from their side: **Redeploy** in
+      the dashboard, or a commit to `main` authored by them. This is the
+      fallback, not the plan
+- [ ] **Check the live page**, not the dashboard
 
 ## What holds each release point
 
