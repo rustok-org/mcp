@@ -8,9 +8,10 @@ mixed up again.
 
 import json
 import re
-import tomllib
 from pathlib import Path
 from typing import Any
+
+from tests.version_points import manifest_version
 
 REPO_ROOT = Path(__file__).parent.parent
 CLAW_PATH = REPO_ROOT / "skills" / "rustok-wallet-tui" / "claw.json"
@@ -57,9 +58,7 @@ def test_claw_manifest_entry_file_exists() -> None:
 def test_claw_manifest_version_matches_pyproject() -> None:
     """ClawHub uploads require the manifest version to track the release."""
     claw = _load_claw()
-    with (REPO_ROOT / "pyproject.toml").open("rb") as fh:
-        pyproject = tomllib.load(fh)
-    assert claw["version"] == pyproject["project"]["version"]
+    assert claw["version"] == manifest_version()
 
 
 def test_claw_and_skill_descriptions_stay_identical() -> None:

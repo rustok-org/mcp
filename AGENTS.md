@@ -78,7 +78,16 @@ the pins are filled is dead permanently.
       `test_every_image_tag_a_reader_can_copy_matches_the_manifest` and
       `tests/test_docs_one_command.py` rather than one entry at a time
 - [ ] `CHANGELOG.md` describes the release — including anything user-facing that
-      landed since the last tag, not only the last PR
+      landed since the last tag, not only the last PR. **Start from the draft,
+      not from memory:** `sh scripts/release-notes-draft.sh` reads the previous
+      release tag, works out which `core` and `console` versions this release
+      moves through from the pins in `Dockerfile.wallet` then and now, and prints
+      every commit in those ranges plus this repo's own. It sorts into
+      likely-user-facing and likely-internal and **drops nothing** — your job is
+      to turn lines into prose or delete them on purpose, which is a different
+      job from remembering them. 0.11.0 was assembled the old way and lost
+      core#124 (a queue-number memory that never expired: payments reported as
+      sent, none arrived, only a restart cured it)
 - [ ] Docs carry no stale image tag (guarded by
       `test_every_image_tag_a_reader_can_copy_matches_the_manifest`)
 - [ ] `ARG CORE_IMAGE` / `CONSOLE_IMAGE` name the intended dependency versions.
@@ -178,10 +187,14 @@ eleven days.
 
 | Point | Step | Held by |
 |---|---|---|
-| version in `pyproject.toml`, SKILL frontmatter, `claw.json`, `WALLET_VERSION`, `DEFAULT_IMAGE` | 1 | `tests/test_version_consistency.py` + the publish workflow's own gate (it refuses to run on a mismatch) |
+| every point that carries the version as a value — declared in `tests/version_points.py`, not listed here | 1 | `test_every_version_point_matches_the_manifest` + the publish workflow's own gate (it refuses to run on a mismatch) |
+| the **count** of those points, wherever prose states it — this file and the test's own docstring | 1 | `test_the_count_in_the_prose_is_the_count_in_the_list` — it said six for two releases while there were ten |
+| `pyproject.toml` reading the same to TOML and to the publish gate's `sed` | 1 | `test_both_readings_of_the_manifest_agree` — otherwise the divergence surfaces two steps later as an opaque refusal from `wallet-publish.yml` |
+| the image the shim harness expects | 1 | derived from the manifest, not typed: seven byte-exact copies used to live in `tests/shim/run-tests.sh`, and the harness now refuses to run at all if the manifest has no version |
 | the version the image states about itself | 1 | `test_the_core_version_the_panel_states_is_the_core_the_image_is_built_from` + a check inside `Dockerfile.wallet` (the build fails) |
 | `CHANGELOG.md` section for the release | 1 | **`release-shelf.yml`** — no section, no release, and the run is red |
-| docs carry no stale image tag | 1 | `test_every_image_tag_a_reader_can_copy_matches_the_manifest` |
+| image tags in copy-paste sources (`SKILL.md`, `docs/INSTALL.md`, `docs/TROUBLESHOOTING.md`, `docs/CONFIGURATION.md`) | 1 | `test_every_image_tag_a_reader_can_copy_matches_the_manifest` — it matches `ghcr.io/…:vX.Y.Z` and nothing else |
+| installer URLs pinned by tag (the same docs plus `README.md` and `DISCLAIMER.md`) | 1 | `tests/test_docs_one_command.py` — a **different** token from the row above, and until 0.12.0 its `INSTALL_TAG` was typed by hand, which let a release that forgot both the docs and the constant stay green |
 | `CORE_IMAGE` / `CONSOLE_IMAGE` versions | 1 | **half** — the guard checks the shape (`:vX.Y.Z`), never whether the number is right. That part is human, deliberately |
 | dispatch with `--ref main` | 2 | human; a mistake surfaces later, as `cosign verify` rejecting the image for users |
 | signature, and that it verifies | 2 | the publish workflow itself (anti-vacuous step) |
@@ -190,6 +203,11 @@ eleven days.
 | **GitHub Release** | 4 | **`release-shelf.yml`** (since 2026-08-17; before that: nothing) |
 | listings — ClawHub, Smithery, MCP registry | 4 | **nothing.** External services; a tag cannot reach them. Stays human |
 | the landing page names no version | 5 | **nothing automatic** — a `curl … \| grep` run by hand |
+| the release notes being **complete** | 1 | **nothing, deliberately.** `scripts/release-notes-draft.sh` assembles the draft, but a line deleted from it is gone. Checking completeness means reading the private `core` from this public repository's CI, and that perimeter costs more than the defect |
 
-Two points are held by nothing at all, and both are the last things anyone does.
-Treat them as the ones most likely to be skipped, because they are.
+The points held by nothing at all are the listings, the landing page, and the
+completeness of the notes — no number here, because the list is the count and a
+number beside it is one more thing to keep true. Two of the three are the last
+things anyone does; completeness is the first, and it is the one that already
+went wrong. Treat them as the
+ones most likely to be skipped, because they are.
