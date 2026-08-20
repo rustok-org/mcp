@@ -64,15 +64,19 @@ the filled pins, because users fetch `install.sh` **by tag**. A tag cut before
 the pins are filled is dead permanently.
 
 **1 — prep (PR):**
-- [ ] Version bumped in **all ten points**, not the six one guard names.
-      `tests/test_version_consistency.py` holds six — `pyproject.toml`, skill
-      frontmatter, `claw.json`, `WALLET_VERSION`, the `DEFAULT_IMAGE` tag,
-      `ARG WALLET_VERSION`. Four more are held by other tests and were found the
-      hard way in 0.11.0: `server.json` (version **and** image tag),
-      `INSTALL_TAG` in `tests/test_docs_one_command.py`, seven byte-exact
-      registration lines in `tests/shim/run-tests.sh`, and the installer URL in
-      `docs/TROUBLESHOOTING.md`. Bumping only the guarded six leaves four tests
-      red, which is how this line came to be written
+- [ ] Version bumped in **all 8 points**. Which places those are is not listed
+      here and not remembered — `tests/version_points.py` declares them, one
+      entry each, and `test_every_version_point_matches_the_manifest` holds all
+      of them. The number in this line is checked against that list by
+      `test_the_count_in_the_prose_is_the_count_in_the_list`, so it cannot go
+      stale the way "six" did for two releases while there were ten. Add a point
+      to the registry, not an assertion to a test
+- [ ] Published prose is bumped too, and it is NOT in that count: install URLs
+      and `podman run` examples live in `README.md`, `docs/INSTALL.md`,
+      `docs/TROUBLESHOOTING.md`, `docs/CONFIGURATION.md` and the body of
+      `SKILL.md` — roughly sixteen lines, held wholesale by
+      `test_every_image_tag_a_reader_can_copy_matches_the_manifest` and
+      `tests/test_docs_one_command.py` rather than one entry at a time
 - [ ] `CHANGELOG.md` describes the release — including anything user-facing that
       landed since the last tag, not only the last PR
 - [ ] Docs carry no stale image tag (guarded by

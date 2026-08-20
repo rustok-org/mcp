@@ -1,11 +1,13 @@
 """Keep every place that names the wallet version telling the same story.
 
-The version is not written once — it is written in ten places that must agree,
-six of them held by this file (the other four: see the docstring below):
-the package manifest, the skill frontmatter, the ClawHub manifest, the version
-the installer reports, the image tag the shim launches, and — since 0.9.3 — the
-number the image states about itself for the console's identity panel. They
-drift silently, and a drift is not cosmetic here:
+The list of those places is not here — it is declared once in
+`tests/version_points.py`, because it used to live in this file's local
+dictionary while the *count* lived in prose beside it, and the two drifted apart
+in 0.11.0: the prose said six, the release found ten the hard way, and nothing
+noticed until a human did.
+
+One version, 8 homes — a mismatch blocks the release, strands users, or makes
+the panel that answers "what am I running" answer wrong:
 
 * `wallet-publish.yml` refuses to publish unless its `version` input equals
   `pyproject.toml` — a stale manifest blocks the release outright;
@@ -18,22 +20,29 @@ drift silently, and a drift is not cosmetic here:
 
 Deliberately an INVARIANT, not a "no 0.7.1 anywhere" grep: a one-off ban on the
 previous string passes vacuously the moment 0.9.0 lands and would have to be
-rewritten every release. This test is green before and after a bump — its red
-proof comes from mutation (desynchronise one point and it names that point).
+rewritten every release. These tests are green before and after a bump — their
+red proof comes from mutation (desynchronise one point and it names that point).
+
+The number above is prose, and prose rots. It is held by
+`test_the_count_in_the_prose_is_the_count_in_the_list` below, the same way
+`test_skill_numbers_do_not_rot` holds the installer's line count: checked
+against the list it describes, rather than deleted or frozen.
 """
 
-import json
 import re
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent
+from tests.version_points import (
+    PYPROJECT,
+    REPO_ROOT,
+    VERSION_HOME_COUNT,
+    VERSION_POINTS,
+    manifest_version,
+)
 
-PYPROJECT = REPO_ROOT / "pyproject.toml"
 SKILL_MD = REPO_ROOT / "skills" / "rustok-wallet-tui" / "SKILL.md"
-CLAW_JSON = REPO_ROOT / "skills" / "rustok-wallet-tui" / "claw.json"
-INSTALL_SH = REPO_ROOT / "scripts" / "install.sh"
-SHIM = REPO_ROOT / "cli" / "rustok"
 DOCKERFILE = REPO_ROOT / "Dockerfile.wallet"
+AGENTS_MD = REPO_ROOT / "AGENTS.md"
 
 
 def _first_match(path: Path, pattern: str) -> str:
@@ -42,51 +51,96 @@ def _first_match(path: Path, pattern: str) -> str:
     return match.group(1)
 
 
-def manifest_version() -> str:
-    # Same extraction the publish workflow uses for its own gate: first
-    # top-level `version = "..."`.
-    return _first_match(PYPROJECT, r'^version = "(.+)"$')
+def manifest_version_as_the_publish_gate_reads_it() -> str:
+    r"""The version as `wallet-publish.yml:68` computes it — by line, not by TOML.
+
+    Not a second way to read the file: the workflow's own gate runs
+    `sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1`, and a
+    release only assembles if that string equals the one everything else uses.
+    This function exists so a divergence is named HERE, by a red test, instead of
+    surfacing two steps later as an opaque refusal from the publish workflow.
+
+    Its only consumer is `test_both_readings_of_the_manifest_agree`.
+    """
+    return _first_match(PYPROJECT, r'^version = "(.*)"$')
 
 
 def test_every_version_point_matches_the_manifest() -> None:
-    """One version, six of its ten homes — a mismatch blocks the release, strands
-    users, or makes the panel that answers "what am I running" answer wrong.
+    """Every point in the registry answers what `pyproject.toml` says.
 
-    Six is what THIS test holds. The 0.11.0 release found four more the hard way,
-    each guarded elsewhere and none of them here: `server.json` carries the
-    version and an image tag (`test_server_manifest.py`), the installer tag is
-    pinned in `test_docs_one_command.py`, seven byte-exact registration lines in
-    `tests/shim/run-tests.sh` carry the image, and `docs/TROUBLESHOOTING.md`
-    repeats the installer URL. Bump the six here and four tests elsewhere go red;
-    the count in this sentence is what a reader plans the release against."""
+    A mismatch blocks the release, strands users, or makes the panel that answers
+    "what am I running" answer wrong. Which places count is not decided here —
+    see `tests/version_points.py`, and add a point there rather than an assertion
+    here, so the count stays computable.
+    """
     expected = manifest_version()
-    found = {
-        "skills/rustok-wallet-tui/SKILL.md (frontmatter)": _first_match(
-            SKILL_MD, r"^version: (.+)$"
-        ),
-        "skills/rustok-wallet-tui/claw.json": json.loads(CLAW_JSON.read_text(encoding="utf-8"))[
-            "version"
-        ],
-        "scripts/install.sh (WALLET_VERSION)": _first_match(INSTALL_SH, r'^WALLET_VERSION="(.+)"$'),
-        "cli/rustok (DEFAULT_IMAGE tag)": _first_match(
-            SHIM, r'^DEFAULT_IMAGE="ghcr\.io/rustok-org/rustok-wallet-tui:v(.+)"$'
-        ),
-        # Sixth home, added in 0.9.3: the number the built image states about
-        # itself, which the console reads and shows to a human. A drift here is
-        # the quietest of the six — nothing refuses to build, nothing strands a
-        # user, the panel simply says the wrong thing to the one person who
-        # opened it to find out what they are running.
-        "Dockerfile.wallet (ARG WALLET_VERSION)": _first_match(
-            DOCKERFILE, r"^ARG WALLET_VERSION=(.+)$"
-        ),
-    }
     drifted = [
-        f"{where}: {value!r} != {expected!r}" for where, value in found.items() if value != expected
+        f"{point.label}: {found!r} != {expected!r}"
+        for point in VERSION_POINTS
+        if (found := point.current()) != expected
     ]
     assert not drifted, (
         f"version drift against pyproject.toml ({expected!r}) — the publish workflow's "
         "own gate rejects a mismatched manifest, and a stale image tag strands users "
         "on an old wallet:\n  " + "\n  ".join(drifted)
+    )
+
+
+def test_both_readings_of_the_manifest_agree() -> None:
+    """Our parser and the publish gate's parser must see the same string.
+
+    Everything in this repo reads the manifest as TOML. `wallet-publish.yml:68`
+    reads it with `sed`, by line, and refuses to publish when its input does not
+    equal what that sed prints. The two agree today by construction — a
+    `version = "..."` line added to any table ABOVE `[project]` would part them,
+    and the release would then fail inside the publish workflow, two steps after
+    the mistake, with an error naming neither cause.
+
+    A red here names both strings at the moment the mistake lands.
+    """
+    semantic = manifest_version()
+    as_published = manifest_version_as_the_publish_gate_reads_it()
+    assert semantic == as_published, (
+        f"pyproject.toml reads as {semantic!r} when parsed as TOML but "
+        f"{as_published!r} to the publish workflow's own gate "
+        "(wallet-publish.yml, `sed -n 's/^version = \"...\"$/.../p' | head -n 1`). "
+        "The release would be refused by that gate with no explanation of why."
+    )
+
+
+# "One version, 8 homes" — the module docstring above, and "all 8 points" in the
+# release checklist. Both are prose, and prose is what rotted last time.
+_PROSE_COUNTS = (
+    (Path(__file__), re.compile(r"One version, (\d+) homes")),
+    (AGENTS_MD, re.compile(r"Version bumped in \*\*all (\d+) points\*\*")),
+)
+
+
+def test_the_count_in_the_prose_is_the_count_in_the_list() -> None:
+    """A number written in a sentence has nothing keeping it honest.
+
+    `test_skill_numbers_do_not_rot` already holds the installer's line count this
+    way: the claim is compared against the thing it describes rather than deleted
+    or frozen. The count of version points is the same class of fact — it was
+    wrong for two releases ("six" while there were ten), and it is what a reader
+    plans a release against.
+    """
+    wrong = []
+    for path, pattern in _PROSE_COUNTS:
+        text = path.read_text(encoding="utf-8")
+        match = pattern.search(text)
+        assert match, (
+            f"{path.name}: the sentence this guard watches is gone (pattern "
+            f"{pattern.pattern!r}). Rewording is fine — update the pattern with it; "
+            "a guard that silently stops matching protects nothing."
+        )
+        if int(match.group(1)) != VERSION_HOME_COUNT:
+            wrong.append(
+                f"{path.name}: says {match.group(1)}, the registry holds {VERSION_HOME_COUNT}"
+            )
+    assert not wrong, (
+        "the prose and the list disagree about how many places carry the version — "
+        "the list in tests/version_points.py is the one that is true:\n  " + "\n  ".join(wrong)
     )
 
 
