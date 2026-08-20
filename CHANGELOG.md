@@ -58,6 +58,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the terminal, short enough that a forgotten card does not sit for hours.
 - **The queue number is taken when the payment is sent**, not when it is shown.
   A number chosen at display time went stale while the card waited for a human.
+- **The wallet's memory of a queue number expires after a minute**, where it used
+  to be kept for the life of the process. If a node ever answered with an
+  absurdly high number, that transaction was accepted into the pool and never
+  mined, the chain's count never caught up, and **every later payment was
+  reported as sent while none arrived** — only restarting the wallet cleared it.
+  The same bad answer now costs a minute, after which the wallet corrects itself.
 
 ### Removed
 - **`sign_message` is off the MCP surface.** The wallet refuses to sign messages
