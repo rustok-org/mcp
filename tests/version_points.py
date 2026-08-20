@@ -150,6 +150,15 @@ VERSION_POINTS: tuple[VersionPoint, ...] = (
         REPO_ROOT / "server.json",
         _tag_in_json("packages", 0, "identifier"),
     ),
+    # The Smithery listing. It was part of the bump once — CHANGELOG 0.5.0 lists
+    # it by name — and then fell out of every list: it sat on v0.9.2 through
+    # eight releases while the storefront told people to run that image. Nothing
+    # looked at it, which is the entire subject of this file.
+    VersionPoint(
+        "smithery.yaml (image)",
+        REPO_ROOT / "smithery.yaml",
+        _by_pattern(r"ghcr\.io/rustok-org/rustok-wallet-tui:v([0-9]+\.[0-9]+\.[0-9]+)"),
+    ),
 )
 
 # What a reader plans a release against: the manifest plus every point that has

@@ -27,9 +27,7 @@ This is a docs grep-invariant: it fails if the docs drift back.
 import re
 from pathlib import Path
 
-from tests.version_points import manifest_version
-
-REPO_ROOT = Path(__file__).parent.parent
+from tests.version_points import REPO_ROOT, manifest_version
 
 # Every doc a human reads to install, run or update the wallet.
 DOC_PATHS = [

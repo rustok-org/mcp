@@ -28,6 +28,19 @@ SH = shutil.which("sh")
 # removed, and the one test that asserts the refusal puts one back.
 CLEAN_ENV = {k: v for k, v in os.environ.items() if k not in ("CI", "GITHUB_ACTIONS")}
 
+# The throwaway repositories must be shaped by these tests and nothing else. A
+# developer's ~/.gitconfig (hooks, templates, commit.gpgsign, init.defaultBranch)
+# or a stray GIT_DIR would otherwise decide what the fixture looks like, and the
+# failure would appear on one machine only.
+GIT_ENV = {k: v for k, v in CLEAN_ENV.items() if not k.startswith(("GIT_", "XDG_"))} | {
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_SYSTEM": os.devnull,
+    "GIT_AUTHOR_NAME": "test",
+    "GIT_AUTHOR_EMAIL": "test@example.invalid",
+    "GIT_COMMITTER_NAME": "test",
+    "GIT_COMMITTER_EMAIL": "test@example.invalid",
+}
+
 
 def _run(
     *args: str, env: dict[str, str] | None = None, cwd: Path | None = None
@@ -37,7 +50,7 @@ def _run(
         [SH, str(SCRIPT), *args],
         capture_output=True,
         text=True,
-        env=env or CLEAN_ENV,
+        env=CLEAN_ENV if env is None else env,
         cwd=cwd or REPO_ROOT,
         check=False,
     )
@@ -46,7 +59,7 @@ def _run(
 def _git(repo: Path, *args: str) -> None:
     assert (git := shutil.which("git")), "no git on this machine"
     subprocess.run(  # noqa: S603  # fixed argv, no shell, no user input
-        [git, *args], cwd=repo, check=True, capture_output=True, text=True
+        [git, *args], cwd=repo, check=True, capture_output=True, text=True, env=GIT_ENV
     )
 
 
@@ -61,8 +74,6 @@ def release_repo(tmp_path: Path) -> Path:
     (repo / "scripts").mkdir(parents=True)
     shutil.copy(SCRIPT, repo / "scripts" / SCRIPT.name)
     _git(repo, "init", "-q", "-b", "main")
-    _git(repo, "config", "user.email", "test@example.invalid")
-    _git(repo, "config", "user.name", "test")
 
     (repo / "Dockerfile.wallet").write_text(_dockerfile("0.4.4", "0.3.2"), encoding="utf-8")
     _git(repo, "add", "-A")
@@ -82,28 +93,32 @@ def _in(
         [SH, str(repo / "scripts" / SCRIPT.name), *args],
         capture_output=True,
         text=True,
-        env=env or CLEAN_ENV,
+        env=CLEAN_ENV if env is None else env,
         cwd=repo,
         check=False,
     )
 
 
-def test_it_refuses_to_run_under_ci() -> None:
+def test_it_refuses_to_run_under_ci(release_repo: Path) -> None:
     """The refusal is the perimeter, not a convenience.
 
     Reading the private `core` needs a person's own credentials. Wired into a
     workflow of this PUBLIC repository, it would need a token for a private one
     — so the script says no before anyone builds on it.
+
+    Run against a throwaway repository, not this one: if the guard under test
+    ever stops working, the fallthrough must not be a real `gh api` call to a
+    private repository under the credentials of whoever ran pytest.
     """
-    result = _run(env={**CLEAN_ENV, "CI": "true"})
+    result = _in(release_repo, env={**CLEAN_ENV, "CI": "true"})
     assert result.returncode == 3, result.stderr
     assert "refusing to run under CI" in result.stderr
     assert "private" in result.stderr.lower()
 
 
-def test_the_other_marker_is_honoured_too() -> None:
+def test_the_other_marker_is_honoured_too(release_repo: Path) -> None:
     """`GITHUB_ACTIONS` without `CI` is the same situation."""
-    result = _run(env={**CLEAN_ENV, "GITHUB_ACTIONS": "true"})
+    result = _in(release_repo, env={**CLEAN_ENV, "GITHUB_ACTIONS": "true"})
     assert result.returncode == 3, result.stderr
 
 
@@ -166,8 +181,6 @@ def test_it_refuses_when_no_release_tag_is_reachable(tmp_path: Path) -> None:
     (repo / "scripts").mkdir(parents=True)
     shutil.copy(SCRIPT, repo / "scripts" / SCRIPT.name)
     _git(repo, "init", "-q", "-b", "main")
-    _git(repo, "config", "user.email", "test@example.invalid")
-    _git(repo, "config", "user.name", "test")
     (repo / "Dockerfile.wallet").write_text(_dockerfile("0.4.5", "0.3.3"), encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "no tags here")
@@ -192,6 +205,10 @@ def test_it_refuses_when_no_release_tag_is_reachable(tmp_path: Path) -> None:
         ("docs(specs): A0 plan — the queue number", "internal"),
         ("ci: a hang costs twenty minutes, not six hours (#127)", "internal"),
         ("chore(release): 0.4.5 — the wallet arrives", "internal"),
+        ("test(e2e): two payments parked together both go out", "internal"),
+        ("refactor(tests): the version points are declared once", "internal"),
+        ("build: pin the base image by digest", "internal"),
+        ("style: reflow the caveats", "internal"),
     ],
 )
 def test_where_a_commit_lands(subject: str, expected: str) -> None:
@@ -220,3 +237,89 @@ def test_an_unknown_argument_is_refused() -> None:
     result = _run("--everything")
     assert result.returncode == 2
     assert "unknown argument" in result.stderr
+
+
+def _with_stub_gh(repo: Path, response: str) -> dict[str, str]:
+    """Put a stub `gh` first on PATH, the way the shim suite stubs podman.
+
+    The full run is the whole point of this script and the only part that leaves
+    the machine, so it was the only part no test touched. A stub answers in the
+    shape `gh api --jq` already produces, which keeps the test about the script's
+    own behaviour rather than about jq.
+    """
+    bin_dir = repo / "stub-bin"
+    bin_dir.mkdir(exist_ok=True)
+    stub = bin_dir / "gh"
+    stub.write_text(f"#!/bin/sh\ncat <<'RESPONSE'\n{response}\nRESPONSE\n", encoding="utf-8")
+    stub.chmod(0o755)
+    return {**CLEAN_ENV, "PATH": f"{bin_dir}:{CLEAN_ENV.get('PATH', '')}"}
+
+
+def test_the_full_run_sorts_and_drops_nothing(release_repo: Path) -> None:
+    """ "Drops nothing" is the promise; this is the only thing that holds it.
+
+    Every commit the ranges contain has to appear somewhere in the output — the
+    editorial split is a convenience for the reader, never a filter.
+    """
+    env = _with_stub_gh(
+        release_repo,
+        "#total 3\n"
+        "fix: a thing users feel\thttps://example.invalid/1\n"
+        "docs(specs): a thing they do not\thttps://example.invalid/2\n"
+        "chore(deps): bump h2 (RUSTSEC-2026-0258)\thttps://example.invalid/3",
+    )
+    result = _in(release_repo, env=env)
+    assert result.returncode == 0, result.stderr
+
+    user_facing, _, internal = result.stdout.partition("## Looks internal")
+    assert "fix: a thing users feel" in user_facing
+    assert "chore(deps): bump h2 (RUSTSEC-2026-0258)" in user_facing, "security beats the prefix"
+    assert "docs(specs): a thing they do not" in internal
+    # This repo's own commits since the tag are in the draft too, and "the pins
+    # move" carries no conventional prefix — which the classifier reads as
+    # user-facing, because an unprefixed subject is how this project writes the
+    # changes a person notices.
+    assert "the pins move" in user_facing
+    assert "#total" not in result.stdout, "the count line is bookkeeping, not a draft entry"
+
+
+def test_a_truncated_compare_is_a_refusal_not_a_short_draft(release_repo: Path) -> None:
+    """The compare endpoint caps its list at 250 while reporting the true total.
+
+    A draft quietly showing 250 of 400 would contradict the only promise this
+    script makes, and would do it in the direction that already cost a release.
+    """
+    env = _with_stub_gh(
+        release_repo, "#total 400\nfix: only one of them arrived\thttps://example.invalid/1"
+    )
+    result = _in(release_repo, env=env)
+    assert result.returncode == 8, result.stdout
+    assert "400 commits and the API returned 1" in result.stderr
+
+
+def test_an_unreadable_pin_is_a_refusal(release_repo: Path) -> None:
+    """An empty range printed as "nothing changed" is a lie, not a result."""
+    (release_repo / "Dockerfile.wallet").write_text("ARG NOTHING=here\n", encoding="utf-8")
+    result = _in(release_repo, "--ranges-only")
+    assert result.returncode == 5, result.stdout
+    assert "CORE_IMAGE" in result.stderr
+
+
+def test_the_tag_can_be_named_explicitly(release_repo: Path) -> None:
+    """`RELEASE_NOTES_PREV_TAG` is the way out when discovery cannot work.
+
+    The refusal advertises it, so something has to prove it does what the
+    refusal promises — otherwise renaming the variable leaves the suite green
+    and the advice false.
+    """
+    _git(release_repo, "commit", "-q", "--allow-empty", "-m", "later still")
+    _git(release_repo, "tag", "wallet-tui-v0.11.0")
+    result = _in(
+        release_repo,
+        "--ranges-only",
+        env={**CLEAN_ENV, "RELEASE_NOTES_PREV_TAG": "wallet-tui-v0.10.0"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Previous release: wallet-tui-v0.10.0" in result.stdout, (
+        "the newest tag would have been v0.11.0 — the override was ignored"
+    )

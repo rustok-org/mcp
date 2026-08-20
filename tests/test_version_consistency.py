@@ -6,7 +6,7 @@ dictionary while the *count* lived in prose beside it, and the two drifted apart
 in 0.11.0: the prose said six, the release found ten the hard way, and nothing
 noticed until a human did.
 
-One version, 8 homes — a mismatch blocks the release, strands users, or makes
+One version, 9 homes — a mismatch blocks the release, strands users, or makes
 the panel that answers "what am I running" answer wrong:
 
 * `wallet-publish.yml` refuses to publish unless its `version` input equals
@@ -65,6 +65,13 @@ def manifest_version_as_the_publish_gate_reads_it() -> str:
     return _first_match(PYPROJECT, r'^version = "(.*)"$')
 
 
+# The exact line the mirror above stands for. Compared as text against the
+# workflow, so a change there turns this red instead of silently retiring it.
+PUBLISH_GATE_SED = (
+    "MANIFEST_VERSION=$(sed -n 's/^version = \"\\(.*\\)\"$/\\1/p' pyproject.toml | head -n 1)"
+)
+
+
 def test_every_version_point_matches_the_manifest() -> None:
     """Every point in the registry answers what `pyproject.toml` says.
 
@@ -98,6 +105,19 @@ def test_both_readings_of_the_manifest_agree() -> None:
 
     A red here names both strings at the moment the mistake lands.
     """
+    # Guard the guard: this test is a mirror, and a mirror of something that
+    # moved reflects nothing. If the workflow changes how it reads the manifest,
+    # comparing tomllib against a pattern nobody runs any more would stay green
+    # while the property it stands for is gone.
+    workflow = (REPO_ROOT / ".github" / "workflows" / "wallet-publish.yml").read_text(
+        encoding="utf-8"
+    )
+    assert PUBLISH_GATE_SED in workflow, (
+        "wallet-publish.yml no longer reads the manifest the way this test mirrors "
+        f"({PUBLISH_GATE_SED!r}). Update the mirror with it — until then this "
+        "comparison stands for nothing."
+    )
+
     semantic = manifest_version()
     as_published = manifest_version_as_the_publish_gate_reads_it()
     assert semantic == as_published, (
@@ -242,3 +262,97 @@ def test_every_image_tag_a_reader_can_copy_matches_the_manifest() -> None:
         f"these copy-paste commands name an image other than {expected!r}, so a reader "
         "following them would run the previous wallet:\n  " + "\n  ".join(sorted(stale))
     )
+
+
+# An image reference is unambiguous in a way prose is not: it always names what
+# to run NOW, so any occurrence of this form outside the registry is either a
+# point nobody counted or a lie waiting to be copied.
+_IMAGE_ANYWHERE = re.compile(r"ghcr\.io/rustok-org/rustok-wallet-tui:v([0-9]+\.[0-9]+\.[0-9]+)")
+
+_SWEEP_SKIP_DIRS = frozenset(
+    {".git", ".venv", ".claude", ".mypy_cache", ".pytest_cache", ".ruff_cache", "__pycache__"}
+)
+
+# Files where an image reference is deliberately NOT the current version. Each
+# entry is a decision with a reason, not a silencer — an exemption without one
+# is how smithery.yaml would have been "handled".
+_SWEEP_EXEMPT = {
+    "tests/shim/run-tests.sh": (
+        "a stub container from the v0.8.0 era, planted to prove the shim reads an "
+        "existing registration; it is fixture data, not a place a release edits"
+    ),
+}
+
+
+def _sweep_files() -> list[Path]:
+    return sorted(
+        path
+        for path in REPO_ROOT.rglob("*")
+        if path.is_file() and not _SWEEP_SKIP_DIRS.intersection(path.relative_to(REPO_ROOT).parts)
+    )
+
+
+def test_no_image_reference_escapes_the_registry() -> None:
+    """Nothing in this tree may name a wallet image other than the manifest's.
+
+    The registry says which places are known. This says there are no others —
+    the harder half, because a place nobody declared is exactly the one nobody
+    bumps. `smithery.yaml` sat on v0.9.2 for eight releases: the Smithery
+    storefront told people to run an image from three minor versions back, and
+    no guard, no bump and no pair of eyes noticed. It was found by this sweep's
+    pattern, not by reading.
+
+    Scoped to the IMAGE form on purpose. The installer-URL form
+    (`wallet-tui-vX.Y.Z`) cannot be swept the same way: `CHANGELOG.md` and
+    `docs/CAVEATS.md` legitimately reference older releases by tag, and telling
+    "the current one" from "the one where this changed" needs meaning, not a
+    regex. That half stays held by `tests/test_docs_one_command.py` over a named
+    list of docs, and its limit is written down in AGENTS.md rather than papered
+    over.
+    """
+    expected = manifest_version()
+    stale: list[str] = []
+    seen = 0
+
+    for path in _sweep_files():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            for found in _IMAGE_ANYWHERE.findall(line):
+                seen += 1
+                if found == expected or relative in _SWEEP_EXEMPT:
+                    continue
+                stale.append(f"{relative}:{line_no}: names v{found}, manifest says {expected}")
+
+    # Guard the guard: a pattern that stopped matching would make this vacuous,
+    # and the run examples cannot have vanished from the tree.
+    assert seen >= 10, (
+        f"the sweep found only {seen} image references in the whole tree — the "
+        "pattern has stopped matching what it is meant to watch"
+    )
+    assert not stale, (
+        "these name a wallet image the manifest does not:\n  "
+        + "\n  ".join(stale)
+        + "\n\nEither bump them, add them to VERSION_POINTS, or exempt them with a reason."
+    )
+
+
+def test_every_sweep_exemption_is_still_earning_it() -> None:
+    """An exemption outlives its reason silently — so it has to keep proving it.
+
+    A file exempted because it carries a deliberately old tag, but which no
+    longer carries one, is a hole left open for the next person to fall into.
+    """
+    expected = manifest_version()
+    for relative, reason in _SWEEP_EXEMPT.items():
+        path = REPO_ROOT / relative
+        assert path.exists(), f"{relative} is exempt from the image sweep but does not exist"
+        found = _IMAGE_ANYWHERE.findall(path.read_text(encoding="utf-8"))
+        assert found, f"{relative} is exempt from the image sweep but names no image at all"
+        assert any(version != expected for version in found), (
+            f"{relative} is exempt because {reason}, but every image it names is now "
+            f"{expected} — the exemption protects nothing and should be deleted"
+        )

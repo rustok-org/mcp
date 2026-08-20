@@ -44,6 +44,12 @@ done
 # way this could run there is if someone wired it in — at which point the public
 # repository's workflow would need a token for the private `core`. Refusing now
 # is cheaper than noticing then.
+#
+# The refusal covers every mode, including `--ranges-only` and `--classify`,
+# which touch no network at all. That is wider than the reason above, on
+# purpose: a workflow step that calls this script for its cheap half is one edit
+# away from calling it for the whole, and the guard is worth more as a rule
+# about the script than as a rule about one code path.
 if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
     echo "release-notes-draft: refusing to run under CI." >&2
     echo "  This reads the PRIVATE core repository with a person's own gh credentials." >&2
@@ -155,8 +161,11 @@ collect_neighbour() {  # collect_neighbour <label> <repo> <was> <now>
         echo "  $1: v$3 unchanged — nothing to pull" >&2
         return 0
     fi
+    # `total_commits` comes back beside the list because the endpoint caps the
+    # list at 250 while still reporting the true total. A draft that quietly
+    # showed 250 of 400 would contradict the one promise this script makes.
     body="$(gh api "repos/$2/compare/v$3...v$4" \
-        --jq '.commits[] | (.commit.message | split("\n")[0]) + "\t" + .html_url' 2>&1)" || {
+        --jq '"#total \(.total_commits)", (.commits[] | (.commit.message | split("\n")[0]) + "\t" + .html_url)' 2>&1)" || {
         echo "release-notes-draft: cannot read $2 v$3...v$4 through gh." >&2
         echo "  $body" >&2
         echo "  This is a failure, not an empty release. Fix access and re-run." >&2
@@ -166,7 +175,22 @@ collect_neighbour() {  # collect_neighbour <label> <repo> <was> <now>
         echo "  $1: pin moved v$3 -> v$4 but no commits between the tags — look yourself" >&2
         return 0
     fi
-    echo "$body" | while IFS="$(printf '\t')" read -r subject url; do
+    total="$(printf '%s\n' "$body" | sed -n 's/^#total //p')"
+    listed="$(printf '%s\n' "$body" | grep -c '	' || true)"
+    if [ -n "$total" ] && [ "$total" -gt "$listed" ]; then
+        echo "release-notes-draft: $2 v$3...v$4 has $total commits and the API returned $listed." >&2
+        echo "  The compare endpoint caps its list at 250. This draft would be incomplete," >&2
+        echo "  which is the one thing it exists not to be. Split the range and re-run." >&2
+        exit 8
+    fi
+    # `printf %s`, never `echo`: under dash — which is /bin/sh on the machines
+    # this is likeliest to meet — `echo` expands backslash escapes by default, so
+    # a commit subject containing \t or \n would be rewritten on its way to the
+    # draft. shellcheck does not catch it (SC2028 stays quiet here).
+    printf '%s\n' "$body" | while IFS="$(printf '\t')" read -r subject url; do
+        case "$subject" in
+            '#total '*) continue ;;
+        esac
         sort_line "$1" "$subject" "$url"
     done
 }

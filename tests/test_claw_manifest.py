@@ -8,12 +8,10 @@ mixed up again.
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 
-from tests.version_points import manifest_version
+from tests.version_points import REPO_ROOT, manifest_version
 
-REPO_ROOT = Path(__file__).parent.parent
 CLAW_PATH = REPO_ROOT / "skills" / "rustok-wallet-tui" / "claw.json"
 
 CLAWHUB_REQUIRED_KEYS = {

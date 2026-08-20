@@ -64,10 +64,10 @@ the filled pins, because users fetch `install.sh` **by tag**. A tag cut before
 the pins are filled is dead permanently.
 
 **1 — prep (PR):**
-- [ ] Version bumped in **all 8 points**. Which places those are is not listed
-      here and not remembered — `tests/version_points.py` declares them, one
-      entry each, and `test_every_version_point_matches_the_manifest` holds all
-      of them. The number in this line is checked against that list by
+- [ ] Version bumped in **all 9 points** — `pyproject.toml`, which the others
+      answer to, plus the 8 that `tests/version_points.py` declares, one entry
+      each. Which places those are is not listed here and not remembered;
+      `test_every_version_point_matches_the_manifest` holds all of them. The number in this line is checked against that list by
       `test_the_count_in_the_prose_is_the_count_in_the_list`, so it cannot go
       stale the way "six" did for two releases while there were ten. Add a point
       to the registry, not an assertion to a test
