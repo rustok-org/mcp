@@ -64,9 +64,15 @@ the filled pins, because users fetch `install.sh` **by tag**. A tag cut before
 the pins are filled is dead permanently.
 
 **1 — prep (PR):**
-- [ ] Version bumped in every point (`tests/test_version_consistency.py` enforces
-      the set: `pyproject.toml`, skill frontmatter, `claw.json`,
-      `WALLET_VERSION`, the `DEFAULT_IMAGE` tag)
+- [ ] Version bumped in **all ten points**, not the six one guard names.
+      `tests/test_version_consistency.py` holds six — `pyproject.toml`, skill
+      frontmatter, `claw.json`, `WALLET_VERSION`, the `DEFAULT_IMAGE` tag,
+      `ARG WALLET_VERSION`. Four more are held by other tests and were found the
+      hard way in 0.11.0: `server.json` (version **and** image tag),
+      `INSTALL_TAG` in `tests/test_docs_one_command.py`, seven byte-exact
+      registration lines in `tests/shim/run-tests.sh`, and the installer URL in
+      `docs/TROUBLESHOOTING.md`. Bumping only the guarded six leaves four tests
+      red, which is how this line came to be written
 - [ ] `CHANGELOG.md` describes the release — including anything user-facing that
       landed since the last tag, not only the last PR
 - [ ] Docs carry no stale image tag (guarded by

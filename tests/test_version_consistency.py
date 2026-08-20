@@ -1,6 +1,7 @@
 """Keep every place that names the wallet version telling the same story.
 
-The version is not written once — it is written in six places that must agree:
+The version is not written once — it is written in ten places that must agree,
+six of them held by this file (the other four: see the docstring below):
 the package manifest, the skill frontmatter, the ClawHub manifest, the version
 the installer reports, the image tag the shim launches, and — since 0.9.3 — the
 number the image states about itself for the console's identity panel. They
@@ -48,8 +49,16 @@ def manifest_version() -> str:
 
 
 def test_every_version_point_matches_the_manifest() -> None:
-    """One version, six homes — a mismatch blocks the release, strands users, or
-    makes the panel that answers "what am I running" answer wrong."""
+    """One version, six of its ten homes — a mismatch blocks the release, strands
+    users, or makes the panel that answers "what am I running" answer wrong.
+
+    Six is what THIS test holds. The 0.11.0 release found four more the hard way,
+    each guarded elsewhere and none of them here: `server.json` carries the
+    version and an image tag (`test_server_manifest.py`), the installer tag is
+    pinned in `test_docs_one_command.py`, seven byte-exact registration lines in
+    `tests/shim/run-tests.sh` carry the image, and `docs/TROUBLESHOOTING.md`
+    repeats the installer URL. Bump the six here and four tests elsewhere go red;
+    the count in this sentence is what a reader plans the release against."""
     expected = manifest_version()
     found = {
         "skills/rustok-wallet-tui/SKILL.md (frontmatter)": _first_match(

@@ -7,14 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- **A data dir the wallet cannot write is a named refusal, not a crash.** `set-pin`
-  and `create-wallet` used to panic (exit 101, a backtrace) when the PIN record
-  could not be written — wrong owner on `/data`, a read-only mount, a full disk.
-  They now say what to fix and exit 2; on `set-pin` the previous PIN stands.
-  Found live, through a volume copy that left `/data` owned by root.
+## [0.11.0] — 2026-08-20
 
 ### Added
+- **The wallet reads a chain out of the box.** A fresh install used to answer
+  "no RPC" on every chain, and it was not merely blind: a chain without an
+  endpoint was dropped from the provider registry entirely, so nothing could be
+  previewed or sent either. The build now carries two public nodes per chain and
+  registers USDC without being asked. Every address was measured before it was
+  written down — `eth_chainId` for the nodes, `decimals()` and `symbol()` for the
+  contracts — because a default aimed at the wrong chain reports a stranger's
+  balance as yours. **What you name replaces what the build carries rather than
+  joining it**, and an empty value means "read nothing on this chain".
+- **Arbitrum is shown by default**, beside Ethereum and Base. On it two USDC rows
+  are normal: the native token and the bridged one, which the wallet labels
+  `USDC.e` — on chain both call themselves `USDC`, and only the address separates
+  them.
+- **A person switches the wallet's mode from the console.** `c` on the Dashboard
+  offers `read_only` / `supervised` / `autonomous` under the same PIN that
+  approves payments; the autonomy disclaimer is on screen before the PIN and
+  while it is typed. Turning autonomy on releases nothing already parked, and an
+  agent session reads the mode at connect — a mid-session switch changes
+  enforcement immediately and the agent's tool list at the next connect.
+- **The balance panel says who learns of a reading**: any node that reads a
+  balance sees the address and the IP that asked. True of the carried nodes,
+  yours, and your provider's alike.
 - **The refusal to pick between several wallets now says which is yours.** With
   a second agent running, `rustok console` (and `set-pin`) refused with
   "claude, test — use --agent <name>" and no more; with two containers on ONE
@@ -30,6 +47,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TROUBLESHOOTING says it plainly: `set-pin` needs the wallet running, and the
   console stops the wallet it started when you leave — `rustok start` first, or
   a second terminal.
+
+### Changed
+- **An unreadable asset now says what to do about it.** "no RPC" became "no node
+  for this chain (set `RUSTOK_RPC_URLS_<id>`)", and "RPC call failed" became
+  "the node did not answer (retry, or name your own)". Naming the cause was the
+  release before this one; a cause with no next step leaves a person exactly
+  where an empty screen did.
+- **A parked payment waits 30 minutes**, not 15 — long enough to walk away from
+  the terminal, short enough that a forgotten card does not sit for hours.
+- **The queue number is taken when the payment is sent**, not when it is shown.
+  A number chosen at display time went stale while the card waited for a human.
+- **The wallet's memory of a queue number expires after a minute**, where it used
+  to be kept for the life of the process. If a node ever answered with an
+  absurdly high number, that transaction was accepted into the pool and never
+  mined, the chain's count never caught up, and **every later payment was
+  reported as sent while none arrived** — only restarting the wallet cleared it.
+  The same bad answer now costs a minute, after which the wallet corrects itself.
+
+### Removed
+- **`sign_message` is off the MCP surface.** The wallet refuses to sign messages
+  in every mode, and until now it still offered the tool — the refusal arrived
+  only after the agent had built the request. Registration, capability map and
+  client method are gone; the texts no longer promise what the policy denies.
+
+### Fixed
+- **A data dir the wallet cannot write is a named refusal, not a crash.** `set-pin`
+  and `create-wallet` used to panic (exit 101, a backtrace) when the PIN record
+  could not be written — wrong owner on `/data`, a read-only mount, a full disk.
+  They now say what to fix and exit 2; on `set-pin` the previous PIN stands.
+  Found live, through a volume copy that left `/data` owned by root.
+- **RUSTSEC-2026-0258** — `h2` 0.4.14 → 0.4.16 (unbounded empty DATA frames).
+
 
 ## [0.10.0] — 2026-08-16
 
