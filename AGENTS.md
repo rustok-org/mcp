@@ -135,6 +135,16 @@ the pins are filled is dead permanently.
       load-bearing:** the landing page no longer carries an install command of
       its own, it points here, so a stale listing is a stale install for
       everyone who arrives through the front door.
+- [ ] **ClawHub's short summary: keep it under 300 characters, whatever the form
+      says.** Its counter allows 500 and its own label calls the field "used in
+      cards, search, and previews" — but a 488-character summary saved on
+      2026-08-20 never reached the public page, while the listing kept the older,
+      shorter text. Two fields with two Save buttons sit on that settings page
+      (summary, and catalog metadata); the second one's changes appeared at once,
+      which is how the first one's absence was noticed at all. **Topics cap at
+      five**, so a seven-tag list cannot be carried over from `claw.json`.
+      Verify by reading the rendered page afterwards, not the form — the form
+      shows what you typed, the page shows what a stranger will read.
 
 **5 — the landing page (ops):** the site used to carry its own copy of the
 install command, which is how it came to sit two versions behind until a third
