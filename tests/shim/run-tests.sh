@@ -12,6 +12,21 @@ TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$TESTS_DIR/../.." && pwd)"
 SHIM="$REPO_ROOT/cli/rustok"
 
+# The image the shim is EXPECTED to launch. Read from the manifest, which is
+# the source of truth for the release, and never from the shim itself — an
+# expectation taken from the thing under test cannot catch it drifting. Seven
+# byte-exact copies of this string lived below until 0.12.0; a bump had to
+# find all seven, and 0.11.0 found them the hard way.
+#
+# Extracted exactly the way wallet-publish.yml does it, so this harness and
+# the gate that refuses a mismatched publish read the manifest identically.
+WALLET_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$REPO_ROOT/pyproject.toml" | head -n 1)"
+if [ -z "$WALLET_VERSION" ]; then
+    echo "run-tests.sh: no version in $REPO_ROOT/pyproject.toml — every expectation below would silently compare against an empty tag" >&2
+    exit 1
+fi
+WALLET_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui:v$WALLET_VERSION"
+
 PASS=0
 FAIL=0
 N=0
@@ -844,7 +859,7 @@ export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
 export RUSTOK_ALLOWED_CHAINS="1"
 run_shim connect claude
 unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
-EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000 -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 -e RUSTOK_ALLOWED_CHAINS=1 ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0"
+EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000 -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 -e RUSTOK_ALLOWED_CHAINS=1 $WALLET_IMAGE"
 if assert_exit 0 \
     && [ "$(grep '^claude mcp add' "$WORK/log")" = "$EXPECTED" ] \
     && [ "$(cat "$WORK/state/secret-rustok-rpc-claude-1")" = "https://rpc.example/with-key" ]; then
@@ -959,7 +974,7 @@ export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
 export RUSTOK_ALLOWED_CHAINS="1"
 run_shim connect openclaw
 unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
-EXPECTED_JSON='{"command":"podman","args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=openclaw","-v","rustok-openclaw:/data","--secret","rustok-keyring-openclaw,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-openclaw","--secret","rustok-rpc-openclaw-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0"]}'
+EXPECTED_JSON='{"command":"podman","args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=openclaw","-v","rustok-openclaw:/data","--secret","rustok-keyring-openclaw,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-openclaw","--secret","rustok-rpc-openclaw-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","'"$WALLET_IMAGE"'"]}'
 if assert_exit 0 \
     && [ "$(sed -n 's/^openclaw-set-json //p' "$WORK/log")" = "$EXPECTED_JSON" ] \
     && [ "$(cat "$WORK/state/secret-rustok-rpc-openclaw-1")" = "https://rpc.example/with-key" ]; then
@@ -1163,7 +1178,7 @@ export RUSTOK_NETWORK_MODE="live"
 export RUSTOK_ALLOWED_CHAINS="1,8453"
 run_shim connect claude
 unset RUSTOK_RPC_URLS_1 RUSTOK_RPC_URLS_8453 RUSTOK_ALLOWED_CHAINS RUSTOK_CHAIN_LABELS RUSTOK_NETWORK_MODE
-EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000 -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 --secret rustok-rpc-claude-8453,type=env,target=RUSTOK_RPC_URLS_8453 -e RUSTOK_ALLOWED_CHAINS=1,8453 -e RUSTOK_CHAIN_LABELS=mainnet,base -e RUSTOK_NETWORK_MODE=live ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0"
+EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000 -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 --secret rustok-rpc-claude-8453,type=env,target=RUSTOK_RPC_URLS_8453 -e RUSTOK_ALLOWED_CHAINS=1,8453 -e RUSTOK_CHAIN_LABELS=mainnet,base -e RUSTOK_NETWORK_MODE=live $WALLET_IMAGE"
 if assert_exit 0 && [ "$(grep '^claude mcp add' "$WORK/log")" = "$EXPECTED" ]; then
     ok "connect with two chains and three literals: full argv byte-exact in sorted order"
 else not_ok "connect with two chains and three literals: full argv byte-exact in sorted order"; fi
@@ -1271,7 +1286,7 @@ export RUSTOK_ALLOWED_CHAINS="1"
 run_shim connect cursor
 unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
 CJSON="$(jq -cS '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
-CEXP='{"args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-cursor","--secret","rustok-rpc-cursor-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0"],"command":"podman"}'
+CEXP='{"args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-cursor","--secret","rustok-rpc-cursor-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","'"$WALLET_IMAGE"'"],"command":"podman"}'
 if assert_exit 0 && [ "$CJSON" = "$CEXP" ] \
     && [ "$(cat "$WORK/state/secret-rustok-rpc-cursor-1")" = "https://rpc.example/with-key" ]; then
     ok "connect cursor: entry byte-exact (default agent=cursor, own volume, leading-dash args survive)"
@@ -1286,7 +1301,7 @@ export RUSTOK_ALLOWED_CHAINS="1"
 run_shim connect cursor --agent claude
 unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
 OJSON="$(jq -cS '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
-OEXP='{"args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=claude","-v","rustok-wallet-tui:/data","--secret","rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude","--secret","rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0"],"command":"podman"}'
+OEXP='{"args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=claude","-v","rustok-wallet-tui:/data","--secret","rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude","--secret","rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","'"$WALLET_IMAGE"'"],"command":"podman"}'
 if assert_exit 0 && [ "$OJSON" = "$OEXP" ] \
     && [ "$(cat "$WORK/state/secret-rustok-rpc-claude-1")" = "https://rpc.example/with-key" ]; then
     ok "connect cursor --agent claude: explicit override drives label/volume/secrets (one resolve line for all clients)"
@@ -1521,7 +1536,7 @@ plant_python3
 plant_all_three
 run_shim update
 CJSON="$(jq -cS '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
-CEXP='{"args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-cursor","ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0"],"command":"podman"}'
+CEXP='{"args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-cursor","'"$WALLET_IMAGE"'"],"command":"podman"}'
 HCHECK="$("$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF'
 import sys, yaml
 c = yaml.safe_load(open(sys.argv[1]))
@@ -1537,7 +1552,7 @@ PEOF
 PULL_BEFORE_ADD=0
 awk '/^podman pull /{p=NR} /^claude mcp add /{a=NR} END{exit !(p && a && p<a)}' "$WORK/log" && PULL_BEFORE_ADD=1
 if assert_exit 0 && [ "$CJSON" = "$CEXP" ] && [ "$HCHECK" = "HOK" ] \
-    && grep -q '^podman pull ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0' "$WORK/log" \
+    && grep -q "^podman pull $WALLET_IMAGE" "$WORK/log" \
     && [ "$PULL_BEFORE_ADD" = "1" ] \
     && grep -q '^claude mcp add -s user rustok -- podman run .* rustok.agent=claude .* rustok-wallet-tui:/data ' "$WORK/log" \
     && assert_has "CLAUDEOLD" && assert_has "CURSOROLD" && assert_has "HERMESOLD" \
