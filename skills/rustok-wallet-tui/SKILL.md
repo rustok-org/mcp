@@ -169,6 +169,24 @@ one — the old PIN is not needed.
 > user's own terminal (window 2). Do not ask the user for their PIN or their
 > phrase in this chat, ever.
 
+## Where the balance you show comes from
+
+The wallet reads chains through an RPC node. Since 0.11.0 it carries two public
+endpoints for each chain it shows (Ethereum, Base, Arbitrum by default), so a
+fresh install reports balances without the user configuring anything, and USDC
+appears beside the native coin without being registered.
+
+**Tell the user this when it matters, and never as a footnote to a payment:** any
+node that reads a balance learns the address and the IP that asked — the
+carried ones, one they name themselves, and their own provider's alike. They
+replace the carried list with `RUSTOK_RPC_URLS_<chain>`; naming one replaces the
+list rather than adding to it.
+
+On Arbitrum two USDC rows are normal: the native token and the bridged one, which
+the wallet labels `USDC.e`. On chain both call themselves `USDC` — only the
+contract address separates them, which is why balance rows carry it. Never treat
+them as one balance, and never sum them without saying you did.
+
 ## How the agent runs the wallet
 
 `rustok connect claude` writes this registration for the user, so normally none of
@@ -190,7 +208,7 @@ podman run -i --rm \
   -v rustok-wallet-tui:/data \
   --secret rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000 \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude \
-  -e RUSTOK_ALLOWED_CHAINS="1,8453" \
+  -e RUSTOK_ALLOWED_CHAINS="1,8453,42161" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
   ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0
 ```
@@ -207,7 +225,7 @@ docker run -i --rm \
   -v rustok-wallet-tui:/data \
   -v ~/.rustok-keyring-pass:/run/keyring-pass:ro \
   -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
-  -e RUSTOK_ALLOWED_CHAINS="1,8453" \
+  -e RUSTOK_ALLOWED_CHAINS="1,8453,42161" \
   -e RUSTOK_RPC_URLS_1="https://your-rpc" \
   ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0
 ```
@@ -257,7 +275,7 @@ password is delivered by the podman secret (or the docker `_FILE` mount) above,
                "-v", "rustok-wallet-tui:/data",
                "--secret", "rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000",
                "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude",
-               "-e", "RUSTOK_ALLOWED_CHAINS=1,8453",
+               "-e", "RUSTOK_ALLOWED_CHAINS=1,8453,42161",
                "-e", "RUSTOK_RPC_URLS_1",
                "ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0"],
       "env": {

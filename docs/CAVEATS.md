@@ -135,6 +135,25 @@ is never moved here, and a repository ruleset enforces that.
   Fixed in **0.9.2**; if you are on an earlier version and you send anything,
   upgrading is not optional in practice.
 
+## Reading the chain
+
+- **A node that reads your balance learns the address and the IP that asked.**
+  That is true of every node — the ones this build carries, the one you name, and
+  your provider's alike. Since 0.11.0 the wallet carries two public endpoints for
+  each chain it shows, so a fresh install reads balances without being configured.
+  Naming `RUSTOK_RPC_URLS_<chain>` (or pointing it at a node you run) **replaces**
+  the carried list rather than joining it, and an empty value means "read nothing
+  on this chain".
+- **A public endpoint behind one hostname is a pool of machines, and a lagging one
+  answers with state a moment behind.** We paid for that once: a swap simulation
+  reported `exceeds allowance` because the machine that answered had not yet seen
+  the approval. Transaction numbering does not ride on it — the wallet takes the
+  number from its own counter, not from the node.
+- **The token shown without being registered is USDC**, listed by contract address.
+  On Arbitrum both the native token and the bridged one appear, and the bridged one
+  is labelled `USDC.e` **by us**: on chain it calls itself `USDC` too, and only the
+  address separates them. A registry you provide replaces this list.
+
 ## What we do not verify at all
 
 - **No formal verification, and none planned.** We measured the price on the

@@ -46,7 +46,15 @@ IMAGE_REPO = "ghcr.io/rustok-org/rustok-wallet-tui"
 
 # What the core answers. Matched on the stable half — the parenthetical
 # ("proto 3, increment 3") is a roadmap note and will move.
-REFUSAL = re.compile(r"blocked by policy|sign parking arrives", re.IGNORECASE)
+# Two shapes of the same "no", and the wallet moved from the first to the second
+# in 0.11.0. Until then `sign_message` was registered and answered with the
+# policy's refusal; since #156 it is not on the surface at all, so the call dies
+# at the capability gate instead — earlier, and without the agent ever building
+# the request. Both are refusals; neither is a signature.
+REFUSAL = re.compile(
+    r"blocked by policy|sign parking arrives|requires additional capability",
+    re.IGNORECASE,
+)
 
 
 def _pinned_image() -> str:
@@ -103,6 +111,13 @@ def test_the_shipped_wallet_refuses_to_sign_a_message(tmp_path: Path) -> None:
         )
         try:
             client.initialize()
+            # Asked first, because it is the stronger claim: the texts say the
+            # wallet does not offer a signature it would refuse, and a tool
+            # missing from the list cannot be reached by any agent at all. The
+            # call below still runs — a name absent from one listing but alive
+            # on the wire would be the worst of both.
+            listed = client.call("tools/list", {})
+            offered = {tool["name"] for tool in listed.get("tools", [])}
             with pytest.raises(RuntimeError) as refusal:
                 client.call(
                     "tools/call",
@@ -113,6 +128,11 @@ def test_the_shipped_wallet_refuses_to_sign_a_message(tmp_path: Path) -> None:
     finally:
         volume_rm(volume)
 
+    assert "sign_message" not in offered, (
+        f"the shipped image still offers sign_message: {sorted(offered)}\n"
+        "The texts say the wallet stopped offering a signature it refuses. An "
+        "agent that sees the tool builds the request before meeting the refusal."
+    )
     assert REFUSAL.search(str(refusal.value)), (
         f"sign_message did not refuse — it answered: {refusal.value}\n"
         "If signature parking has landed, this guard has done its job: the wallet's "

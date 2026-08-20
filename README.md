@@ -129,9 +129,12 @@ Core service (they stay in the local keystore volume).
 - **No spending policy by design**: no hard-coded limits, budgets, or blocklists —
   you consciously accept the risk of funds on the agent wallet. `txguard` surfaces
   a risk level on preview but does not block. Opt-in limits may come later.
-- **Chains are opt-in**: set `RUSTOK_ALLOWED_CHAINS` (default `1,8453` — Ethereum +
-  Base); enable another chain by providing its RPC (`RUSTOK_RPC_URLS_<id>` or an
-  Alchemy key).
+- **Chains**: `RUSTOK_ALLOWED_CHAINS` decides which ones are shown (default
+  `1,8453,42161` — Ethereum, Base, Arbitrum). Those read out of the box: the build
+  carries two public nodes for each. Naming your own (`RUSTOK_RPC_URLS_<id>`, or an
+  Alchemy key) replaces the carried list rather than joining it. **Any node that
+  reads a balance learns the address and the IP that asked** — that is true of ours,
+  yours, and your provider's alike.
 - **Informed preview**: `preview_transaction` returns the decoded call (who/what is
   authorized), a pre-sign simulation (revert check), gas, and a txguard risk level.
   Execution is not exposed as an MCP tool.
