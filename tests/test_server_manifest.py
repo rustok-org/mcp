@@ -17,18 +17,11 @@ would be one more version point to forget, which is the failure being prevented.
 
 import json
 import re
-import tomllib
-from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).parent.parent
+from tests.version_points import REPO_ROOT, manifest_version
+
 SERVER_JSON = REPO_ROOT / "server.json"
-PYPROJECT = REPO_ROOT / "pyproject.toml"
-
-
-def manifest_version() -> str:
-    """The single source of truth every other version point answers to."""
-    return str(tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]["version"])
 
 
 def _server() -> dict[str, Any]:

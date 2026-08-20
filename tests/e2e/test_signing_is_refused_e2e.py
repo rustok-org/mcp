@@ -15,7 +15,7 @@ touching the texts and THIS one goes red. Neither is worth much alone.
 Two deliberate departures from its siblings in this suite, both load-bearing:
 
 * **The image comes from `WALLET_DIGEST`, not from the version tag.** Siblings
-  resolve `ghcr.io/…:v{manifest_version}` (`conftest.py:33`), which is right for
+  resolve `ghcr.io/…:v{manifest_version}` (`conftest.py`, `DEFAULT_IMAGE`), which is right for
   them: they accept the release. This one asks whether the texts match *what a
   user runs*, and a user runs the digest the installer pins. A tag is a name that
   can be repointed; a digest is the bytes.

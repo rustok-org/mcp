@@ -27,7 +27,7 @@ This is a docs grep-invariant: it fails if the docs drift back.
 import re
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent
+from tests.version_points import REPO_ROOT, manifest_version
 
 # Every doc a human reads to install, run or update the wallet.
 DOC_PATHS = [
@@ -42,8 +42,14 @@ DOC_PATHS = [
 # The ratified install-URL tag (Gate-1, decision Р-2): the tag line that already
 # ships this product (wallet-tui-v0.5.0 … v0.7.1). The bare `v0.1.x` namespace
 # belongs to the old rustok-mcp python package — reusing it would put two
-# unrelated things in one tag namespace.
-INSTALL_TAG = "wallet-tui-v0.11.0"
+# unrelated things in one tag namespace. The PREFIX is the ratified decision and
+# stays a literal here; only the number follows the manifest.
+#
+# It was written out in full until 0.11.0, and that made this guard weaker than
+# it looks: with the tag typed here by hand, a release that bumped the manifest
+# and forgot BOTH the docs and this line stayed green — the docs agreed with a
+# constant that was equally stale. Derived, the same forgetting is red.
+INSTALL_TAG = f"wallet-tui-v{manifest_version()}"
 INSTALL_URL = f"https://raw.githubusercontent.com/rustok-org/mcp/{INSTALL_TAG}/scripts/install.sh"
 
 # Any ref in an installer raw-URL, so a drifted tag is caught wherever it hides.

@@ -33,8 +33,9 @@ One command installs it; `rustok` does the rest.
   testing).
 
 > **There is no `latest` tag for the console image.** It is published by version
-> only (`v0.11.0`, `v0.11`, `v0`), on purpose: the installer pins the exact digest
-> of the release it ships with, and a floating tag would quietly undo that.
+> only, under semver tags at all three levels — full, minor, major — on purpose:
+> the installer pins the exact digest of the release it ships with, and a
+> floating tag would quietly undo that.
 > `podman pull …-tui:latest` answers `manifest unknown` — that is the design,
 > not a broken publish.
 
