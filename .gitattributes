@@ -1,0 +1,2 @@
+# Keep release checksums and POSIX scripts identical on every checkout platform.
+* text=auto eol=lf
