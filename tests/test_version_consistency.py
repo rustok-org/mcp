@@ -225,43 +225,16 @@ IMAGE_TAG_RE = re.compile(r"ghcr\.io/rustok-org/rustok-wallet-tui:v([0-9]+\.[0-9
 
 
 def test_every_image_tag_a_reader_can_copy_matches_the_manifest() -> None:
-    """The copy-paste commands must not pin the previous image.
-
-    SKILL.md is not documentation, it is the ClawHub listing: whatever image tag
-    its `podman run` / `docker run` / MCP-config examples name is what a reader
-    copies into their own setup. The frontmatter check above never looked at the
-    body, and the body drifted — 0.8.1 shipped with three `:v0.8.0` examples in
-    it, found only because someone read the listing before publishing it.
-
-    `docs/` was added after the 0.8.4 release audit found six more image tags in
-    `INSTALL.md` guarded by nothing at all. They are the same class as the
-    SKILL.md ones and worse in reach: INSTALL.md is where the listing sends
-    anyone who wants more than the one-liner.
-    """
-    expected = manifest_version()
-    stale: list[str] = []
-    seen_any = False
-
+    """Normal onboarding uses the signed selected digest, never a copyable tag."""
     for path in COPY_PASTE_SOURCES:
-        if not path.exists():
-            continue
-        tags = IMAGE_TAG_RE.findall(path.read_text(encoding="utf-8"))
-        if tags:
-            seen_any = True
-        stale += [
-            f"{path.relative_to(REPO_ROOT)}: v{tag}" for tag in sorted(set(tags)) if tag != expected
-        ]
-
-    # Guard the guard: a regex that stopped matching would make every assertion
-    # below vacuously true, and the examples cannot have vanished.
-    assert seen_any, (
-        "no wallet image tag found in any copy-paste source — the run examples "
-        f"cannot have vanished from {[str(p.name) for p in COPY_PASTE_SOURCES]}"
-    )
-    assert not stale, (
-        f"these copy-paste commands name an image other than {expected!r}, so a reader "
-        "following them would run the previous wallet:\n  " + "\n  ".join(sorted(stale))
-    )
+        text = path.read_text(encoding="utf-8")
+        assert not IMAGE_TAG_RE.search(text), f"mutable wallet recipe in {path}"
+    skill = SKILL_MD.read_text(encoding="utf-8")
+    assert "saved immutable release digest" in skill
+    assert "rustok connect claude" in skill
+    # Independent positive control for the regex: restoring even a CURRENT
+    # version tag to a recipe must be caught, not sanctioned by version equality.
+    assert IMAGE_TAG_RE.search(f"ghcr.io/rustok-org/rustok-wallet-tui:v{12}.{34}.{56}")
 
 
 # An image reference is unambiguous in a way prose is not: it always names what
@@ -323,16 +296,15 @@ def test_no_image_reference_escapes_the_registry() -> None:
         for line_no, line in enumerate(text.splitlines(), start=1):
             for found in _IMAGE_ANYWHERE.findall(line):
                 seen += 1
-                if found == expected or relative in _SWEEP_EXEMPT:
+                if relative in _SWEEP_EXEMPT:
                     continue
                 stale.append(f"{relative}:{line_no}: names v{found}, manifest says {expected}")
 
-    # Guard the guard: a pattern that stopped matching would make this vacuous,
-    # and the run examples cannot have vanished from the tree.
-    assert seen >= 10, (
-        f"the sweep found only {seen} image references in the whole tree — the "
-        "pattern has stopped matching what it is meant to watch"
-    )
+    # Normal runtime references moved to digests, so zero active tags is valid.
+    # An independent witness keeps the matcher live without inventing a quota.
+    assert _IMAGE_ANYWHERE.findall(f"ghcr.io/rustok-org/rustok-wallet-tui:v{12}.{34}.{56}") == [
+        "12.34.56"
+    ]
     assert not stale, (
         "these name a wallet image the manifest does not:\n  "
         + "\n  ".join(stale)

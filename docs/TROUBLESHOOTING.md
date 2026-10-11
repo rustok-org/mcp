@@ -15,64 +15,13 @@ The shim is installed to `~/.local/bin`, which your current shell may not have o
   add `export PATH="$HOME/.local/bin:$PATH"` yourself.
 - Otherwise run `~/.local/bin/rustok doctor` directly; it will tell you the same.
 
-## The installer says it is skipping the signature check
+## Signature verification refuses installation/update
 
-```
-rustok-install: cosign is not installed (optional …) — skipping the signature check.
-rustok-install: cosign is installed but will not run (…) — skipping the signature check.
-```
+Trusted **cosign 3+** is mandatory. Install it independently through a trusted system package channel; see [Sigstore installation](https://docs.sigstore.dev/cosign/system_config/installation/). A missing/non-executable/broken verifier, cosign 2.x, a wrong identity/issuer/signature, or unavailable verification network stops installation before persistent installation writes or client changes. Repair the verifier/network and retry the same signed release; removing the verifier does not bypass the check.
 
-**Not an error, and not something you have to fix before installing.** cosign
-proves *who built* the image (provenance). What you actually get is fixed by the
-`@sha256:` digest pinned inside the installer — those bytes or nothing. So a
-missing cosign, or one that is present but cannot execute (no `+x` bit, wrong
-architecture, missing libc, a truncated download), downgrades the run to
-"installed by digest, provenance unchecked" and says so out loud.
+`verify-blob` authenticates the release manifest under release-shelf's fixed tag identity. `verify` authenticates the OCI image under wallet-publish on main. These are separate checks. Never execute a freshly downloaded installer before its hash and manifest signature have passed the published skill bootstrap.
 
-To check provenance later, install a working
-[cosign](https://docs.sigstore.dev/cosign/installation) and run the command the
-installer printed. No other rustok command uses it.
-
-## `cosign could NOT verify …` — the installer refuses to install
-
-The install stopped and nothing was written to disk. This branch only happens
-when cosign **ran** and came back unhappy, which has two very different causes —
-read the message before assuming the worst:
-
-**The check could not complete** (most common, and not an attack):
-
-- **`no signatures found` on cosign 2.x — check this first.** Our images are
-  signed with cosign 3, which stores the signature as an **OCI referrer**;
-  cosign 2.x only looks for a `.sig` tag, finds nothing, and reports it exactly
-  like a stripped signature. It is not a downgrade in your setup and not a
-  problem with the image — 2.x simply cannot see it. Two ways forward, both
-  fine: **upgrade to cosign 3+** and re-run, or **remove cosign** and re-run —
-  provenance is optional, and the install proceeds by digest, which is what
-  fixes the bytes you receive either way. (Removing your verifier to get past a
-  check sounds wrong, which is why it is spelled out: here the check is the
-  optional layer, not the guarantee.)
-- **no network path to the Sigstore transparency log** — keyless verification is
-  an online check, so an offline machine, a proxy or a firewall lands here;
-- a **rate limit** from the log, or a transient Sigstore outage.
-
-Retry later, or install by digest and check provenance afterwards.
-
-Why the installer will not just skip a failed check: cosign 2.x cannot tell our
-signature-in-a-referrer apart from a signature someone **stripped**. Both look
-like `no signatures found`. Treating that as "could not complete" and carrying
-on would hand an attacker a one-step bypass, so this branch stays fail-closed
-and the choice stays yours.
-
-**The signature genuinely did not match:**
-
-- **the release has not published its signed image yet** — check the release
-  notes for the tag you are installing from;
-- you edited the pinned digest or identity in a local copy of `install.sh`;
-- something is actually wrong with the image.
-
-In either case, do not "fix" it by deleting cosign so the installer skips the
-check — if the signature is being served and disagrees, that is exactly the
-signal worth stopping for.
+A missing/corrupt local manifest stops normal launches; reinstall from the [published release skill](https://github.com/rustok-org/mcp/releases/download/wallet-tui-v0.12.0/SKILL.md). An installation lock may indicate another installer or an interrupted commit. Inspect it before removing a stale lock; do not delete wallet volumes/passwords to fix installation state.
 
 ## `neither podman nor docker found`
 
@@ -160,16 +109,7 @@ rustok status      # the IMAGE column shows the tag in use
 If it is older than `v0.8.0`, **re-run the installer** — do not stop at
 `rustok update`:
 
-```bash
-curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.12.0/scripts/install.sh | sh
-```
-
-The image version is chosen by the **shim**, and the shim does not update itself.
-An old shim keeps pulling its own old tag *and* re-stamps that tag into your
-agent's config on every `rustok update` — so editing the config by hand does not
-survive either. Reinstalling is the only path that moves you forward, and it is
-the one that verifies the signature.
+Use the [published release bootstrap](https://github.com/rustok-org/mcp/releases/download/wallet-tui-v0.12.0/SKILL.md) to migrate an old unsigned installer. The current `rustok update` verifies a signed release; use `--release 0.12.0` to choose it explicitly, or omit the flag to refresh the installed release. It preserves explicit subsets, narrows implicit grants and leaves live sessions running until a human restart.
 
 ## "backend not ready" / the agent can't reach the wallet
 
@@ -277,13 +217,10 @@ volume name is a different (empty) wallet.
 - Hand-rolled setup: the image tag in the agent's MCP config is stale — the agent
   spawns the container itself. `rustok connect <client> --force` rewrites it.
 - A transaction the agent parked but nobody approved does **not** survive a
-  restart (the pending queue is in the container's memory). Nothing was signed or
-  sent — ask the agent to propose it again.
+  restart. Pending and active executions may be indistinguishable; an unknown
+  outcome requires audit/hash/network investigation, never automatic replay.
 
-> Note on trust: `rustok update` **pulls by tag** and
-> **does not re-run the cosign verification** — the signature check belongs to
-> `install.sh`, so it covers installation, not the whole lifecycle. Re-running
-> the installer for a new release gives you the verified path again.
+`rustok update` verifies a signed release, including the installer and immutable image, before registering clients. Live sessions retain their previous image/grants until a human restart. Stop new requests in all sessions, resolve pending approvals, wait for active execution terminal results, then confirm `rustok stop`. This is human coordination, not a software drain guarantee.
 
 ## Empty balances / positions for a chain
 

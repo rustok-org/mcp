@@ -43,7 +43,10 @@ reverse a signed transaction, or recover funds sent to the wrong address.
 
 ## Verify what you install
 
-Install only at the published image digest, through the installer that pins it.
+Use the published release skill's bootstrap: verify the signed manifest and
+the exact installer hash before executing the downloaded file. Trusted cosign
+3+ is required. The verified installer checks the OCI signature and stores the
+selected immutable image digest; standard subsequent launches use that digest.
 A substituted image would reach the same volume the private keys live in.
 
 ## Risk

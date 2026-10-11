@@ -42,8 +42,10 @@ failure timeouts.
 ## Keys and the approval gate
 
 **What holds.** Private keys stay in your local volume. On the console edition,
-`execute_transaction` is parked and needs your approval in a **separate console
-window**, with a PIN for high-risk items. `keystore.json` and `approval-pin.json`
+supervised `execute_transaction` calls wait for your approval in a **separate
+console window**, with a PIN for high-risk items. Once you confirm autonomous
+mode, execution can broadcast without approval of each payment; an execute
+grant can spend the full wallet balance. `keystore.json` and `approval-pin.json`
 are owner-only (`0600`), and installs that predate that are narrowed at startup.
 The keyring password that encrypts the keystore is 32 random bytes the shim
 generates — stronger than anything a person would type — and lives in the
@@ -83,7 +85,7 @@ random rather than yours.
 - **Shell access to the container defeats the gate.** Anything that can
   `docker exec` into it reads the gateway key — a `0600` file staged under `/run`
   — and reaches every route the configured `RUSTOK_MCP_CAPABILITIES` ceiling
-  allows, which by default is all of them, including EIP-712 permits. A narrower
+  allows. Message and typed-data signing remain refused by the core in every mode; a compromised host can steal keys and bypass the client boundary. A narrower
   ceiling does now genuinely narrow this, because the gateway enforces it on the
   path; it does not make the caller harmless. That is why the console is a
   separate window and not an agent command.
@@ -100,40 +102,18 @@ random rather than yours.
   block them.
 
 **Never claim** that a prompt-injected agent "cannot move funds". What is true:
-keys stay local, and on-chain sends are human-gated *on the console edition*.
+keys stay local, supervised sends wait for console approval, and human-confirmed
+autonomy permits sends without approval of each payment.
 
 ## Installation and updates
 
-**What holds.** The installer pulls the image **by digest** — those bytes or
-nothing — and verifies who built it with cosign when cosign is present and
-runnable. The shim is fetched by commit SHA.
+**What holds.** The published skill bootstrap verifies a signed release manifest and the installer hash before executing downloaded code. The installer re-verifies blob/OCI signatures, checks installer/shim hashes and pulls an immutable digest. Trusted cosign 3+ must be installed independently; missing/broken verifier or failed verification refuses installation. A source skill template without its generated bootstrap hash is intentionally not runnable.
 
-**Do not install from `wallet-tui-v0.9.6`.** That tag was cut before the release
-pinned its image digest, so the `install.sh` it carries names the 0.9.5 digest
-under a 0.9.6 label. It does not fail: the pull is by digest, the 0.9.5 image is
-present and validly signed, so the install completes and reports success — while
-the shim it leaves behind runs the `v0.9.6` tag, which is a different image than
-the one just verified. **Use 0.9.7**, which is the same content released in the
-order the checklist prescribes. The tag stays where it is because a published tag
-is never moved here, and a repository ruleset enforces that.
+`rustok update` verifies a signed release and preserves explicit client capability subsets. Implicit or invalid grants migrate to read-only; ambiguous/unreadable entries are retained and reported. Normal init/restore/start/connect use the locally saved release digest; tags cannot silently change selected bytes. Explicit `RUSTOK_IMAGE` is a visibly unverified development override, rejected by normal update. Host compromise can change local files or steal credentials and remains outside this model.
 
-**What does not hold.**
+Live sessions retain their previous image/grants until a human restart. Update never drains or restarts them automatically. The human must stop new requests in all sessions, resolve pending approvals and wait for active execution terminal outcomes before confirming stop. That attestation is not a programmatic quiescence guarantee. Restart loses previews, pending approvals and status outcomes; unknown payment outcomes must be investigated, never automatically replayed. Volumes/keys/policy persist; the password lives separately, so the recovery phrase is essential before uninstall deletes passwords. PIN rotation does not re-encrypt keys; restoring the same phrase does not revoke a leaked key.
 
-- **The git tag in the installer URL pins a version, not bytes.** A tag can in
-  principle be repointed. The identities bound to exact bytes live *inside* the
-  script: the image digest and the shim's commit SHA.
-- **`rustok update` pulls by tag and does not re-run the signature check.** The
-  provenance guarantee covers installation, not the lifecycle.
-- **cosign is optional.** A missing or broken cosign downgrades the run to
-  "installed by digest, provenance unchecked" and says so; it does not fail.
-- **Nothing updates on its own, and that cuts both ways.** Pinning a digest is
-  what makes an install reproducible; it is also why a release that fixes a
-  defect does not reach anyone who does not go and get it. **0.9.0 and 0.9.1 can
-  have a payment refused by the network** — they build every transaction as a
-  legacy one, so the fee headroom never applies and a base fee that rises between
-  building and inclusion produces `max fee per gas less than block base fee`.
-  Fixed in **0.9.2**; if you are on an earlier version and you send anything,
-  upgrading is not optional in practice.
+No automatic update is promised. Use `--release` to choose a signed version; unsigned legacy versions have no supported verified rollback. Previously published tags/assets are not overwritten.
 
 ## Reading the chain
 

@@ -10,99 +10,17 @@ One command installs it; `rustok` does the rest.
 
 ## Prerequisites
 
-- **Podman** (recommended — rootless, ships a secret store) or **Docker**.
-- **curl**.
-- **cosign — optional.** It is a *provenance* tool: it proves the image was
-  built by this repository's workflow. It is **not** what makes the download
-  trustworthy — the installer pulls **by digest**, so you get exactly the bytes
-  pinned in the script or nothing at all. If cosign is present and working the
-  installer verifies the signature; if it is missing (or installed but unable to
-  run) the installer says so, skips that check and continues. A signature that
-  is present but *does not verify* still stops the install. If you do install
-  it, use **cosign 3 or newer**: our signatures are stored as OCI referrers, and
-  cosign 2.x cannot see them at all — it reports `no signatures found`, which
-  the installer must treat as a refusal.
-  [installation](https://docs.sigstore.dev/cosign/installation) — nothing else
-  in the wallet uses it.
-- **`jq`** — needed only by `rustok connect claude` / `connect cursor` /
-  `connect openclaw`; **`python3` + PyYAML** — needed only by
-  `rustok connect hermes`; the **`openclaw`** CLI — needed only by
-  `rustok connect openclaw`, which registers through it.
-  `rustok doctor` tells you which of these you are missing.
-- An Ethereum RPC URL (an Alchemy key URL is recommended; a public RPC works for
-  testing).
+Podman (recommended) or Docker, curl, a SHA-256 tool, and trusted **cosign 3+** installed independently through your system's trusted package channel. See [Sigstore installation](https://docs.sigstore.dev/cosign/system_config/installation/). An absent, broken, old or rejecting verifier stops installation; network refusal does too. The bootstrap never installs an unverified verifier.
 
-> **There is no `latest` tag for the console image.** It is published by version
-> only, under semver tags at all three levels — full, minor, major — on purpose:
-> the installer pins the exact digest of the release it ships with, and a
-> floating tag would quietly undo that.
-> `podman pull …-tui:latest` answers `manifest unknown` — that is the design,
-> not a broken publish.
-
-**Platforms.** The published image is `linux/amd64`, and the installer is POSIX
-`sh`. Linux is the tested path. On **Windows, install inside WSL2** and treat it
-as a Linux machine — there is no native Windows installer, and we are not going
-to pretend otherwise. macOS and `arm64` are not published yet.
+The shell targets Linux, macOS and Windows Git Bash; the container is linux/amd64. Actual platform verification and installation are release conditions. A package-manager listing alone is not proof of platform acceptance.
 
 ## 1. Install
 
-```bash
-curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.12.0/scripts/install.sh | sh
-```
+Use the verify-before-execute command from the [published release SKILL.md](https://github.com/rustok-org/mcp/releases/download/wallet-tui-v0.12.0/SKILL.md), obtained through the release/listing you trust. The source skill is an unfilled template and intentionally refuses to install. The published bootstrap downloads using `--proto '=https' --tlsv1.2`, verifies the manifest under this repository's release-shelf tag identity and checks the installer against the hash in that published skill **before** executing it. It lets you read the same verified file first (~214 lines of POSIX sh).
 
-### Inspect it before you run it
+The installer separately re-verifies the signed manifest, its own and the shim's hashes, and the OCI image under wallet-publish on main. It fetches the shim from a full source commit, pulls the verified digest, and commits the shim followed by `~/.local/share/rustok/release.manifest` (or `$XDG_DATA_HOME/rustok/release.manifest`). Normal launches use that saved digest, never a mutable version tag. Missing/corrupt records refuse launch.
 
-This is a wallet — reading the script first is a reasonable thing to want. Fetch
-it to a file, read that file, then run **that same file**: what you read is
-exactly what runs.
-
-```bash
-curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.12.0/scripts/install.sh -o install.sh
-less install.sh      # ~214 lines of POSIX sh
-sh install.sh
-```
-
-> **What the tag in that URL is and is not.** It pins a *version* — it is not a
-> cryptographic identity. A git tag can in principle be repointed at a different
-> commit, so treat the tag as "which release", not as proof of content. The
-> identities that are bound to exact bytes are the ones **inside** the script:
-> the image `@sha256:` digest it pulls and the `sha256` of the shim it installs.
-> For the script itself, the published `sha256` is the check.
->
-> This is why reading the script and running *that same file* matters. The shim
-> is fetched later than the script was, and the hash the script carries is what
-> makes the bytes you get then match the release you read now — even if the tag
-> moved in between.
-
-### What the installer does — and what it deliberately does not
-
-1. **Checks provenance first, when it can.** If cosign is available and runnable
-   it verifies the image's signature against this repository's publishing
-   workflow *before* anything is written to disk — a wrong-identity image is
-   refused, not downloaded. If cosign is missing or cannot run, the installer
-   prints that plainly and carries on: provenance is a layer on top, not the
-   thing that keeps you safe. What it will never do is fail *quietly* — a cosign
-   that runs and disagrees aborts the install.
-2. Pulls the image **by digest** (`@sha256:…`), so a mutable tag cannot be
-   repointed at different bytes underneath you. This — not cosign — is what
-   guarantees you get the exact image this release pinned.
-3. Fetches the `rustok` shim over `--proto '=https' --tlsv1.2`, **verifies its
-   `sha256` against the pin inside this script**, and only then makes it
-   executable and installs it to `~/.local/bin`. A mismatch aborts and says so:
-   the bytes at that URL changed since the script was published. If no hashing
-   tool is available at all (`sha256sum`, `shasum`, `openssl`), the installer
-   refuses rather than installing something it cannot check.
-4. Adds `~/.local/bin` to your `PATH` in one marked block of your shell profile.
-   Set `RUSTOK_NO_MODIFY_PATH=1` to skip that and get the line to add yourself.
-
-It **never touches a secret, a keystore volume or your wallet.** Creating the
-wallet — the part that prints your recovery phrase — is a separate step *you*
-run in your own terminal. A recovery phrase must never travel through a pipe.
-
-If `rustok` is not found afterwards, open a new shell (or `. ~/.bashrc`), then
-run `rustok doctor`.
+Failed verification/download/pull preserves the previous installation. A crash between shim and manifest commits leaves the old selected digest; a fresh partial install refuses to run without a manifest. `install.lock` serializes commits; a stale lock needs human inspection before removal. Installation never initializes a wallet, touches keys or registers a client. A PATH write failure is reported separately with the manual line. Set `RUSTOK_NO_MODIFY_PATH=1` before installing to opt out of profile changes. The published bootstrap fetches with `-o "$stage_dir/install.sh"`, shows `less "$stage_dir/install.sh"`, then executes `sh "$stage_dir/install.sh"` with its signed manifest and bundle; it never uses a pipe to execute downloaded code.
 
 ## 2. Create your wallet — `rustok init`
 
@@ -160,6 +78,8 @@ does not bring back is the payment journal and any settings.
 
 ## 3. Connect your agent — `rustok connect`
 
+New registrations default to `read_wallet`. To enable transactions, the user runs `rustok connect claude --force --capabilities read_wallet,preview_tx,execute_tx` and confirms the expansion in their own terminal. Use `--capabilities none` to disable every tool. The core policy/PIN remains a separate gate; acknowledged unlimited autonomy can spend the full wallet balance under an execute grant. Reconnect/update preserves existing valid explicit subsets.
+
 ```bash
 rustok connect claude     # writes ~/.claude.json
 rustok connect cursor     # writes ~/.cursor/mcp.json
@@ -188,8 +108,11 @@ Restart the client afterwards so it picks up the new MCP server.
 
 ## 4. Approve transactions — `rustok console`
 
-The console is a **separate window the agent cannot drive**. Transactions that
-move funds are parked by the wallet until you release them here:
+The console is a **separate window the agent cannot drive**. In supervised mode,
+transactions wait for you to release them here. Once you confirm autonomous mode
+in the console, an execute grant can spend the full wallet balance without
+approval of each payment. Opening the console is not a per-payment gate in that
+mode:
 
 ```bash
 rustok console      # also the default: bare `rustok` does the same
@@ -229,34 +152,20 @@ that the optional tools `connect` needs are present.
 
 ## Updating
 
-```bash
-rustok update
+```sh
+rustok update                 # refresh exactly the installed signed release
+rustok update --release 0.12.0 # explicitly choose a signed release
 ```
 
-Pulls the current wallet image and re-registers every rustok MCP entry it finds
-across claude / cursor / hermes / openclaw, each keeping its own wallet. A failed pull stops
-the run before any config is touched. Wallets that are running keep the previous
-image until their agent's next session starts (or until `rustok stop`).
+`rustok update` verifies a signed release before executing its installer, updates the shim/record and re-registers existing clients while preserving explicit capability subsets. Implicit, blank or invalid old grants migrate to `read_wallet`. Ambiguous or unreadable entries stay unchanged and count as client failures; other clients continue. A failure before installation changes no registration. A partial result reports which clients failed; the installed release can already have changed. `RUSTOK_IMAGE` is an unverified development override and is refused by standard update.
 
-> **What `update` does not do.** `rustok update` **pulls by tag** and, unlike the
-> installer, **does not re-run the cosign verification** of the image. The
-> signature guarantee you get from `install.sh` covers *installation*, not the
-> whole lifecycle. Re-running the installer for a new release gives you the
-> verified path again.
+Live sessions retain their previous image/grants until a human restart. Stop new requests in every session, approve/deny pending operations, wait for terminal outcomes of active executions, then run `rustok stop` and confirm `FINISHED`, followed by `rustok start`. InFlight is not a denial. The prompt is a human attestation, not programmatic quiescence. Restart discards previews, pending approvals and retained execution status. If a result is unknown after a crash or lost response, inspect available audit/hash/network data; **never automatically replay a payment**.
 
-**The shim does not update itself** — re-run the installer to get a newer
-`rustok`. To move to a different version (including going back to an older one),
-run the installer from that version's tag: the URL above is a normal repository
-tag, so replacing it with the version you want is all it takes.
-
-Your keys, address and PIN hash live in the **volume**, not in the image, so they
-survive every update (the keyring password lives beside it, in the secret store —
-also untouched by an update). Anything waiting for approval does not: the pending queue
-lives in the running container's memory, so approve or deny what is open
-**before** you update. Nothing is signed or sent — the agent simply has to
-propose it again.
+Address, encrypted keys and policy remain in the wallet volume; the keyring password remains outside it. Verify the address/policy after restart. Rollback uses `--release` for a previous release with a signed manifest; unsigned legacy releases do not qualify.
 
 ## Uninstalling
+
+Uninstall deletes stored keyring passwords. **An encrypted volume alone is not a recoverable backup**: preserve the recovery phrase before proceeding. Purge requires separate terminal confirmation. Changing the approval PIN does not re-encrypt the keystore; restoring the same phrase does not revoke a leaked private key.
 
 ```bash
 rustok uninstall
@@ -300,179 +209,21 @@ historical volume name (`rustok-wallet-tui`), any other agent gets
 > `rustok.agent=<name>` sub-label instead: an auto-generated container name, but
 > still discoverable, and the sub-label says *which* agent's wallet it is.
 
-## Appendix: installing without the shim
+## Appendix: advanced configuration
 
-Everything above is optional convenience. If you would rather not pipe a script
-into a shell, or you want to see exactly what the shim writes, this is the same
-setup by hand. It is also the reference for what a registration looks like.
+Use `rustok connect` to generate the engine argv and the selected immutable digest for Claude, Cursor, Hermes or OpenClaw. It preserves unrelated client entries and per-agent wallet labels/volumes. Containers use labels `rustok=wallet` and `rustok.agent=<agent>` rather than a fixed container name. To inspect the same wallet the console discovers:
 
-### Create the wallet
-
-**Podman (recommended)** — store the password once in podman's secret store and
-mount it as a *file*: it never touches shell history, `podman inspect` or the MCP
-config, it is in no process's environment, and quotes in the password are safe
-(they are read as-is, not parsed). `mode`/`uid`/`gid` narrow the mount from
-podman's world-readable default to owner-only for the image's user:
-
-```bash
-read -r -s -p "Keyring password: " pw &&
-  printf '%s' "$pw" | podman secret create rustok-keyring-claude -
-unset pw
-
-podman run -it --rm \
-  -v rustok-wallet-tui:/data \
-  --secret rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000 \
-  -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.12.0 create-wallet
+```sh
+podman ps -q --filter label=rustok=wallet --filter label=rustok.agent=claude
 ```
 
-**Docker** (no secret store without swarm) — keep the password in a `0600` file
-and hand the wallet its *path* via `RUSTOK_KEYRING_PASSWORD_FILE` (a trailing
-newline in the file is stripped). The path below is yours to choose; the shim
-keeps its own at `~/.config/rustok/keyring-pass-<agent>`:
+Keep the configuration's image equal to the signed installed release; a mutable tag is not a verified replacement. Missing/corrupt local manifests require reinstallation from a signed release.
 
-```bash
-umask 077
-read -r -s -p "Keyring password: " pw &&
-  printf '%s' "$pw" > ~/.rustok-keyring-pass
-unset pw
+Init uses `podman secret create` with the password supplied on stdin, never argv. The keyring password is generated by init and stored outside the encrypted volume. Podman delivers an owner-readable secret mount; the Docker fallback uses an owner-readable local file, both passed through `RUSTOK_KEYRING_PASSWORD_FILE`. This removes the password from argv and agent configuration, but a compromised host or process with filesystem/shell access can still read secrets. The secret file mount is not a backup. RPC URLs can contain billing credentials: connect uses Podman RPC secrets, while raw env forwarding and Docker fallback can expose them in engine metadata.
 
-docker run -it --rm \
-  -v rustok-wallet-tui:/data \
-  -v ~/.rustok-keyring-pass:/run/keyring-pass:ro \
-  -e RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass \
-  ghcr.io/rustok-org/rustok-wallet-tui:v0.12.0 create-wallet
-```
+`RUSTOK_IMAGE` is an explicit unverified development override. It is announced on every image selection, never persisted as the signed release record and refused by normal update. It does not change wallet keys, capabilities or policy. Do not describe an override as release verification.
 
-#### What the file delivery does and does not protect
-
-> Every boundary this wallet has is collected in one place: **[CAVEATS](CAVEATS.md)**.
-> The list below is the part of it that concerns the password.
-
-Worth reading once, because the difference decides which of the two commands
-above you should use.
-
-- **What it closes.** The password is in no process's `/proc/<pid>/environ`, so
-  it cannot be harvested from a running wallet the cheapest way there is; it is
-  not inherited by anything the agent spawns; and `podman inspect` holds a path,
-  not the value.
-- **The `-e` path is still accepted, and still leaks into the container config.**
-  The entrypoint stages such a password in a `0600` file, drops the variable and
-  deletes the file once the core has unlocked — but the copy the *runtime* keeps
-  in the container config is outside the image's reach, and `--init` would add
-  another holder for the container's life. That is why the commands above pass a
-  file and no `--init`.
-- **Same-user code is not in scope.** Anything already running as your user can
-  read the mounted secret, the staged file during its short life, the core's
-  memory and the data volume. This protects a secret from casual harvesting, not
-  a machine from its own compromise.
-- **Measured on podman 5.8.4.** Docker was not installed on the machine these
-  runs were made on: the mechanism is engine-independent (a mounted file plus an
-  environment variable naming its path), but docker's behaviour here is
-  **expected, not verified**.
-
-Either way, `create-wallet` run by hand like this — with nothing on its stdin —
-prints the **12-word recovery phrase** and a **generated 6-digit approval PIN**
-exactly once. (Through the shim you choose the PIN instead and only the phrase is
-printed; that path is `rustok init`, above.) Back both up offline before going
-further, then fund the printed address — nothing later in this appendix will
-show them again.
-
-### Register it with an agent
-
-The MCP client launches the image over stdio — **the password never goes into
-this config file**. With podman the secret above does the delivery:
-
-```json
-{
-  "mcpServers": {
-    "rustok": {
-      "command": "podman",
-      "args": ["run", "-i", "--rm",
-               "--label", "rustok=wallet", "--label", "rustok.agent=claude",
-               "-v", "rustok-wallet-tui:/data",
-               "--secret", "rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000",
-               "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude",
-               "-e", "RUSTOK_ALLOWED_CHAINS=1,8453,42161",
-               "-e", "RUSTOK_RPC_URLS_1=https://ethereum-rpc.publicnode.com",
-               "ghcr.io/rustok-org/rustok-wallet-tui:v0.12.0"]
-    }
-  }
-}
-```
-
-With **docker**, swap the `--secret` argument pair for the `0600`-file mount:
-
-```jsonc
-"command": "docker",
-"args": ["run", "-i", "--rm",
-         "--label", "rustok=wallet", "--label", "rustok.agent=claude",
-         "-v", "rustok-wallet-tui:/data",
-         "-v", "/home/you/.rustok-keyring-pass:/run/keyring-pass:ro",
-         "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/keyring-pass",
-         "-e", "RUSTOK_ALLOWED_CHAINS=1,8453,42161",
-         "-e", "RUSTOK_RPC_URLS_1=https://ethereum-rpc.publicnode.com",
-         "ghcr.io/rustok-org/rustok-wallet-tui:v0.12.0"]
-```
-
-> **An RPC URL that embeds a provider key** (an Alchemy URL) is a credential too
-> — on podman deliver it the same way:
-> `--secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1`.
-> The public-endpoint URLs above are not secrets.
-
-> **Legacy: inline `-e` password / `--env-file`.** Older setups passed the
-> password as an inline `-e` value, forwarded it from the caller's environment,
-> or used an env-file. All still work and all are deprecated: the value is
-> visible in `inspect` (and, for an env block, in the MCP config file), and
-> inside an env-file **quotes become part of the password** — a silent unlock
-> failure that broke real onboardings. Use the secret / `_FILE` delivery above.
-
-### Open the console by label
-
-The container has no fixed name, so find it by label:
-
-```bash
-docker exec -it "$(docker ps -q --filter label=rustok=wallet --filter label=rustok.agent=claude)" rustok-console
-```
-
-(To choose a new PIN, `rustok set-pin` — or by hand, `docker exec -i <id>
-core-server set-pin` with the new PIN on its stdin; with nothing on stdin it
-generates one and prints it once. Either way the wallet proves it holds the
-keyring password before it changes anything.)
-
-### A second agent, by hand
-
-Give it a distinct volume and sub-label, and its own secret:
-
-```jsonc
-"args": ["run", "-i", "--rm",
-         "--label", "rustok=wallet", "--label", "rustok.agent=hermes",
-         "-v", "rustok-hermes:/data",                // its own wallet volume
-         "--secret", "rustok-keyring-hermes,type=mount,mode=0400,uid=1000,gid=1000",
-         "-e", "RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-hermes", …,
-         "ghcr.io/rustok-org/rustok-wallet-tui:v0.12.0"]
-```
-
-`create-wallet` that volume once (as above, with `-v rustok-hermes:/data` and its
-own secret), and open its console with `--filter label=rustok.agent=hermes`.
-
-### Upgrading by hand
-
-Pull the new tag, restart the agent, keep the volume:
-
-```bash
-docker pull ghcr.io/rustok-org/rustok-wallet-tui:v0.12.0
-# the agent-launched container is --rm (it disappears when the agent session ends);
-# just restart the agent with the new tag in its MCP config, same -v … :/data volume
-```
-
-- **Point the new container at the same volume.** A different `-v` name is a
-  different (empty) wallet, not an upgraded one.
-- **Update the image tag in your agent's MCP config too** — the agent spawns the
-  container itself, so a stale tag there keeps running the old wallet.
-- Coming from the **agent edition** (`rustok-wallet`)? That is a different
-  product with its own volume and its own keys — there is no in-place migration:
-  create a wallet in the console edition and move the funds on-chain.
+Message and typed-data signing (`sign_message`, `sign_typed_data`) are refused outright in all wallet modes. Transaction execution requires preview, the client grant and the core policy; acknowledged unlimited autonomy has no spending budget. Shell access to the host/container is outside the client isolation model.
 
 ## Next steps
 

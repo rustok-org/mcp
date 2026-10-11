@@ -6,7 +6,7 @@ umask 077
 : "${SHELL:=/bin/sh}"
 WALLET_VERSION="0.12.0"
 # Filled in the pin stage; used by the release-asset generator and image guards.
-WALLET_DIGEST="sha256:4b9507923904656429b4d73b832dc700953ce053d8cea2fe9d76c28474521782"
+WALLET_DIGEST="sha256:c9c69308bcd97ae4018dbf80f6e8786189476226ea3f3c6072f10bca75c36023"
 SHIM_SHA256="2008bffe7ae5483f5c352955eedab5df41ffab4412f36c9ea1a3195a3f51aa45"
 RAW_BASE="https://raw.githubusercontent.com/rustok-org/mcp"
 COSIGN_IDENTITY="https://github.com/rustok-org/mcp/.github/workflows/wallet-publish.yml@refs/heads/main"

@@ -1,28 +1,4 @@
-"""Guard the docs against drifting back off the one-command install path.
-
-Stage 4 / PR-4.1 of the easy-install epic: the wallet installs with ONE command
-(`curl … scripts/install.sh | sh`) and is then driven by the `rustok` shim —
-`init`, `connect`, `console`. Before this PR the docs knew neither the installer
-nor the shim: they taught the manual recipe end to end and INSTALL.md still
-promised the shim as "coming". The manual path survives as an explicit appendix
-(installing *without* the shim), but it must never again read as the way in.
-
-Three failure modes this locks down — each one has already happened here or was
-one edit away:
-
-* **a placeholder shipped** — the installer URL carries an immutable tag, and
-  every doc must carry the SAME one. A release that bumps two files out of three
-  leaves a silently broken install line behind.
-* **a supply-chain overclaim** — `rustok update` pulls by tag and does NOT
-  re-run the signature check (the verify-on-update debt is open), so the
-  guarantee covers installation, not the lifecycle. The check is *conditional*
-  over every doc on purpose: a named list of two files would not fail when a
-  third doc starts talking about updating.
-* **the shim is documented but unusable** — `install.sh` hard-requires `cosign`
-  and edits PATH; "one command" that omits its own preconditions is a lie.
-
-This is a docs grep-invariant: it fails if the docs drift back.
-"""
+"""Guard the signed-release entry point, trust prerequisites and truthful lifecycle."""
 
 import re
 from pathlib import Path
@@ -50,12 +26,10 @@ DOC_PATHS = [
 # and forgot BOTH the docs and this line stayed green — the docs agreed with a
 # constant that was equally stale. Derived, the same forgetting is red.
 INSTALL_TAG = f"wallet-tui-v{manifest_version()}"
-INSTALL_URL = f"https://raw.githubusercontent.com/rustok-org/mcp/{INSTALL_TAG}/scripts/install.sh"
+INSTALL_URL = f"https://github.com/rustok-org/mcp/releases/download/{INSTALL_TAG}/SKILL.md"
 
 # Any ref in an installer raw-URL, so a drifted tag is caught wherever it hides.
-RAW_INSTALL_RE = re.compile(
-    r"raw\.githubusercontent\.com/rustok-org/mcp/([^/\s]+)/scripts/install\.sh"
-)
+RAW_INSTALL_RE = re.compile(r"github\.com/rustok-org/mcp/releases/download/([^/\s]+)/SKILL\.md")
 
 # The hardened fetch install.sh's own header prescribes — a doc that drops these
 # teaches an unpinned TLS download.
@@ -76,7 +50,7 @@ SHIM_COMMANDS = (
 # staying silent about the mutable tag the pull resolves through, which is the
 # other half of why the guarantee stops at install time.
 UPDATE_MENTION = "rustok update"
-UPDATE_CAVEATS = ("pulls by tag", "does not re-run the cosign verification")
+UPDATE_CAVEATS = ("verifies a signed release", "human restart")
 
 # Placeholders that must never reach a doc a user copies from.
 VERSION_PLACEHOLDERS = ["vX.Y.Z", "<version>", "v0.0.0"]
@@ -89,11 +63,11 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_install_and_readme_teach_the_one_command_install() -> None:
+def test_install_and_readme_teach_the_signed_release_bootstrap() -> None:
     """The entry points must show the real, hardened, tag-pinned one-liner."""
     for name in ("README.md", "docs/INSTALL.md"):
         text = _read(REPO_ROOT / name)
-        assert INSTALL_URL in text, f"{name} must carry the ratified installer URL"
+        assert INSTALL_URL in text, f"{name} must carry the generated release skill URL"
         assert CURL_FLAGS in text, f"{name} must fetch it with {CURL_FLAGS}"
 
 
@@ -114,7 +88,9 @@ def test_install_documents_the_installer_preconditions() -> None:
 def test_install_teaches_inspect_before_run() -> None:
     """Piping a script into a shell is only acceptable if reading it first is taught."""
     text = _read(REPO_ROOT / "docs" / "INSTALL.md")
-    assert "-o install.sh" in text, "INSTALL.md must show fetching the installer to a file"
+    assert '-o "$stage_dir/install.sh"' in text, (
+        "INSTALL.md must show fetching the installer to a file"
+    )
     assert "inspect" in text.lower(), "INSTALL.md must tell the reader to inspect it first"
 
 
@@ -162,10 +138,10 @@ def test_every_installer_url_carries_the_same_ratified_tag() -> None:
         + "\n  ".join(offenders)
     )
     # Without this the check above is vacuously green when the URL is missing.
-    assert found, "no doc carries an installer URL at all"
+    assert found, "no doc carries a generated release skill URL at all"
 
 
-def test_every_doc_that_mentions_updating_admits_the_unverified_pull() -> None:
+def test_every_doc_that_mentions_updating_states_verification_and_live_session_boundary() -> None:
     """Conditional on purpose: it must also bite in a doc nobody listed here yet."""
     offenders: list[str] = []
     for path in DOC_PATHS:
@@ -187,3 +163,23 @@ def test_the_update_caveat_is_actually_exercised() -> None:
         assert UPDATE_MENTION in _read(REPO_ROOT / name), (
             f"{name} must document updating (otherwise the honesty check is vacuous)"
         )
+
+
+def test_no_install_doc_teaches_pipe_execution_or_optional_signature_bypass() -> None:
+    for path in DOC_PATHS:
+        text = _read(path)
+        assert not re.search(r"curl[^\n]*(?:\n[^\n]*){0,2}\|\s*sh\b", text), path
+        assert "cosign is optional" not in text.lower(), path
+        assert "remove cosign" not in text.lower(), path
+
+
+def test_bootstrap_checks_trust_before_executing_downloaded_code() -> None:
+    text = _read(REPO_ROOT / "skills/rustok-wallet-tui/SKILL.md")
+    start = text.index("expected_installer_sha256=")
+    end = text.index('sh "$stage_dir/install.sh"', start)
+    bootstrap = text[start:end]
+    assert "cosign verify-blob" in bootstrap
+    assert '[ "$actual_sha" = "$expected_installer_sha256" ]' in bootstrap
+    assert "release-shelf.yml@refs/tags/wallet-tui-v$wallet_version" in bootstrap
+    assert "--certificate-oidc-issuer https://token.actions.githubusercontent.com" in bootstrap
+    assert "@INSTALLER_SHA256@" in bootstrap
