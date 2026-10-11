@@ -12,7 +12,9 @@ platform_commit=$3
 printf '%s\n' "$platform_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || die "invalid version"
 printf '%s\n' "$platform_commit" | grep -Eq '^[0-9a-f]{40}$' || die "invalid source commit"
 for name in install.sh rustok release.manifest release.manifest.sigstore.json; do
-    [ -f "$platform_assets/$name" ] && [ ! -L "$platform_assets/$name" ] || die "missing or nonregular asset: $name"
+    if [ ! -f "$platform_assets/$name" ] || [ -L "$platform_assets/$name" ]; then
+        die "missing or nonregular asset: $name"
+    fi
 done
 
 platform_work=$(mktemp -d)
@@ -70,7 +72,9 @@ env HOME="$platform_home" XDG_DATA_HOME="$platform_home/data" \
     sh -c '. "$HOME/.bashrc"; command -v rustok; rustok version' > "$platform_work/version.log"
 cat "$platform_work/version.log"
 grep -qF "wallet selected $platform_version ($platform_image)" "$platform_work/version.log" || die "installed selection differs"
-[ ! -e INJECTED ] && [ ! -e "$platform_work/INJECTED" ] || die "profile executed path contents"
+if [ -e INJECTED ] || [ -e "$platform_work/INJECTED" ]; then
+    die "profile executed path contents"
+fi
 printf '%s\n' 'PASS native signed installation, immutable selection and quoted PATH'
 
 expect_refusal() {

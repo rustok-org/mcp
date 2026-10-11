@@ -115,7 +115,7 @@ and one look costs less than that trade.
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
   https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.12.0/scripts/install.sh -o install.sh
-less install.sh      # ~213 lines of POSIX sh
+less install.sh      # ~214 lines of POSIX sh
 sh install.sh
 ```
 

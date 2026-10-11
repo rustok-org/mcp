@@ -162,8 +162,9 @@ add_to_path() {
 }
 
 main() {
-    [ "$#" -eq 4 ] && [ "$1" = --manifest ] && [ "$3" = --bundle ] \
-        || die "usage: sh ./install.sh --manifest ./release.manifest --bundle ./release.manifest.sigstore.json (no pipe execution)"
+    if [ "$#" -ne 4 ] || [ "$1" != --manifest ] || [ "$3" != --bundle ]; then
+        die "usage: sh ./install.sh --manifest ./release.manifest --bundle ./release.manifest.sigstore.json (no pipe execution)"
+    fi
     manifest_path=$2
     bundle_path=$4
     read_release_manifest "$manifest_path"
