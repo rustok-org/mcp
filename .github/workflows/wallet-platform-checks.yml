@@ -1,0 +1,52 @@
+name: Wallet Platform Checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published signed wallet version (X.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wallet-platform-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  native-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Validate the selected release
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: wallet-tui-v${{ inputs.version }}
+          persist-credentials: false
+      - uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+        with:
+          cosign-release: v3.0.3
+      - name: Download and verify the exact published package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          gh release download "wallet-tui-v$VERSION" --dir platform-assets
+          SOURCE_COMMIT=$(git rev-parse HEAD)
+          python scripts/build-wallet-release.py --output platform-assets --version "$VERSION" --commit "$SOURCE_COMMIT" --check
+          sh scripts/check-wallet-platform.sh platform-assets "$VERSION" "$SOURCE_COMMIT"

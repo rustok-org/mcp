@@ -23,7 +23,7 @@ fresh() {
     rm -rf "${WORK:?}/home" "${WORK:?}/bin" "${WORK:?}/log"
     mkdir -p "$WORK/home" "$WORK/bin"
     : >"$WORK/log"
-    for tool in sh cat sed head grep mkdir chmod rm mv cut env printf command basename; do
+    for tool in sh cat sed head grep mkdir chmod rm mv cut env printf command basename cp tr tail od mktemp rmdir; do
         ln -s "$(command -v "$tool")" "$WORK/bin/$tool" 2>/dev/null || true
     done
     ln -s "$TESTS_DIR/stub-bin/curl" "$WORK/bin/curl"
@@ -37,6 +37,12 @@ fresh() {
     STUB_COSIGN_BROKEN=0
     NO_MODIFY=""
     TEST_PATH="$WORK/bin"
+    printf '%s\n' 'format=rustok-wallet-release-v1' "wallet_version=$(sed -n 's/^WALLET_VERSION="\(.*\)"$/\1/p' "$INSTALL")" \
+        'source_commit=1111111111111111111111111111111111111111' \
+        "image_ref=ghcr.io/rustok-org/rustok-wallet-tui@$(sed -n 's/^WALLET_DIGEST="\(.*\)"$/\1/p' "$INSTALL")" \
+        "installer_sha256=$(sha256sum "$INSTALL" | cut -d' ' -f1)" \
+        "shim_sha256=$(sha256sum "$REPO_ROOT/cli/rustok" | cut -d' ' -f1)" > "$WORK/manifest"
+    printf '%s\n' '{}' > "$WORK/bundle"
     RUN_SHELL="sh"
     TEST_SHELL="/bin/bash"
 }
@@ -98,7 +104,7 @@ run_install() {
         STUB_SHIM_SRC="$REPO_ROOT/cli/rustok" \
         STUB_SHIM_TAMPER="${STUB_SHIM_TAMPER:-0}" \
         RUSTOK_NO_MODIFY_PATH="$NO_MODIFY" \
-        "$RUN_SHELL" "$INSTALL" </dev/null 2>&1)" && RC=0 || RC=$?
+        "$RUN_SHELL" "$INSTALL" --manifest "$WORK/manifest" --bundle "$WORK/bundle" </dev/null 2>&1)" && RC=0 || RC=$?
 }
 
 ok() { N=$((N + 1)); PASS=$((PASS + 1)); echo "ok $N - $1"; }
@@ -140,9 +146,9 @@ plant_podman
 run_install
 if assert_exit 0 \
     && log_has "curl .*--proto =https" && log_has "curl .*--tlsv1.2" \
-    && grep -E "curl .*raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v[0-9]+\.[0-9]+\.[0-9]+/cli/rustok" "$WORK/log" >/dev/null; then
-    ok "install: shim fetched over --proto=https --tlsv1.2 from the release tag, and verified by hash"
-else not_ok "install: shim fetched over --proto=https --tlsv1.2 from the release tag, and verified by hash"; fi
+    && grep -E "curl .*raw.githubusercontent.com/rustok-org/mcp/1111111111111111111111111111111111111111/cli/rustok" "$WORK/log" >/dev/null; then
+    ok "install: shim fetched over --proto=https --tlsv1.2 from the full source commit, and verified by hash"
+else not_ok "install: shim fetched over --proto=https --tlsv1.2 from the full source commit, and verified by hash"; fi
 
 # --- fail-closed: a bad signature installs NOTHING ----------------------------
 # A WORKING cosign whose verify says no. The only branch that may refuse.
@@ -165,87 +171,27 @@ if assert_exit 1 && assert_has "signature" && assert_has "transparency log"; the
     ok "install: the refusal names BOTH causes (bad signature / check could not complete), not tampering alone"
 else not_ok "install: the refusal names BOTH causes (bad signature / check could not complete), not tampering alone"; fi
 
-# cosign 2.x cannot see our signatures at all (they are OCI referrers; 2.x looks
-# for a .sig tag), so a whole class of users lands in this branch through no
-# fault of the image. Being told the cause without being told the way out reads
-# as "you are stuck" — and the second way out (remove the optional tool) is
-# counter-intuitive enough that it has to be spelled out.
-if assert_exit 1 && assert_has "cosign 3+" && assert_has "remove cosign"; then
-    ok "install: the refusal names both ways forward (upgrade to cosign 3+, or remove cosign and install by digest)"
-else not_ok "install: the refusal names both ways forward (upgrade to cosign 3+, or remove cosign and install by digest)"; fi
-
-# --- cosign ABSENT: provenance is skipped, the install still happens ----------
-
-fresh
-plant_podman
-unplant_cosign
-run_install
-if assert_exit 0 && shim_installed \
-    && assert_has "digest" \
-    && assert_lacks "tampered" \
-    && log_has 'podman pull .*@sha256:' \
-    && grep -q '^# >>> rustok installer >>>$' "$WORK/home/.bashrc"; then
-    ok "install: no cosign at all -> warns about provenance, still installs by digest (cosign is not a wall)"
-else not_ok "install: no cosign at all -> warns about provenance, still installs by digest (cosign is not a wall)"; fi
-
-# The skip is announced in the middle of a long install log, where it scrolls
-# away — a third party installing for the first time did not notice it and had
-# to work out from the outside that provenance had not been checked. The last
-# thing the installer prints is what gets read, so the summary carries it too,
-# with the version requirement named where it is actionable.
+# Verifier failure is mandatory, including absence and broken executables.
+for verifier_case in absent broken noexec; do
+    fresh
+    plant_podman
+    case "$verifier_case" in
+        absent) unplant_cosign ;;
+        broken) STUB_COSIGN_BROKEN=1 ;;
+        noexec) unexec_cosign; RUN_SHELL=bash ;;
+    esac
+    run_install
+    if assert_exit 1 && ! shim_installed && log_lacks 'podman pull' && [ ! -e "$WORK/home/.bashrc" ]; then
+        ok "install: $verifier_case verifier refuses before install/pull/profile"
+    else not_ok "install: $verifier_case verifier refuses before install/pull/profile"; fi
+done
 
 fresh
 plant_podman
-unplant_cosign
 run_install
-if assert_exit 0 && shim_installed \
-    && assert_has "signature was NOT checked" \
-    && assert_has "cosign 3" ; then
-    ok "install without cosign: the final summary says provenance went unchecked, and names cosign 3+"
-else not_ok "install without cosign: the final summary says provenance went unchecked, and names cosign 3+"; fi
-
-# The other half of the same claim: a notice that always prints is not a notice.
-fresh
-plant_podman
-run_install
-if assert_exit 0 && shim_installed \
-    && log_has 'cosign verify' \
-    && assert_lacks "signature was NOT checked"; then
-    ok "install with a working cosign: the summary does NOT claim a skipped signature check"
-else not_ok "install with a working cosign: the summary does NOT claim a skipped signature check"; fi
-
-# --- cosign PRESENT but NOT RUNNABLE (wrong arch / missing libc) --------------
-# Executable, so `command -v` says yes in every shell — only running it tells
-# the truth. Without the `version` probe this lands in verify and dies with
-# "tampered" on a perfectly good image.
-
-fresh
-plant_podman
-STUB_COSIGN_BROKEN=1
-run_install
-if assert_exit 0 && shim_installed \
-    && assert_lacks "tampered" \
-    && log_has 'cosign version' \
-    && log_lacks 'cosign verify' \
-    && log_has 'podman pull .*@sha256:'; then
-    ok "install: cosign present but unrunnable -> probed, treated as absent, installs by digest (never called a tamper)"
-else not_ok "install: cosign present but unrunnable -> probed, treated as absent, installs by digest (never called a tamper)"; fi
-
-# --- cosign PRESENT but not +x, run under bash -------------------------------
-# The literal machine state that triggered this fix. Under `sh` the file reads
-# as absent; under `bash` `command -v` returns TRUE and the exec fails with 126.
-# Both must end in the same place: installed, no accusation.
-
-fresh
-plant_podman
-unexec_cosign
-RUN_SHELL="bash"
-run_install
-if assert_exit 0 && shim_installed \
-    && assert_lacks "tampered" \
-    && log_has 'podman pull .*@sha256:'; then
-    ok "install: cosign present without +x under bash -> installs by digest instead of crying tamper (the reported incident)"
-else not_ok "install: cosign present without +x under bash -> installs by digest instead of crying tamper (the reported incident)"; fi
+if assert_exit 0 && shim_installed && log_has 'cosign verify-blob' && log_has 'cosign verify ghcr' && assert_lacks "signature was NOT checked"; then
+    ok "install: manifest and OCI signatures both verified"
+else not_ok "install: manifest and OCI signatures both verified"; fi
 
 # --- fail-closed: a failed pull installs nothing ------------------------------
 
@@ -315,7 +261,7 @@ fresh
 plant_podman
 unexec_cosign
 run_install
-if assert_exit 0 && shim_installed \
+if assert_exit 1 && ! shim_installed \
     && assert_has "will not run" \
     && assert_lacks "tampered" \
     && log_lacks 'cosign verify'; then
@@ -332,9 +278,9 @@ for VARIANT in garbage elf text; do
     plant_podman
     plant_unrunnable_cosign "$VARIANT"
     run_install
-    if assert_exit 0 && shim_installed && assert_has "will not run" && assert_lacks "tampered"; then
-        ok "install: an executable-but-unrunnable cosign ($VARIANT) lands in the same branch, install proceeds"
-    else not_ok "install: an executable-but-unrunnable cosign ($VARIANT) lands in the same branch, install proceeds"; fi
+    if assert_exit 1 && ! shim_installed && log_lacks "podman pull"; then
+        ok "install: an executable-but-unrunnable cosign ($VARIANT) lands in the same refusal branch; nothing installed"
+    else not_ok "install: an executable-but-unrunnable cosign ($VARIANT) lands in the same refusal branch; nothing installed"; fi
 done
 
 # --- filesystem failures are branded, clean up, and do not lie ----------------
@@ -420,7 +366,7 @@ plant_podman
 STUB_SHIM_TAMPER=1 run_install
 if assert_exit 1 \
     && ! shim_installed \
-    && assert_has "bytes at that URL changed"; then
+    && assert_has "checksum mismatch"; then
     ok "install: a shim whose bytes do not match SHIM_SHA256 is refused, and nothing is installed"
 else not_ok "install: a shim whose bytes do not match SHIM_SHA256 is refused, and nothing is installed"; fi
 
@@ -430,7 +376,7 @@ plant_no_hasher
 run_install
 if assert_exit 1 \
     && ! shim_installed \
-    && assert_has "no sha256 tool found"; then
+    && assert_has "installer bytes do not match"; then
     ok "install: with no hashing tool at all the installer refuses rather than installing unverified"
 else not_ok "install: with no hashing tool at all the installer refuses rather than installing unverified"; fi
 

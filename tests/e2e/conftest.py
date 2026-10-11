@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import uuid
 from collections.abc import Iterator
@@ -33,12 +34,18 @@ class Chain:
     anvil: Anvil
     network: str
     url_from_container: str
+    container: str
 
 
 @pytest.fixture(scope="session")
 def image() -> str:
     """The wallet image under acceptance."""
-    return os.environ.get("RUSTOK_E2E_IMAGE", DEFAULT_IMAGE)
+    selected = os.environ.get("RUSTOK_E2E_IMAGE")
+    if selected is not None:
+        assert re.fullmatch(r"(?:[^\s]+@)?sha256:[0-9a-f]{64}", selected), (
+            "candidate acceptance requires an immutable image digest or local image ID"
+        )
+    return selected or DEFAULT_IMAGE
 
 
 @pytest.fixture(scope="session")
@@ -82,6 +89,7 @@ def chain() -> Iterator[Chain]:
             anvil=anvil,
             network=network,
             url_from_container=f"http://{container}:8545",
+            container=container,
         )
     finally:
         rm_force(container)
@@ -110,11 +118,13 @@ def wallet(chain: Chain, image: str, tmp_path: Path) -> Iterator[Wallet]:
             name=name,
             anvil_url=chain.url_from_container,
             stderr_path=tmp_path / f"{name}.stderr.log",
+            capabilities="read_wallet,preview_tx,execute_tx",
         )
+        instance = Wallet(name=name, address=address, pin=pin, mcp=mcp, volume=volume)
         try:
-            yield Wallet(name=name, address=address, pin=pin, mcp=mcp)
+            yield instance
         finally:
-            mcp.close()
+            instance.mcp.close()
     finally:
         rm_force(name)
         volume_rm(volume)

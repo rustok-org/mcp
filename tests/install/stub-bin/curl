@@ -26,10 +26,18 @@ for a in "$@"; do
 done
 
 if [ -n "$out" ]; then
-    if [ "${STUB_SHIM_TAMPER:-0}" != "1" ] && [ -n "${STUB_SHIM_SRC:-}" ] && [ -f "${STUB_SHIM_SRC}" ]; then
-        cat "$STUB_SHIM_SRC" >"$out"
-    else
-        printf '%s\n' "#!/bin/sh" "# STUB-SHIM-BODY marker" "echo rustok-stub" >"$out"
-    fi
+    case "$*" in
+        */cli/rustok*)
+            if [ "${STUB_SHIM_TAMPER:-0}" != 1 ] && [ -n "${STUB_SHIM_SRC:-}" ]; then
+                cat "$STUB_SHIM_SRC" > "$out"
+            else
+                printf '%s\n' '#!/bin/sh' 'echo tampered' > "$out"
+            fi ;;
+        *)
+            url=''
+            for a in "$@"; do case "$a" in https://*) url=$a ;; esac; done
+            [ -n "${STUB_RELEASE_DIR:-}" ] || exit 22
+            cat "$STUB_RELEASE_DIR/${url##*/}" > "$out" ;;
+    esac
 fi
 exit 0

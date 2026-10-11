@@ -150,8 +150,10 @@ def test_s1_approve_broadcasts_and_both_sides_see_the_same_tx_hash(
     )
 
 
-def test_s2_deny_resolves_as_denied_and_nothing_is_broadcast(wallet: Wallet) -> None:
+def test_s2_deny_resolves_as_denied_and_nothing_is_broadcast(wallet: Wallet, chain: Chain) -> None:
     """S2: the human says no — the agent sees `denied`, no money moves."""
+    recipient_before = chain.anvil.balance(RECIPIENT)
+    nonce_before = chain.anvil.rpc("eth_getTransactionCount", [wallet.address, "pending"])
     preview_id = wallet.park_send(RECIPIENT, SEND_WEI)
 
     with Console(wallet.name) as console:
@@ -164,6 +166,8 @@ def test_s2_deny_resolves_as_denied_and_nothing_is_broadcast(wallet: Wallet) -> 
     assert exit_code == EXIT_ABORTED, "quitting the resident session must exit 6 (EXIT_ABORTED)"
     status = wait_status(wallet, preview_id, "denied")
     assert status["tx_hash"] is None, "a denied transaction must carry no tx hash"
+    assert chain.anvil.balance(RECIPIENT) == recipient_before
+    assert chain.anvil.rpc("eth_getTransactionCount", [wallet.address, "pending"]) == nonce_before
 
 
 def test_s4_three_wrong_pins_lock_the_channel_and_fail_the_queue_closed(wallet: Wallet) -> None:

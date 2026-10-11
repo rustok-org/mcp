@@ -25,7 +25,8 @@ CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rustok"
 CONFIG_FILE="$CONFIG_DIR/config"
 # The shipped wallet image; RUSTOK_IMAGE overrides (a digest-pinned ref comes
 # with the installer stage of the epic).
-DEFAULT_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0"
+DEFAULT_WALLET_VERSION="0.12.0"
+RELEASE_MANIFEST="${XDG_DATA_HOME:-$HOME/.local/share}/rustok/release.manifest"
 
 usage() {
     cat <<'EOF'
@@ -55,10 +56,9 @@ Commands:
   stop           stop the running wallet container
   status         show the running wallet container(s)
   doctor         diagnose the setup (engine, config, PATH, stray containers)
-  update         pull the current wallet image and re-register every rustok
-                 MCP entry (each client keeps its own wallet, read from the
-                 entry itself; the old entry is printed before replacing);
-                 the shim itself does not self-update — re-run the installer
+  update         verify and install a signed release, then refresh each client
+                 while preserving explicit capability subsets; defaults to
+                 the installed release version and leaves running wallets alone
   uninstall      data-safe teardown: deregister from agents, stop wallets,
                  remove secrets, the installer PATH block and the shim.
                  Keystore volumes (your keys) are NEVER touched without
@@ -67,6 +67,8 @@ Commands:
   version        show the shim version
 
 Options:
+  --capabilities <list|none>  connect: explicit grant; expansion requires your terminal
+  --release <X.Y.Z>           update: choose a signed release; default refreshes installed release
   --agent <name>   the agent this wallet belongs to (default: claude)
   --force          init: replace an orphaned keyring secret (one whose wallet
                    volume is gone); over a LIVE volume init always refuses —
@@ -256,7 +258,72 @@ valid_agent_name() {
     return 0
 }
 
-image_ref() { echo "${RUSTOK_IMAGE:-$DEFAULT_IMAGE}"; }
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    elif command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha256 "$1" | sed 's/.*= //'
+    fi
+}
+
+# BEGIN release manifest v1 parser (also embedded in the standalone shim).
+# Output fields are consumed by the installer/update; both standalone copies share this parser.
+# shellcheck disable=SC2034
+read_release_manifest() {
+    release_manifest=$1
+    [ -f "$release_manifest" ] || die "release manifest is missing — install a signed release first"
+    [ "$(tail -c 1 "$release_manifest" | od -An -tu1 | tr -d ' \n')" = 10 ] \
+        || die "release manifest must end with LF"
+    LC_ALL=C grep -aEq '[^ -~]' "$release_manifest" && die "release manifest must contain printable ASCII and LF only"
+    release_seen='|'
+    release_count=0
+    while IFS='=' read -r release_key release_value; do
+        case "$release_seen" in *"|$release_key|"*) die "duplicate release manifest field" ;; esac
+        release_seen="$release_seen$release_key|"
+        release_count=$((release_count + 1))
+        case "$release_key" in
+            format) [ "$release_value" = rustok-wallet-release-v1 ] || die "unsupported release manifest format" ;;
+            wallet_version)
+                printf '%s\n' "$release_value" | LC_ALL=C grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || die "invalid wallet version"
+                release_version=$release_value ;;
+            source_commit)
+                [ "${#release_value}" -eq 40 ] || die "invalid source commit"
+                case "$release_value" in *[!0-9a-f]*) die "invalid source commit" ;; esac
+                release_commit=$release_value ;;
+            image_ref)
+                case "$release_value" in ghcr.io/rustok-org/rustok-wallet-tui@sha256:*) ;; *) die "invalid wallet image repository" ;; esac
+                release_digest=${release_value#ghcr.io/rustok-org/rustok-wallet-tui@sha256:}
+                [ "${#release_digest}" -eq 64 ] || die "invalid wallet image digest"
+                case "$release_digest" in *[!0-9a-f]*) die "invalid wallet image digest" ;; esac
+                release_image=$release_value ;;
+            installer_sha256|shim_sha256)
+                [ "${#release_value}" -eq 64 ] || die "invalid release file hash"
+                case "$release_value" in *[!0-9a-f]*) die "invalid release file hash" ;; esac
+                case "$release_key" in installer_sha256) release_installer_sha=$release_value ;; shim_sha256) release_shim_sha=$release_value ;; esac ;;
+            *) die "unknown release manifest field" ;;
+        esac
+    done < "$release_manifest"
+    [ "$release_count" -eq 6 ] || die "incomplete release manifest"
+}
+# END release manifest v1 parser.
+
+require_cosign() {
+    cosign_version=$(cosign version 2>/dev/null) || die "trusted cosign 3+ is required; install it independently from a trusted package manager"
+    cosign_major=$(printf '%s\n' "$cosign_version" | sed -n 's/^GitVersion:[[:space:]]*v\([0-9][0-9]*\)\..*/\1/p')
+    case "$cosign_major" in ''|*[!0-9]*) die "cannot determine cosign version" ;; esac
+    [ "$cosign_major" -ge 3 ] || die "cosign 3+ is required for OCI referrers"
+}
+image_ref() {
+    if [ -n "${RUSTOK_IMAGE:-}" ]; then
+        echo "rustok: explicit RUSTOK_IMAGE override — unverified development path" >&2
+        printf '%s\n' "$RUSTOK_IMAGE"
+    else
+        read_release_manifest "$RELEASE_MANIFEST"
+        printf '%s\n' "$release_image"
+    fi
+}
 
 secret_present() {
     # podman: the secret store; docker (no store without swarm): the 0600 file.
@@ -283,7 +350,7 @@ rustok_env_names() {
     # cause mismatched-unlock mysteries. RUSTOK_IMAGE is the shim's own knob.
     # Sorted so every argv built from this list is deterministic.
     env | sed -n 's/^\(RUSTOK_[A-Z0-9_]*\)=.*/\1/p' \
-        | grep -v -E '^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE)$' | LC_ALL=C sort || true
+        | grep -v -E '^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE|MCP_CAPABILITIES)$' | LC_ALL=C sort || true
 }
 
 old_env_names_from_args_json() {
@@ -314,7 +381,7 @@ old_env_names_from_args_json() {
         | .[]
     ' 2>/dev/null \
         | grep -E '^RUSTOK_[A-Z0-9_]*$' \
-        | grep -v -E '^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE)$' \
+        | grep -v -E '^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE|MCP_CAPABILITIES)$' \
         | LC_ALL=C sort -u
     return 0
 }
@@ -674,6 +741,9 @@ wallet_run_args() {
     # only adds one more holder of whatever the runtime was handed.
     # shellcheck disable=SC2046  # label_volume_args emits a word-split fragment
     set -- run -d -i --rm $(label_volume_args "$agent")
+    if [ "${RUSTOK_MCP_CAPABILITIES+x}" = x ]; then
+        set -- "$@" -e RUSTOK_MCP_CAPABILITIES
+    fi
     for name in $(rustok_env_names); do
         case "$name" in
             RUSTOK_RPC_URLS_*)
@@ -746,6 +816,12 @@ cmd_stop() {
             echo "rustok: nothing to stop"
             ;;
         1)
+            open_tty_or_die "wallet stop"
+            printf '%s\n' 'Restart loses previews, pending approvals and execution status. Stop new requests in every session, approve/deny pending operations, and wait for terminal results of active executions. Unknown outcomes need manual audit/hash/network investigation; never replay automatically.' >&2
+            printf 'Type FINISHED only after these human prerequisites are fulfilled: ' >&2
+            IFS= read -r stop_confirm <&3 || stop_confirm=''
+            close_tty
+            [ "$stop_confirm" = FINISHED ] || die "stop cancelled; wallet remains running"
             "$engine" stop "$1" >/dev/null
             echo "rustok: wallet stopped"
             ;;
@@ -839,6 +915,153 @@ cmd_console() {
     esac
 }
 
+normalize_capabilities() {
+    cap_raw=$(printf '%s' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    case "$cap_raw" in
+        none) printf 'none\n'; return 0 ;;
+    esac
+    cap_read=0 cap_preview=0 cap_execute=0
+    cap_tokens=$(printf '%s' "$cap_raw" | tr ',' '\n')
+    while IFS= read -r cap_token; do
+        cap_token=$(printf '%s' "$cap_token" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        case "$cap_token" in
+            '') ;;
+            read_wallet) cap_read=1 ;;
+            preview_tx) cap_preview=1 ;;
+            execute_tx) cap_execute=1 ;;
+            *) return 1 ;;
+        esac
+    done <<EOF
+$cap_tokens
+EOF
+    cap_out=''
+    [ "$cap_read" -eq 0 ] || cap_out=read_wallet
+    if [ "$cap_preview" -eq 1 ]; then cap_out="${cap_out:+$cap_out,}preview_tx"; fi
+    if [ "$cap_execute" -eq 1 ]; then cap_out="${cap_out:+$cap_out,}execute_tx"; fi
+    printf '%s\n' "${cap_out:-none}"
+}
+
+capabilities_from_args_json() {
+    jq -er '
+      def inherited_capability:
+        . as $name | $name == "RUSTOK_MCP_CAPABILITIES" or
+        (($name | contains("=") | not) and ($name | endswith("*")) and
+         ("RUSTOK_MCP_CAPABILITIES" | startswith($name | rtrimstr("*"))));
+      if type != "array" or any(.[]; type != "string") then error("invalid args")
+      else . as $a | [to_entries[] | .key as $i | .value as $v |
+        if $i > 0 and ($a[$i-1] == "-e" or $a[$i-1] == "--env")
+        then {kind: "env", value: $v}
+        elif $v | startswith("--env=") then {kind: "env", value: ($v | ltrimstr("--env="))}
+        elif ($v | startswith("-e")) and $v != "-e" then {kind: "env", value: ($v | ltrimstr("-e"))}
+        elif $i > 0 and $a[$i-1] == "--env-merge" then {kind: "merge", value: $v}
+        elif $v | startswith("--env-merge=") then {kind: "merge", value: ($v | ltrimstr("--env-merge="))}
+        elif $i > 0 and $a[$i-1] == "--secret" then {kind: "secret", value: $v}
+        elif $v | startswith("--secret=") then {kind: "secret", value: ($v | ltrimstr("--secret="))}
+        else empty end |
+        if .kind == "env" then .value |
+          if startswith("RUSTOK_MCP_CAPABILITIES=") then ltrimstr("RUSTOK_MCP_CAPABILITIES=")
+          elif inherited_capability then "IMPLICIT" else empty end
+        elif .kind == "merge" and (.value | startswith("RUSTOK_MCP_CAPABILITIES=")) then "IMPLICIT"
+        elif .kind == "secret" and (.value | split(",") | . as $parts |
+          index("type=env") != null and
+          (index("target=RUSTOK_MCP_CAPABILITIES") != null or
+           ($parts[0] == "RUSTOK_MCP_CAPABILITIES" and (any($parts[]; startswith("target=")) | not)))) then "IMPLICIT"
+        else empty end] |
+        if length > 1 then error("ambiguous capability args") else .[0] // "IMPLICIT" end
+      end' 2>/dev/null
+}
+
+registration_capabilities() {
+    # Print only a capability literal; never config/secret values.
+    case "$client" in
+        claude|cursor)
+            cap_args=$(jq -c '.mcpServers.rustok.args' "$cfg" 2>/dev/null) || return 1
+            cap_values=$(printf '%s' "$cap_args" | capabilities_from_args_json) || return 1 ;;
+        openclaw)
+            cap_entry=$(openclaw mcp show rustok --json 2>/dev/null) || return 1
+            cap_args=$(printf '%s' "$cap_entry" | jq -c '.args' 2>/dev/null) || return 1
+            cap_values=$(printf '%s' "$cap_args" | capabilities_from_args_json) || return 1 ;;
+        hermes)
+            cap_values=$(python3 - "$cfg" <<'PYEOF'
+import sys
+import yaml
+try:
+    with open(sys.argv[1]) as stream:
+        args = yaml.safe_load(stream)["mcp_servers"]["rustok"]["args"]
+    if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
+        raise ValueError("invalid args")
+    values = []
+    for i, arg in enumerate(args):
+        if i > 0 and args[i-1] in ("-e", "--env", "--env-merge", "--secret"):
+            kind = {"-e": "env", "--env": "env", "--env-merge": "merge", "--secret": "secret"}[args[i-1]]
+            value = arg
+        elif arg.startswith("--env="):
+            kind, value = "env", arg[len("--env="):]
+        elif arg.startswith("-e") and arg != "-e":
+            kind, value = "env", arg[2:]
+        elif arg.startswith("--env-merge="):
+            kind, value = "merge", arg[len("--env-merge="):]
+        elif arg.startswith("--secret="):
+            kind, value = "secret", arg[len("--secret="):]
+        else:
+            continue
+        if kind == "env":
+            if value.startswith("RUSTOK_MCP_CAPABILITIES="):
+                values.append(value.split("=", 1)[1])
+            elif value == "RUSTOK_MCP_CAPABILITIES" or (
+                "=" not in value and value.endswith("*") and
+                "RUSTOK_MCP_CAPABILITIES".startswith(value[:-1])
+            ):
+                values.append("IMPLICIT")
+        elif kind == "merge" and value.startswith("RUSTOK_MCP_CAPABILITIES="):
+            values.append("IMPLICIT")
+        elif kind == "secret":
+            parts = value.split(",")
+            if "type=env" in parts and (
+                "target=RUSTOK_MCP_CAPABILITIES" in parts or
+                (parts[0] == "RUSTOK_MCP_CAPABILITIES" and not any(p.startswith("target=") for p in parts))
+            ):
+                values.append("IMPLICIT")
+    if len(values) > 1:
+        raise ValueError("ambiguous capabilities")
+    print(values[0] if values else "IMPLICIT")
+except Exception:
+    sys.exit(1)
+PYEOF
+) || return 1 ;;
+    esac
+    if [ "$cap_values" != IMPLICIT ] && [ -n "$(printf '%s' "$cap_values" | tr -d '[:space:]')" ]; then
+        normalize_capabilities "$cap_values" && return 0
+    fi
+    echo "rustok: $client: implicit or invalid previous grant migrates to read_wallet; live sessions retain their old ceiling until a human restart" >&2
+    echo read_wallet
+}
+
+select_registration_capabilities() {
+    previous_caps=none
+    if [ "$registered" -eq 0 ]; then
+        previous_caps=$(registration_capabilities) || die "cannot read an unambiguous capability grant — previous registration retained"
+    fi
+    if [ "$CAPABILITIES_SET" -eq 1 ]; then
+        selected_caps=$(normalize_capabilities "$CAPABILITIES") || die "unknown capability name; registration unchanged"
+    elif [ "$registered" -eq 0 ]; then
+        selected_caps=$previous_caps
+    else
+        selected_caps=read_wallet
+    fi
+    for cap_name in read_wallet preview_tx execute_tx; do
+        case ",$selected_caps," in *",$cap_name,"*) ;; *) continue ;; esac
+        case ",$previous_caps," in *",$cap_name,"*) continue ;; esac
+        case "$cap_name" in read_wallet) continue ;; esac
+        open_tty_or_die "capability expansion"
+        printf 'Grant %s to agent %s. execute_tx allows payments up to the full balance under acknowledged unlimited autonomy. Core policy/PIN is a separate gate. Type GRANT to continue: ' "$selected_caps" "$agent" >&2
+        IFS= read -r cap_confirm <&3 || cap_confirm=''
+        close_tty
+        [ "$cap_confirm" = GRANT ] || die "capability expansion cancelled; registration and secrets unchanged"
+        break
+    done
+}
+
 cmd_connect() {
     # Registration probes READ the client's config file: `claude mcp get`/`list`
     # both health-check, i.e. START a wallet container on the shared keystore
@@ -928,7 +1151,8 @@ cmd_connect() {
                     old_env_names="$(openclaw mcp show rustok --json 2>/dev/null | jq -c '.args' 2>/dev/null | old_env_names_from_args_json)" \
                         || old_env_read=failed
                     ;;
-                *) registered=1 ;;
+                1) registered=1 ;;
+                *) die "cannot read OpenClaw registration — previous configuration retained" ;;
             esac
             ;;
         hermes)
@@ -941,8 +1165,8 @@ try:
     cfg = yaml.safe_load(open(sys.argv[1]))
     if not isinstance(cfg, dict):
         raise ValueError("top level is not a mapping")
-except Exception as exc:
-    print("unreadable YAML: %s" % exc, file=sys.stderr)
+except Exception:
+    print("unreadable YAML (previous registration retained)", file=sys.stderr)
     sys.exit(3)
 servers = cfg.get("mcp_servers")
 sys.exit(0 if isinstance(servers, dict) and "rustok" in servers else 1)
@@ -967,7 +1191,7 @@ import sys
 
 import yaml
 
-EXCLUDED = re.compile(r"^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE)$")
+EXCLUDED = re.compile(r"^RUSTOK_(KEYRING_PASSWORD(_FILE)?|IMAGE|MCP_CAPABILITIES)$")
 NAME = re.compile(r"^RUSTOK_[A-Z0-9_]*$")
 
 cfg = yaml.safe_load(open(sys.argv[1]))
@@ -999,6 +1223,8 @@ PYEOF
             esac
             ;;
     esac
+
+    select_registration_capabilities
 
     # Multiplicity is born from agent SESSIONS (each one starts a container),
     # and live pre-label containers carry no rustok.agent — so the honest
@@ -1049,7 +1275,7 @@ PYEOF
         set -- "$@" -e "$name=$env_value"
         env_value=""
     done
-    set -- "$@" "$(image_ref)"
+    set -- "$@" -e "RUSTOK_MCP_CAPABILITIES=$selected_caps" "$(image_ref)"
     if [ "$tier_note" -eq 1 ]; then
         echo "rustok: note: docker fallback — RPC URLs ride as plain -e in the agent config (second tier; podman delivers them as secrets)" 1>&2
     fi
@@ -1065,50 +1291,39 @@ PYEOF
 }
 
 connect_write_claude() {
-    # Transport: the claude CLI owns the write; "$@" is the engine-run tail.
-    old_entry=""
+    # The CLI has remove/add but no replace. Keep a private on-disk recovery
+    # record and restore it atomically if add fails; never print config values.
+    claude_backup=''
     if [ "$registered" -eq 0 ]; then
-        # Snapshot BEFORE remove: `claude mcp add` has no replace flag, so
-        # remove→add is forced — and a failed add would otherwise leave the
-        # wallet silently unregistered with no way back but memory.
-        old_entry="$(jq -c '.mcpServers.rustok' "$cfg" 2>/dev/null || true)"
-        if [ -n "$old_entry" ] && [ "$old_entry" != "null" ]; then
-            # Print it on the SUCCESSFUL replace path too, not only on a
-            # failed add: `update` replaces routinely, and a hand-tuned entry
-            # must never vanish silently (one recovery path in all three
-            # writers — Gate-1 2.3c).
-            echo "rustok: replacing the previous entry (return path if needed):" 1>&2
-            printf '  %s\n' "$old_entry" 1>&2
-        fi
-        claude mcp remove -s user rustok >/dev/null \
-            || die "claude mcp remove failed — registration left unchanged"
+        claude_backup=$(mktemp "$cfg.rustok-backup.XXXXXX") || die "cannot preserve previous registration"
+        chmod 600 "$claude_backup"
+        cp "$cfg" "$claude_backup" || die "cannot preserve previous registration"
+        claude mcp remove -s user rustok >/dev/null || die "claude mcp remove failed — registration unchanged (backup: $claude_backup)"
     fi
-    set -- mcp add -s user rustok -- "$engine" "$@"
-    if ! claude "$@"; then
-        if [ -n "$old_entry" ] && [ "$old_entry" != "null" ]; then
-            echo "rustok: 'claude mcp add' failed AND the old registration is already removed — the wallet is currently NOT registered" 1>&2
-            echo "rustok: previous entry (restore by hand under .mcpServers.rustok in $cfg):" 1>&2
-            printf '  %s\n' "$old_entry" 1>&2
-            echo "rustok: or re-run it manually:" 1>&2
-        else
-            echo "rustok: 'claude mcp add' failed — re-run it manually:" 1>&2
+    if ! claude mcp add -s user rustok -- "$engine" "$@"; then
+        if [ -n "$claude_backup" ]; then
+            claude_restore=$(mktemp "$cfg.rustok-restore.XXXXXX") || die "add failed; recovery record: $claude_backup"
+            if cp "$claude_backup" "$claude_restore" && mv "$claude_restore" "$cfg"; then
+                die "claude mcp add failed — previous registration restored (private backup: $claude_backup)"
+            fi
+            rm -f "$claude_restore"
+            die "claude mcp add and restoration failed; restore private backup $claude_backup manually"
         fi
-        printf '  claude' 1>&2
-        for arg in "$@"; do printf ' %s' "$arg" 1>&2; done
-        printf '\n' 1>&2
-        exit 1
+        die "claude mcp add failed — no registration created"
     fi
-    echo "rustok: MCP server 'rustok' registered for agent '$agent' ($engine) — restart the agent session to pick it up"
+    echo "rustok: MCP server rustok configured for Claude, agent $agent, grant $selected_caps; restart the client to activate it"
 }
 
 connect_write_cursor() {
     # No registrar CLI exists for Cursor — the shim owns the file write:
-    # print the old entry as the return path, then ONE atomic tmp+mv (the
+    # save a private recovery record, then ONE atomic tmp+mv (the
     # previous registration stays valid until the very rename — no
     # unregistered window at any point).
     if [ "$registered" -eq 0 ]; then
-        echo "rustok: replacing the previous entry (return path if needed):" 1>&2
-        printf '  %s\n' "$(jq -c '.mcpServers.rustok' "$cfg" 2>/dev/null || true)" 1>&2
+        cursor_backup=$(mktemp "$cfg.rustok-backup.XXXXXX") || die "cannot preserve previous registration"
+        chmod 600 "$cursor_backup"
+        cp "$cfg" "$cursor_backup" || die "cannot preserve previous registration"
+        echo "rustok: replacing entry; private recovery record: $cursor_backup" >&2
     fi
     mkdir -p "${cfg%/*}" 2>/dev/null || true
     if [ ! -f "$cfg" ]; then
@@ -1134,6 +1349,7 @@ connect_write_hermes() {
     hermes_backup="$cfg.rustok-bak-$(date +%Y%m%d-%H%M%S)"
     cp "$cfg" "$hermes_backup" 2>/dev/null \
         || die "cannot write backup next to $cfg — is the directory writable? (nothing was changed)"
+    chmod 600 "$hermes_backup" || die "cannot protect recovery record"
     hermes_note="$(python3 - "$cfg" "$engine" "$@" <<'PYEOF'
 import os
 import sys
@@ -1146,21 +1362,15 @@ try:
         cfg = yaml.safe_load(f) or {}
     if not isinstance(cfg, dict):
         raise ValueError("top level is not a mapping")
-except Exception as exc:
-    print("unreadable YAML: %s" % exc, file=sys.stderr)
+except Exception:
+    print("unreadable YAML (previous registration retained)", file=sys.stderr)
     sys.exit(3)
 servers = cfg.get("mcp_servers")
 if not isinstance(servers, dict):
     servers = {}
 old = servers.get("rustok")
 if old is not None:
-    # One recovery path across all three writers (Gate-1 2.3c): the replaced
-    # entry is printed, never swallowed — the backup file holds it too, but
-    # a routine `update` must SAY that something was overwritten.
-    sys.stderr.write("rustok: replacing the previous entry (return path if needed):\n")
-    for line in yaml.safe_dump(
-            {"rustok": old}, sort_keys=False, allow_unicode=True).splitlines():
-        sys.stderr.write("  %s\n" % line)
+    sys.stderr.write("rustok: replacing entry; private recovery record saved beside the config\n")
 dropped = "rustok-wallet" in servers
 servers.pop("rustok-wallet", None)
 servers["rustok"] = {"command": engine, "args": list(args), "enabled": True}
@@ -1196,7 +1406,7 @@ connect_write_openclaw() {
         oc_old="$(openclaw mcp show rustok --json 2>/dev/null || true)"
         if [ -n "$oc_old" ]; then
             echo "rustok: replacing the previous entry (return path if needed):" 1>&2
-            printf '  %s\n' "$oc_old" 1>&2
+            echo "rustok: existing entry read; capability grant $previous_caps preserved" >&2
         fi
     fi
     oc_json="$(jq -nc --arg cmd "$engine" '{command: $cmd, args: $ARGS.positional}' --args -- "$@")" \
@@ -1310,129 +1520,119 @@ client_cfg_for() {
 }
 
 cmd_update() {
-    # Pull FIRST: a broken pull must stop the run before any registration is
-    # touched — a half-updated set of agent configs is worse than a stale one.
-    # Told at the moment the guarantee drops, not only in a doc page: this pull
-    # resolves a MUTABLE tag and runs no signature check. The installer is the
-    # verified road; `update` deliberately is not, and saying so here is the
-    # difference between a documented limitation and a silent one.
-    echo "rustok: note: update pulls by tag and does not re-verify the image signature — the installer is the verified path (docs/INSTALL.md)" 1>&2
-    "$engine" pull "$(image_ref)" >/dev/null \
-        || die "image pull failed — no registration was touched (network? registry? try: rustok doctor)"
-    ids="$(discover_ids "")"
-    # shellcheck disable=SC2086
-    set -- $ids
-    if [ $# -gt 0 ]; then
-        echo "rustok: note: $# running wallet(s) ($(agent_list "$@")) keep the previous image until their agent's next session start (or: rustok stop)" 1>&2
-    fi
-    updated=0
+    [ -z "${RUSTOK_IMAGE:-}" ] || die "update requires a signed release; unset RUSTOK_IMAGE"
+    update_version=${RELEASE_VERSION:-$release_version}
+    require_cosign
+    command -v curl >/dev/null 2>&1 || die "update needs curl"
+    update_dir=$(mktemp -d) || die "cannot stage release update"
+    chmod 700 "$update_dir"
+    trap 'rm -rf "$update_dir"' EXIT
+    trap 'exit 1' HUP INT TERM
     upd_failed=0
+    # Capture previous grants before changing the installed release. No values
+    # other than validated agent/capability names leave these private snapshots.
     for upd_client in claude cursor hermes openclaw; do
-        upd_cfg="$(client_cfg_for "$upd_client")"
-        # openclaw is exempt from the file gate on purpose: its CLI owns the
-        # config location (profiles move it), and our probe goes through that
-        # CLI anyway — gating on the default path would skip a real
-        # registration silently.
-        if [ "$upd_client" != "openclaw" ] && [ ! -f "$upd_cfg" ]; then
-            continue
-        fi
-        upd_agent=""
-        upd_probe=""
-        case "$upd_client" in
-            claude | cursor)
-                if ! command -v jq >/dev/null 2>&1; then
-                    echo "rustok: warn: cannot probe $upd_cfg without jq — skipped (install jq and re-run)" 1>&2
-                    continue
+        client=$upd_client
+        cfg=$(client_cfg_for "$client")
+        case "$client" in
+            claude|cursor)
+                [ -f "$cfg" ] || continue
+                if ! command -v jq >/dev/null 2>&1 || ! jq -e 'type == "object"' "$cfg" >/dev/null 2>&1; then
+                    echo "rustok: $client: config unreadable or jq missing; previous registration retained" >&2
+                    upd_failed=$((upd_failed + 1)); continue
                 fi
-                jq -e '.mcpServers.rustok' "$upd_cfg" >/dev/null 2>&1 || continue
-                upd_agent="$(jq -r '.mcpServers.rustok.args // [] | map(select(type == "string" and startswith("rustok.agent="))) | first // empty' "$upd_cfg" 2>/dev/null | sed 's/^rustok\.agent=//')"
-                ;;
+                jq -e '.mcpServers | type == "object" and has("rustok")' "$cfg" >/dev/null 2>&1 || continue
+                upd_agent=$(jq -er '.mcpServers.rustok.args | [ .[] | select(type == "string" and startswith("rustok.agent=")) ] | if length != 1 then error("ambiguous agent") else .[0] | ltrimstr("rustok.agent=") end' "$cfg" 2>/dev/null) || upd_agent='' ;;
             hermes)
+                [ -f "$cfg" ] || continue
                 if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import yaml' 2>/dev/null; then
-                    echo "rustok: warn: cannot probe $upd_cfg without python3+PyYAML — skipped" 1>&2
-                    continue
+                    echo "rustok: hermes: Python/PyYAML missing; registration retained" >&2
+                    upd_failed=$((upd_failed + 1)); continue
                 fi
-                upd_probe="$(python3 - "$upd_cfg" <<'PYEOF'
+                upd_agent=$(python3 - "$cfg" <<'PYEOF'
 import sys
 import yaml
 try:
-    cfg = yaml.safe_load(open(sys.argv[1]))
-    if not isinstance(cfg, dict):
-        raise ValueError("top level is not a mapping")
+    with open(sys.argv[1]) as stream:
+        config = yaml.safe_load(stream)
+    if not isinstance(config, dict):
+        raise ValueError("invalid config")
+    servers = config.get("mcp_servers", {})
+    if not isinstance(servers, dict):
+        raise ValueError("invalid servers")
+    if "rustok" not in servers:
+        print("ABSENT")
+    else:
+        args = servers["rustok"]["args"]
+        agents = [arg.split("=", 1)[1] for arg in args
+                  if isinstance(arg, str) and arg.startswith("rustok.agent=")]
+        if len(agents) != 1:
+            raise ValueError("ambiguous agent")
+        print(agents[0])
 except Exception:
-    print("UNREADABLE")
-    sys.exit(0)
-servers = cfg.get("mcp_servers")
-entry = servers.get("rustok") if isinstance(servers, dict) else None
-if not isinstance(entry, dict):
-    print("ABSENT")
-    sys.exit(0)
-for arg in entry.get("args") or []:
-    if isinstance(arg, str) and arg.startswith("rustok.agent="):
-        print("AGENT %s" % arg.split("=", 1)[1])
-        sys.exit(0)
-print("NOAGENT")
+    sys.exit(1)
 PYEOF
-)"
-                case "$upd_probe" in
-                    ABSENT) continue ;;
-                    "AGENT "*) upd_agent="${upd_probe#AGENT }" ;;
-                    UNREADABLE)
-                        echo "rustok: $upd_client: unreadable YAML in $upd_cfg — fix it by hand, then: rustok connect hermes --force" 1>&2
-                        upd_failed=$((upd_failed + 1))
-                        continue
-                        ;;
-                esac
-                ;;
+) || upd_agent=''
+                [ "$upd_agent" != ABSENT ] || continue ;;
             openclaw)
-                # The entry is read through OpenClaw's own CLI, then the agent
-                # label is pulled out of it with jq — same shape as claude and
-                # cursor, different reader.
-                if ! command -v openclaw >/dev/null 2>&1; then
-                    # No CLI: nothing here to update, and nothing to say — unless
-                    # its default config is sitting there, which is evidence the
-                    # client exists and only the tool is missing.
-                    if [ -f "$upd_cfg" ]; then
-                        echo "rustok: warn: $upd_cfg exists but the openclaw CLI is not on PATH — skipped" 1>&2
+                if ! command -v openclaw >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+                    if [ -f "$cfg" ]; then
+                        echo "rustok: openclaw: CLI/jq missing; registration retained" >&2
+                        upd_failed=$((upd_failed + 1))
                     fi
                     continue
                 fi
-                if ! command -v jq >/dev/null 2>&1; then
-                    echo "rustok: warn: cannot read the OpenClaw registration without jq — skipped (install jq and re-run)" 1>&2
-                    continue
-                fi
-                upd_probe="$(openclaw mcp show rustok --json 2>/dev/null)" || continue
-                upd_agent="$(printf '%s' "$upd_probe" | jq -r '.args // [] | map(select(type == "string" and startswith("rustok.agent="))) | first // empty' 2>/dev/null | sed 's/^rustok\.agent=//')"
-                ;;
+                upd_show_rc=0
+                upd_entry=$(openclaw mcp show rustok --json 2>/dev/null) || upd_show_rc=$?
+                case "$upd_show_rc" in
+                    0) ;;
+                    1) continue ;;
+                    *) echo "rustok: openclaw: cannot read registration; retained" >&2
+                       upd_failed=$((upd_failed + 1)); continue ;;
+                esac
+                upd_agent=$(printf '%s' "$upd_entry" | jq -er '.args | [.[] | select(type == "string" and startswith("rustok.agent="))] | if length != 1 then error("ambiguous agent") else .[0] | ltrimstr("rustok.agent=") end' 2>/dev/null) || upd_agent='' ;;
         esac
-        if [ -z "$upd_agent" ]; then
-            echo "rustok: $upd_client: registration found but no rustok.agent label inside it — re-run: rustok connect $upd_client --force" 1>&2
-            upd_failed=$((upd_failed + 1))
-            continue
-        fi
         if ! valid_agent_name "$upd_agent"; then
-            echo "rustok: $upd_client: invalid agent name in the registration — refused (fix it: rustok connect $upd_client --force)" 1>&2
-            upd_failed=$((upd_failed + 1))
-            continue
+            echo "rustok: $client: invalid or ambiguous agent label; registration retained" >&2
+            upd_failed=$((upd_failed + 1)); continue
         fi
-        # A subshell on purpose: cmd_connect die()s on its own errors, and one
-        # client's failure must not abort the others (summary + exit 1 below).
-        if (CONNECT_TARGET="$upd_client" && AGENT="$upd_agent" && FORCE=1 && cmd_connect); then
+        if ! upd_caps=$(registration_capabilities); then
+            echo "rustok: $client: unreadable or ambiguous capability args; registration retained" >&2
+            upd_failed=$((upd_failed + 1)); continue
+        fi
+        printf '%s\n%s\n' "$upd_agent" "$upd_caps" > "$update_dir/client-$client"
+    done
+    release_base="https://github.com/rustok-org/mcp/releases/download/wallet-tui-v$update_version"
+    for asset in release.manifest release.manifest.sigstore.json install.sh; do
+        curl --proto '=https' --tlsv1.2 -fsSL "$release_base/$asset" -o "$update_dir/$asset" \
+            || die "release download failed; installed release and registrations unchanged"
+    done
+    read_release_manifest "$update_dir/release.manifest"
+    [ "$release_version" = "$update_version" ] || die "downloaded release version mismatch"
+    update_identity="https://github.com/rustok-org/mcp/.github/workflows/release-shelf.yml@refs/tags/wallet-tui-v$update_version"
+    cosign verify-blob "$update_dir/release.manifest" --bundle "$update_dir/release.manifest.sigstore.json" \
+        --certificate-identity "$update_identity" \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null 2>&1 \
+        || die "release signature verification failed; previous installation retained"
+    [ "$(sha256_of "$update_dir/install.sh")" = "$release_installer_sha" ] || die "installer checksum mismatch; refusing to execute downloaded bytes"
+    sh "$update_dir/install.sh" --manifest "$update_dir/release.manifest" --bundle "$update_dir/release.manifest.sigstore.json" \
+        || die "release installation failed; no client registration touched (see installer for exact committed state)"
+    read_release_manifest "$RELEASE_MANIFEST"
+    updated=0
+    for upd_client in claude cursor hermes openclaw; do
+        [ -f "$update_dir/client-$upd_client" ] || continue
+        upd_agent=$(sed -n '1p' "$update_dir/client-$upd_client")
+        upd_caps=$(sed -n '2p' "$update_dir/client-$upd_client")
+        if (CONNECT_TARGET=$upd_client; AGENT=$upd_agent; FORCE=1; CAPABILITIES=$upd_caps; CAPABILITIES_SET=1; cmd_connect); then
             updated=$((updated + 1))
         else
-            echo "rustok: $upd_client: re-registration FAILED — restore from the printed old entry if needed, or re-run: rustok connect $upd_client --force" 1>&2
+            echo "rustok: $upd_client: registration update failed; previous entry retained" >&2
             upd_failed=$((upd_failed + 1))
         fi
     done
-    if [ "$updated" -eq 0 ] && [ "$upd_failed" -eq 0 ]; then
-        echo "rustok: nothing to update — no rustok registration found (first: rustok connect claude|cursor|hermes|openclaw)"
-    else
-        upd_tail=""
-        [ "$upd_failed" -gt 0 ] && upd_tail=", $upd_failed FAILED"
-        echo "rustok: updated $updated client(s)$upd_tail"
-    fi
-    echo "rustok: the shim itself does not self-update — re-run the installer (docs/INSTALL.md)"
-    [ "$upd_failed" -eq 0 ] || exit 1
+    echo "rustok: installed release $release_version; configured $updated client(s), $upd_failed failed. Existing live sessions keep their previous image/grants until a human restart."
+    echo "rustok: stop new requests, resolve pending approvals and wait for active execution terminal outcomes before restart; session previews/status are lost, unknown outcomes must not be replayed automatically."
+    [ "$upd_failed" -eq 0 ] || return 1
 }
 
 cmd_uninstall() {
@@ -1444,6 +1644,7 @@ cmd_uninstall() {
     # reports it, and the purge gate must show it while there is still an
     # installation to keep.
     un_vols="$("$engine" volume ls --format '{{.Name}}' 2>/dev/null | grep -E '^(rustok-wallet-tui|rustok-[A-Za-z0-9][A-Za-z0-9_-]*)$' || true)"
+    echo "rustok: uninstall deletes stored keyring passwords. An encrypted volume alone is NOT a recoverable backup: keep the recovery phrase before proceeding. PIN changes do not re-encrypt the keystore; restoring the same phrase does not revoke a leaked key." >&2
     # --- the purge gate runs FIRST, before a single mutation ------------------
     # It used to sit at the end. Everything above it — deregistrations, stopping
     # wallets, secrets, the PATH block, the shim itself — had already happened
@@ -1669,6 +1870,7 @@ PYEOF
     if [ -f "$HOME/.local/bin/rustok" ]; then
         rm -f "$HOME/.local/bin/rustok" && echo "rustok: removed ~/.local/bin/rustok"
     fi
+    rm -f "$RELEASE_MANIFEST" || un_rc=1
     # Last: everything above still needed the engine pin.
     rm -rf "$CONFIG_DIR" 2>/dev/null || true
     if [ -z "$un_vols" ]; then
@@ -1707,6 +1909,9 @@ AGENT=""
 FORCE=0
 PURGE=0
 CONNECT_TARGET=""
+CAPABILITIES=""
+CAPABILITIES_SET=0
+RELEASE_VERSION=""
 
 if [ $# -gt 0 ]; then
     case "$1" in
@@ -1739,7 +1944,13 @@ if [ $# -gt 0 ]; then
             exit 0
             ;;
         version | --version)
-            echo "rustok $VERSION"
+            echo "rustok shim $VERSION (wallet build $DEFAULT_WALLET_VERSION)"
+            if [ -f "$RELEASE_MANIFEST" ]; then
+                read_release_manifest "$RELEASE_MANIFEST"
+                echo "wallet selected $release_version ($release_image)"
+            else
+                echo "wallet release not installed"
+            fi
             exit 0
             ;;
         --agent) ;; # fall through to the option loop (command stays `console`)
@@ -1774,6 +1985,18 @@ while [ $# -gt 0 ]; do
             FORCE=1
             shift
             ;;
+        --capabilities)
+            [ "$COMMAND" = connect ] || die "--capabilities is a connect-only flag"
+            [ $# -ge 2 ] || die "--capabilities needs a list or none"
+            CAPABILITIES=$2
+            CAPABILITIES_SET=1
+            shift 2 ;;
+        --release)
+            [ "$COMMAND" = update ] || die "--release is an update-only flag"
+            [ $# -ge 2 ] || die "--release needs X.Y.Z"
+            printf '%s\n' "$2" | LC_ALL=C grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || die "invalid release version"
+            RELEASE_VERSION=$2
+            shift 2 ;;
         --purge-keys)
             case "$COMMAND" in
                 uninstall) ;;
@@ -1792,6 +2015,10 @@ done
 case "$COMMAND" in
     status | doctor) ENGINE_PERSIST=0 ;;
     *) ENGINE_PERSIST=1 ;;
+esac
+case "$COMMAND" in
+    doctor) ;;
+    *) read_release_manifest "$RELEASE_MANIFEST" ;;
 esac
 resolve_engine
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.rustok-org/rustok-wallet-tui",
-  "description": "Self-custody Ethereum wallet (MCP/stdio). Keys stay in a local Docker volume; transactions that move funds require human approval in a terminal console.",
-  "version": "0.11.0",
+  "description": "Self-custody Ethereum wallet. Human approval for supervised payments; autonomy needs confirmation.",
+  "version": "0.12.0",
   "websiteUrl": "https://github.com/rustok-org/mcp",
   "repository": {
     "url": "https://github.com/rustok-org/mcp",
@@ -11,7 +11,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/rustok-org/rustok-wallet-tui:v0.11.0",
+      "identifier": "ghcr.io/rustok-org/rustok-wallet-tui@sha256:4b9507923904656429b4d73b832dc700953ce053d8cea2fe9d76c28474521782",
       "transport": {
         "type": "stdio"
       },
@@ -62,7 +62,8 @@
             }
           }
         }
-      ]
+      ],
+      "version": "0.12.0"
     }
   ]
 }

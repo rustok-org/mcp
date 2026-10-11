@@ -1,8 +1,8 @@
 [project]
 name = "rustok-mcp"
-version = "0.11.0"
+version = "0.12.0"
 description = "Rustok MCP Server — FastAPI with SSE and stdio transports"
-readme = "README.md"
+readme = "PACKAGE.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -35,6 +35,7 @@ dev = [
     # ANSI escapes with text and cannot be matched reliably.
     "pexpect>=4.9",
     "pyte>=0.8",
+    "pyyaml>=6.0.2",
 ]
 
 [tool.ruff]

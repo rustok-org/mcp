@@ -5,12 +5,18 @@
 # Python artifacts
 .venv
 __pycache__
+**/__pycache__
 *.pyc
+**/*.pyc
+**/*.pyo
 .pytest_cache
+**/.pytest_cache
 .mypy_cache
+**/.mypy_cache
 .ruff_cache
+**/.ruff_cache
 
-# Not needed in the image (Dockerfile copies pyproject.toml, uv.lock, README.md, src/)
+# Not needed in the image (Dockerfile copies pyproject.toml, uv.lock, PACKAGE.md, src/)
 tests
 docs
 scripts
@@ -20,7 +26,7 @@ docker-compose.yml
 .dockerignore
 smithery.yaml
 *.md
-!README.md
+!PACKAGE.md
 
 # Legacy Rust artifacts
 target

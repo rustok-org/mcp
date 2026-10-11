@@ -25,7 +25,7 @@ if [ -z "$WALLET_VERSION" ]; then
     echo "run-tests.sh: no version in $REPO_ROOT/pyproject.toml — every expectation below would silently compare against an empty tag" >&2
     exit 1
 fi
-WALLET_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui:v$WALLET_VERSION"
+WALLET_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 PASS=0
 FAIL=0
@@ -45,11 +45,29 @@ fresh() {
     : >"$WORK/log"
     : >"$WORK/log.tokens"
     # env hygiene: a previous test's exported wallet config must not leak in
-    unset RUSTOK_RPC_URLS_1 RUSTOK_KEYRING_PASSWORD RUSTOK_IMAGE 2>/dev/null || true
-    for tool in sh cat sed head sort awk mkdir basename cut tr rm mv grep env sleep stty date cp od; do
+    unset RUSTOK_RPC_URLS_1 RUSTOK_KEYRING_PASSWORD RUSTOK_IMAGE RUSTOK_MCP_CAPABILITIES 2>/dev/null || true
+    for tool in sh cat sed head sort awk mkdir basename cut tr rm mv grep env sleep stty date cp od tail mktemp chmod rmdir; do
         ln -s "$(command -v "$tool")" "$WORK/bin/$tool"
     done
     ln -s "$TESTS_DIR/stub-bin/podman" "$WORK/bin/podman"
+    export XDG_DATA_HOME="$WORK/home/.local/share"
+    mkdir -p "$XDG_DATA_HOME/rustok"
+    printf '%s\n' 'format=rustok-wallet-release-v1' "wallet_version=$WALLET_VERSION" \
+        'source_commit=1111111111111111111111111111111111111111' "image_ref=$WALLET_IMAGE" \
+        'installer_sha256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+        'shim_sha256=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' > "$XDG_DATA_HOME/rustok/release.manifest"
+    ln -s "$REPO_ROOT/tests/install/stub-bin/cosign" "$WORK/bin/cosign"
+    ln -s "$REPO_ROOT/tests/install/stub-bin/curl" "$WORK/bin/curl"
+    ln -s "$REPO_ROOT/tests/install/stub-bin/sha256sum" "$WORK/bin/sha256sum"
+    export STUB_SHIM_SRC="$SHIM" STUB_RELEASE_DIR="$WORK/assets"
+    mkdir -p "$STUB_RELEASE_DIR"
+    cp "$REPO_ROOT/scripts/install.sh" "$STUB_RELEASE_DIR/install.sh"
+    UPDATE_IMAGE="ghcr.io/rustok-org/rustok-wallet-tui@$(sed -n 's/^WALLET_DIGEST="\(.*\)"$/\1/p' "$REPO_ROOT/scripts/install.sh")"
+    printf '%s\n' 'format=rustok-wallet-release-v1' "wallet_version=$WALLET_VERSION" \
+        'source_commit=1111111111111111111111111111111111111111' "image_ref=$UPDATE_IMAGE" \
+        "installer_sha256=$(sha256sum "$REPO_ROOT/scripts/install.sh" | cut -d' ' -f1)" \
+        "shim_sha256=$(sha256sum "$SHIM" | cut -d' ' -f1)" > "$STUB_RELEASE_DIR/release.manifest"
+    printf '{}\n' > "$STUB_RELEASE_DIR/release.manifest.sigstore.json"
     STUB_CONTAINERS=""
     STUB_LEGACY=""
     STUB_INFO_FAIL=0
@@ -72,7 +90,17 @@ plant_openclaw_stub() { ln -s "$TESTS_DIR/stub-bin/openclaw" "$WORK/bin/openclaw
 # jq is a host tool (like python3 for the pty driver): planted per-test so its
 # ABSENCE stays a testable state, not an accident of the machine.
 plant_jq() { ln -s "$(command -v jq)" "$WORK/bin/jq"; }
-plant_python3() { ln -s "$(command -v python3)" "$WORK/bin/python3"; }
+plant_python3() {
+    # A symlink in this bin directory loses a venv's pyvenv.cfg. Execute the
+    # real interpreter path so its installed PyYAML remains available in CI.
+    STUB_PYTHON3_PATH="$(command -v python3)"
+    export STUB_PYTHON3_PATH
+    cat > "$WORK/bin/python3" <<'EOF'
+#!/bin/sh
+exec "$STUB_PYTHON3_PATH" "$@"
+EOF
+    chmod +x "$WORK/bin/python3"
+}
 seed_wallet() {
     # seed_wallet [agent] — default claude, which keeps the historical volume
     # name (volume_for); any other agent gets its own per-agent volume.
@@ -804,9 +832,9 @@ else not_ok "second start refuses: already running"; fi
 fresh
 STUB_CONTAINERS="aaa1;rustok=wallet;rustok.agent=claude;image=img"
 run_shim stop
-if assert_exit 0 && assert_has "wallet stopped" && grep -q '^podman stop aaa1' "$WORK/log"; then
-    ok "stop stops the single running wallet"
-else not_ok "stop stops the single running wallet"; fi
+if assert_exit 1 && assert_has "own terminal" && ! grep -q '^podman stop aaa1' "$WORK/log"; then
+    ok "stop refuses non-TTY without stopping the running wallet"
+else not_ok "stop refuses non-TTY without stopping the running wallet"; fi
 
 fresh
 run_shim stop
@@ -859,7 +887,7 @@ export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
 export RUSTOK_ALLOWED_CHAINS="1"
 run_shim connect claude
 unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
-EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000 -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 -e RUSTOK_ALLOWED_CHAINS=1 $WALLET_IMAGE"
+EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000 -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 -e RUSTOK_ALLOWED_CHAINS=1 -e RUSTOK_MCP_CAPABILITIES=read_wallet $WALLET_IMAGE"
 if assert_exit 0 \
     && [ "$(grep '^claude mcp add' "$WORK/log")" = "$EXPECTED" ] \
     && [ "$(cat "$WORK/state/secret-rustok-rpc-claude-1")" = "https://rpc.example/with-key" ]; then
@@ -974,7 +1002,7 @@ export RUSTOK_RPC_URLS_1="https://rpc.example/with-key"
 export RUSTOK_ALLOWED_CHAINS="1"
 run_shim connect openclaw
 unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
-EXPECTED_JSON='{"command":"podman","args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=openclaw","-v","rustok-openclaw:/data","--secret","rustok-keyring-openclaw,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-openclaw","--secret","rustok-rpc-openclaw-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","'"$WALLET_IMAGE"'"]}'
+EXPECTED_JSON='{"command":"podman","args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=openclaw","-v","rustok-openclaw:/data","--secret","rustok-keyring-openclaw,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-openclaw","--secret","rustok-rpc-openclaw-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","-e","RUSTOK_MCP_CAPABILITIES=read_wallet","'"$WALLET_IMAGE"'"]}'
 if assert_exit 0 \
     && [ "$(sed -n 's/^openclaw-set-json //p' "$WORK/log")" = "$EXPECTED_JSON" ] \
     && [ "$(cat "$WORK/state/secret-rustok-rpc-openclaw-1")" = "https://rpc.example/with-key" ]; then
@@ -1132,8 +1160,7 @@ plant_jq
 seed_wallet
 STUB_CLAUDE_ADD_FAIL=1
 run_shim connect claude
-if assert_exit 1 && assert_has "re-run it manually" \
-    && assert_has "claude mcp add -s user rustok"; then
+if assert_exit 1 && assert_has "no registration created"; then
     ok "connect surfaces a failed mcp add with the exact retry command"
 else not_ok "connect surfaces a failed mcp add with the exact retry command"; fi
 
@@ -1144,7 +1171,7 @@ seed_wallet
 printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run"]}}}' >"$WORK/home/.claude.json"
 STUB_CLAUDE_REMOVE_FAIL=1
 run_shim connect claude --force
-if assert_exit 1 && assert_has "registration left unchanged" \
+if assert_exit 1 && assert_has "registration unchanged" \
     && ! grep -q '^claude mcp add' "$WORK/log"; then
     ok "connect --force with a failing mcp remove dies named, never runs add"
 else not_ok "connect --force with a failing mcp remove dies named, never runs add"; fi
@@ -1178,7 +1205,7 @@ export RUSTOK_NETWORK_MODE="live"
 export RUSTOK_ALLOWED_CHAINS="1,8453"
 run_shim connect claude
 unset RUSTOK_RPC_URLS_1 RUSTOK_RPC_URLS_8453 RUSTOK_ALLOWED_CHAINS RUSTOK_CHAIN_LABELS RUSTOK_NETWORK_MODE
-EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000 -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 --secret rustok-rpc-claude-8453,type=env,target=RUSTOK_RPC_URLS_8453 -e RUSTOK_ALLOWED_CHAINS=1,8453 -e RUSTOK_CHAIN_LABELS=mainnet,base -e RUSTOK_NETWORK_MODE=live $WALLET_IMAGE"
+EXPECTED="claude mcp add -s user rustok -- podman run -i --rm --label rustok=wallet --label rustok.agent=claude -v rustok-wallet-tui:/data --secret rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000 -e RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude --secret rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1 --secret rustok-rpc-claude-8453,type=env,target=RUSTOK_RPC_URLS_8453 -e RUSTOK_ALLOWED_CHAINS=1,8453 -e RUSTOK_CHAIN_LABELS=mainnet,base -e RUSTOK_NETWORK_MODE=live -e RUSTOK_MCP_CAPABILITIES=read_wallet $WALLET_IMAGE"
 if assert_exit 0 && [ "$(grep '^claude mcp add' "$WORK/log")" = "$EXPECTED" ]; then
     ok "connect with two chains and three literals: full argv byte-exact in sorted order"
 else not_ok "connect with two chains and three literals: full argv byte-exact in sorted order"; fi
@@ -1265,10 +1292,9 @@ seed_wallet
 printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","OLDMARKER"]}}}' >"$WORK/home/.claude.json"
 STUB_CLAUDE_ADD_FAIL=1
 run_shim connect claude --force
-if assert_exit 1 && assert_has "NOT registered" && assert_has "OLDMARKER" \
-    && assert_has "re-run it manually"; then
-    ok "connect --force with a failing add says the old entry is gone and prints it back"
-else not_ok "connect --force with a failing add says the old entry is gone and prints it back"; fi
+if assert_exit 1 && assert_has "previous registration restored" && grep -q OLDMARKER "$WORK/home/.claude.json" && assert_lacks OLDMARKER; then
+    ok "connect --force with a failing add restores the old entry without printing config values"
+else not_ok "connect --force with a failing add restores the old entry without printing config values"; fi
 
 # --- connect cursor: the shim writes ~/.cursor/mcp.json itself (no CLI exists) ---
 
@@ -1286,7 +1312,7 @@ export RUSTOK_ALLOWED_CHAINS="1"
 run_shim connect cursor
 unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
 CJSON="$(jq -cS '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
-CEXP='{"args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-cursor","--secret","rustok-rpc-cursor-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","'"$WALLET_IMAGE"'"],"command":"podman"}'
+CEXP='{"args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-cursor","--secret","rustok-rpc-cursor-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","-e","RUSTOK_MCP_CAPABILITIES=read_wallet","'"$WALLET_IMAGE"'"],"command":"podman"}'
 if assert_exit 0 && [ "$CJSON" = "$CEXP" ] \
     && [ "$(cat "$WORK/state/secret-rustok-rpc-cursor-1")" = "https://rpc.example/with-key" ]; then
     ok "connect cursor: entry byte-exact (default agent=cursor, own volume, leading-dash args survive)"
@@ -1301,7 +1327,7 @@ export RUSTOK_ALLOWED_CHAINS="1"
 run_shim connect cursor --agent claude
 unset RUSTOK_RPC_URLS_1 RUSTOK_ALLOWED_CHAINS
 OJSON="$(jq -cS '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
-OEXP='{"args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=claude","-v","rustok-wallet-tui:/data","--secret","rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude","--secret","rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","'"$WALLET_IMAGE"'"],"command":"podman"}'
+OEXP='{"args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=claude","-v","rustok-wallet-tui:/data","--secret","rustok-keyring-claude,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-claude","--secret","rustok-rpc-claude-1,type=env,target=RUSTOK_RPC_URLS_1","-e","RUSTOK_ALLOWED_CHAINS=1","-e","RUSTOK_MCP_CAPABILITIES=read_wallet","'"$WALLET_IMAGE"'"],"command":"podman"}'
 if assert_exit 0 && [ "$OJSON" = "$OEXP" ] \
     && [ "$(cat "$WORK/state/secret-rustok-rpc-claude-1")" = "https://rpc.example/with-key" ]; then
     ok "connect cursor --agent claude: explicit override drives label/volume/secrets (one resolve line for all clients)"
@@ -1349,7 +1375,7 @@ seed_cursor
 mkdir -p "$WORK/home/.cursor"
 printf '%s' '{"mcpServers":{"rustok":{"command":"old","args":["CURSOROLD"]}}}' >"$WORK/home/.cursor/mcp.json"
 run_shim connect cursor --force
-if assert_exit 0 && assert_has "CURSOROLD" \
+if assert_exit 0 && assert_lacks "CURSOROLD" && ls "$WORK/home/.cursor/"mcp.json.rustok-backup.* >/dev/null 2>&1 \
     && [ "$(jq -r '.mcpServers.rustok.command' "$WORK/home/.cursor/mcp.json")" = "podman" ]; then
     ok "connect cursor --force prints the old entry back and replaces it"
 else not_ok "connect cursor --force prints the old entry back and replaces it"; fi
@@ -1536,7 +1562,7 @@ plant_python3
 plant_all_three
 run_shim update
 CJSON="$(jq -cS '.mcpServers.rustok' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
-CEXP='{"args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-cursor","'"$WALLET_IMAGE"'"],"command":"podman"}'
+CEXP='{"args":["run","-i","--rm","--label","rustok=wallet","--label","rustok.agent=cursor","-v","rustok-cursor:/data","--secret","rustok-keyring-cursor,type=mount,mode=0400,uid=1000,gid=1000","-e","RUSTOK_KEYRING_PASSWORD_FILE=/run/secrets/rustok-keyring-cursor","-e","RUSTOK_MCP_CAPABILITIES=read_wallet","'"$UPDATE_IMAGE"'"],"command":"podman"}'
 HCHECK="$("$PY3" - "$WORK/home/.hermes/config.yaml" <<'PEOF'
 import sys, yaml
 c = yaml.safe_load(open(sys.argv[1]))
@@ -1552,13 +1578,13 @@ PEOF
 PULL_BEFORE_ADD=0
 awk '/^podman pull /{p=NR} /^claude mcp add /{a=NR} END{exit !(p && a && p<a)}' "$WORK/log" && PULL_BEFORE_ADD=1
 if assert_exit 0 && [ "$CJSON" = "$CEXP" ] && [ "$HCHECK" = "HOK" ] \
-    && grep -q "^podman pull $WALLET_IMAGE" "$WORK/log" \
+    && grep -q "^podman pull $UPDATE_IMAGE" "$WORK/log" \
     && [ "$PULL_BEFORE_ADD" = "1" ] \
     && grep -q '^claude mcp add -s user rustok -- podman run .* rustok.agent=claude .* rustok-wallet-tui:/data ' "$WORK/log" \
-    && assert_has "CLAUDEOLD" && assert_has "CURSOROLD" && assert_has "HERMESOLD" \
-    && assert_has "updated 3 client(s)" && assert_has "re-run the installer"; then
-    ok "update: pull first, all three re-registered with their own agents, old entries printed"
-else RC="$RC cjson=$CJSON hcheck=$HCHECK" && not_ok "update: pull first, all three re-registered with their own agents, old entries printed"; fi
+    && assert_lacks "CLAUDEOLD" && assert_has "private recovery record" \
+    && assert_has "configured 3 client(s)" && assert_has "human restart"; then
+    ok "update: pull first, all three re-registered with their own agents, private backups and grants preserved"
+else RC="$RC cjson=$CJSON hcheck=$HCHECK" && not_ok "update: pull first, all three re-registered with their own agents, private backups and grants preserved"; fi
 
 fresh
 plant_claude_stub
@@ -1568,7 +1594,7 @@ mkdir -p "$WORK/home/.cursor"
 printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","--label","rustok.agent=claude","OVERRIDE"]}}}' >"$WORK/home/.cursor/mcp.json"
 run_shim update
 CJSON="$(jq -cS '.mcpServers.rustok.args' "$WORK/home/.cursor/mcp.json" 2>/dev/null || echo none)"
-if assert_exit 0 && assert_has "updated 1 client(s)" \
+if assert_exit 0 && assert_has "configured 1 client(s)" \
     && printf '%s' "$CJSON" | grep -q '"rustok.agent=claude"' \
     && printf '%s' "$CJSON" | grep -q '"rustok-wallet-tui:/data"'; then
     ok "update preserves a cross-wired agent override read from the entry itself (claude volume on the cursor client)"
@@ -1596,7 +1622,7 @@ fresh
 plant_claude_stub
 plant_jq
 run_shim update
-if assert_exit 0 && assert_has "nothing to update"; then
+if assert_exit 0 && assert_has "configured 0 client(s)"; then
     ok "update with no registrations anywhere: honest no-op, exit 0"
 else not_ok "update with no registrations anywhere: honest no-op, exit 0"; fi
 
@@ -1623,7 +1649,7 @@ import sys, yaml
 c = yaml.safe_load(open(sys.argv[1]))
 assert "rustok-hermes:/data" in c["mcp_servers"]["rustok"]["args"]
 PEOF
-if assert_exit 1 && assert_has "no rustok.agent" \
+if assert_exit 1 && assert_has "invalid or ambiguous agent" \
     && cmp -s "$WORK/home/.cursor/mcp.json" "$WORK/mb" \
     && [ "$HOK" = "1" ]; then
     ok "update: an entry without an agent label fails NAMED for that client only — the rest still update"
@@ -1636,7 +1662,7 @@ mkdir -p "$WORK/home/.cursor"
 printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["run","--label","rustok.agent=e;vil"]}}}' >"$WORK/home/.cursor/mcp.json"
 cp "$WORK/home/.cursor/mcp.json" "$WORK/mb"
 run_shim update
-if assert_exit 1 && assert_has "invalid agent name" \
+if assert_exit 1 && assert_has "invalid or ambiguous agent" \
     && cmp -s "$WORK/home/.cursor/mcp.json" "$WORK/mb" \
     && ! grep -q 'e;vil' "$WORK/log"; then
     ok "update: a poisoned agent name in a registration is refused named — never reaches an engine argv"
@@ -1656,9 +1682,9 @@ plant_jq
 seed_wallet
 printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":["CLAUDEOLD"]}}}' >"$WORK/home/.claude.json"
 run_shim connect claude --force
-if assert_exit 0 && assert_has "replacing the previous entry" && assert_has "CLAUDEOLD"; then
-    ok "connect claude --force prints the old entry on a SUCCESSFUL replace (not only on a failed add)"
-else not_ok "connect claude --force prints the old entry on a SUCCESSFUL replace (not only on a failed add)"; fi
+if assert_exit 0 && ls "$WORK/home/".claude.json.rustok-backup.* >/dev/null 2>&1 && assert_lacks CLAUDEOLD; then
+    ok "connect claude --force saves a private recovery record on replace (not only on a failed add)"
+else not_ok "connect claude --force saves a private recovery record on replace (not only on a failed add)"; fi
 
 fresh
 plant_claude_stub
@@ -1673,7 +1699,7 @@ c["mcp_servers"]["rustok"] = {"command": "old", "args": ["HERMESOLD"], "enabled"
 yaml.safe_dump(c, open(p, "w"), sort_keys=False)
 PEOF
 run_shim connect hermes --force
-if assert_exit 0 && assert_has "replacing the previous entry" && assert_has "HERMESOLD"; then
+if assert_exit 0 && assert_has "private recovery record" && assert_lacks HERMESOLD; then
     ok "connect hermes --force prints the old entry on replace (Gate-1 finding: parity with claude/cursor)"
 else not_ok "connect hermes --force prints the old entry on replace (Gate-1 finding: parity with claude/cursor)"; fi
 
@@ -1998,9 +2024,9 @@ fi
 fresh
 seed_wallet
 run_shim update
-if assert_exit 0 && assert_has "does not re-verify" && assert_has "installer"; then
-    ok "update: warns at pull time that it pulls by tag and skips the signature check"
-else not_ok "update: warns at pull time that it pulls by tag and skips the signature check"; fi
+if assert_exit 0 && assert_has "human restart" && grep -q 'cosign verify-blob' "$WORK/log"; then
+    ok "update: verifies blob and OCI signatures, then discloses the human restart boundary"
+else not_ok "update: verifies blob and OCI signatures, then discloses the human restart boundary"; fi
 
 # ─────────────── connect --force names the config it drops ───────────────
 # `--force` rebuilds the registration from the CURRENT environment, so anything
@@ -2103,9 +2129,9 @@ plant_jq
 seed_wallet
 printf '%s' '{"mcpServers":{"rustok":{"command":"podman","args":"run -e RUSTOK_ALLOWED_CHAINS=1"}}}' >"$WORK/home/.claude.json"
 run_shim connect claude --force
-if assert_exit 0 && assert_has "cannot read the previous entry to compare"; then
-    ok "an entry of an unexpected shape is admitted, not passed over in silence"
-else not_ok "an entry of an unexpected shape is admitted, not passed over in silence"; fi
+if assert_exit 1 && assert_has "unambiguous capability grant"; then
+    ok "an unreadable grant is refused with the previous entry retained"
+else not_ok "an unreadable grant is refused with the previous entry retained"; fi
 
 
 # hermes speaks YAML through python instead of JSON through jq, and a client

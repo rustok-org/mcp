@@ -49,11 +49,11 @@ def test_parse_capabilities_empty() -> None:
     assert parse_capabilities([]) == set()
 
 
-def test_resolve_stdio_capabilities_unset_is_all() -> None:
-    """Unset/blank grants all capabilities — stdio is process-trusted, not gated."""
-    assert resolve_stdio_capabilities(None) == set(Capability)
-    assert resolve_stdio_capabilities("") == set(Capability)
-    assert resolve_stdio_capabilities("   ") == set(Capability)
+def test_resolve_stdio_capabilities_unset_is_read_only() -> None:
+    """An implicit process grant must never authorize payments."""
+    assert resolve_stdio_capabilities(None) == {Capability.READ_WALLET}
+    assert resolve_stdio_capabilities("") == {Capability.READ_WALLET}
+    assert resolve_stdio_capabilities("   ") == {Capability.READ_WALLET}
 
 
 def test_resolve_stdio_capabilities_subset() -> None:
@@ -122,3 +122,21 @@ def test_extract_rustok_capabilities_missing_or_non_dict_returns_empty() -> None
     assert extract_rustok_capabilities({}) == set()
     assert extract_rustok_capabilities(None) == set()
     assert extract_rustok_capabilities("not-a-dict") == set()
+
+
+@pytest.mark.parametrize("raw", ["read_wallet,typo", "execute_tx,none", "preview_tx,secret-probe"])
+def test_stdio_unknown_token_denies_the_whole_grant(
+    raw: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A partially valid grant must fail closed without logging its raw value."""
+    assert resolve_stdio_capabilities(raw) == set()
+    assert raw not in caplog.text
+
+
+@pytest.mark.parametrize("raw", ["none", ",,,", " none "])
+def test_stdio_explicit_empty_grants_no_tools(raw: str) -> None:
+    assert resolve_stdio_capabilities(raw) == set()
+
+
+def test_stdio_ignores_empty_items_and_collapses_duplicates() -> None:
+    assert resolve_stdio_capabilities("read_wallet,,read_wallet,") == {Capability.READ_WALLET}

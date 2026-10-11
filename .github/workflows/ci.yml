@@ -24,8 +24,8 @@ jobs:
         with:
           python-version-file: ".python-version"
       - run: uv sync --dev
-      - run: uv run ruff check src tests
-      - run: uv run ruff format --check src tests
+      - run: uv run ruff check src tests scripts/build-wallet-release.py
+      - run: uv run ruff format --check src tests scripts/build-wallet-release.py
       - run: uv run mypy src
 
   test:

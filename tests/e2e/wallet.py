@@ -62,6 +62,7 @@ class Wallet:
     address: str
     pin: str
     mcp: McpStdio
+    volume: str = ""
 
     def exec(self, *command: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         """Run a command inside the wallet container."""
@@ -190,6 +191,7 @@ def start_wallet(
     stderr_path: Path,
     password_args: tuple[str, ...] | None = None,
     extra_args: tuple[str, ...] = (),
+    capabilities: str | None = None,
 ) -> McpStdio:
     """Start the wallet container with its stdio as the MCP channel.
 
@@ -210,6 +212,10 @@ def start_wallet(
         *extra_args,
         "--name",
         name,
+        "--label",
+        "rustok=wallet",
+        "--label",
+        f"rustok.agent={name}",
         "--network",
         network,
         "-v",
@@ -219,6 +225,7 @@ def start_wallet(
         f"RUSTOK_ALLOWED_CHAINS={CHAIN_ID}",
         "-e",
         f"RUSTOK_RPC_URLS_{CHAIN_ID}={anvil_url}",
+        *(() if capabilities is None else ("-e", f"RUSTOK_MCP_CAPABILITIES={capabilities}")),
         image,
     ]
     mcp = McpStdio(argv, stderr_path)

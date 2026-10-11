@@ -63,7 +63,7 @@ def test_capabilities_read_from_prefixed_env(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_capabilities_defaults_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """capabilities defaults to None when unset (stdio then grants all)."""
+    """Unset configuration stays None; the stdio resolver defaults to read_wallet."""
     monkeypatch.delenv("RUSTOK_MCP_CAPABILITIES", raising=False)
     assert Settings().capabilities is None
 
@@ -71,7 +71,7 @@ def test_capabilities_defaults_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_capabilities_empty_string_normalizes_to_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A set-but-empty value reads as unset (→ all caps), never as a blank set."""
+    """Empty configuration normalizes to None; stdio resolves it to read_wallet."""
     monkeypatch.setenv("RUSTOK_MCP_CAPABILITIES", "")
     assert Settings().capabilities is None
 

@@ -6,7 +6,7 @@ dictionary while the *count* lived in prose beside it, and the two drifted apart
 in 0.11.0: the prose said six, the release found ten the hard way, and nothing
 noticed until a human did.
 
-One version, 9 homes — a mismatch blocks the release, strands users, or makes
+One version, 8 homes — a mismatch blocks the release, strands users, or makes
 the panel that answers "what am I running" answer wrong:
 
 * `wallet-publish.yml` refuses to publish unless its `version` input equals
