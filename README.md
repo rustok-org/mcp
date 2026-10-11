@@ -17,23 +17,14 @@ Rustok ships **two wallet products** — pick the trust model you want:
 
 ## Install (rustok-wallet-tui, self-custody)
 
-```bash
-curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-v0.12.0/scripts/install.sh | sh
+Install trusted **cosign 3+** independently, then use the verify-before-execute bootstrap in the [published release skill](https://github.com/rustok-org/mcp/releases/download/wallet-tui-v0.12.0/SKILL.md). It downloads over `--proto '=https' --tlsv1.2`, verifies the manifest signature and installer hash before running the installer. There is no pipe-to-shell path. The repository skill is an unfilled source template; install wallet binaries only from the generated release/listing package.
 
-rustok init             # creates the wallet — you choose a PIN, it prints the 12 words once
-rustok connect claude   # registers it with your agent (or: cursor / hermes / openclaw)
+```sh
+rustok init             # you choose a 6-digit PIN; the recovery phrase prints once
+rustok connect claude   # read-only; also cursor / hermes / openclaw
 ```
 
-The console image is published **by version only** — there is no `latest` tag to
-pull, on purpose: the installer pins the exact digest of the release it ships
-with, and a floating tag would quietly undo that.
-
-The installer verifies the wallet image's cosign signature **before** anything
-touches disk, pulls it by digest, and installs the `rustok` command — it never
-touches a secret, a keystore or your wallet. Requires podman (or docker) and
-cosign; you can read the script before running it. Full walkthrough, including
-the by-hand setup without the shim: [Installation Guide](docs/INSTALL.md).
+`rustok connect claude --force --capabilities read_wallet,preview_tx,execute_tx` requires confirmation in the user's own terminal before expanding rights. Core policy and PIN remain separate from the capability grant. `rustok update` verifies a signed release and preserves explicit subsets; live sessions retain their old image/grants until a human restart. There are no hard-coded spending limits after the user acknowledges unlimited autonomy.
 
 The wallet is one self-contained image (Core + Gateway + MCP over **stdio** + the
 human-approval console); keys live only in a local container volume and never
@@ -124,7 +115,7 @@ Core service (they stay in the local keystore volume).
 - **Self-custody**: keys are encrypted at rest (Argon2id + AES-256-GCM) and only
   decrypted inside Core on your machine.
 - **Capability-gated tools** (`read_wallet` / `preview_tx` / `execute_tx`): the
-  stdio transport is process-trusted (all by default; restrict with
+  stdio transport defaults to read-only (explicit grants use
   `RUSTOK_MCP_CAPABILITIES`); the network-facing SSE transport is bearer-gated.
 - **No spending policy by design**: no hard-coded limits, budgets, or blocklists —
   you consciously accept the risk of funds on the agent wallet. `txguard` surfaces

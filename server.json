@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.rustok-org/rustok-wallet-tui",
-  "description": "Self-custody Ethereum wallet. Human approval for supervised payments; autonomy needs confirmation.",
+  "description": "Read-only default. Human approval for supervised payments; confirmed autonomy can spend full balance",
   "version": "0.12.0",
   "websiteUrl": "https://github.com/rustok-org/mcp",
   "repository": {
@@ -11,7 +11,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/rustok-org/rustok-wallet-tui@sha256:4b9507923904656429b4d73b832dc700953ce053d8cea2fe9d76c28474521782",
+      "identifier": "ghcr.io/rustok-org/rustok-wallet-tui@sha256:c9c69308bcd97ae4018dbf80f6e8786189476226ea3f3c6072f10bca75c36023",
       "transport": {
         "type": "stdio"
       },

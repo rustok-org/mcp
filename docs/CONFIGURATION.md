@@ -24,7 +24,7 @@ All configuration is via environment variables passed to the wallet container.
 > writes — read that line.
 
 | `RUSTOK_DATA_DIR` | No | `/data` | Keystore directory inside the container (mount a volume here). |
-| `RUSTOK_MCP_CAPABILITIES` | No | all | Restrict the stdio agent to a comma-separated capability subset (`read_wallet`,`preview_tx`,`execute_tx`). Unset → all (stdio is process-trusted). |
+| `RUSTOK_MCP_CAPABILITIES` | No | read_wallet | Process/HTTP ceiling. Unset or blank is read-only; an explicit list grants exactly its names, `none` grants nothing, any unknown nonempty token denies the whole grant. |
 
 ¹ Since 0.11.0 neither is required for the chains the build carries endpoints for
 (1, 8453, 42161, 10, 11155111): those read without configuration. A key makes the
@@ -74,12 +74,9 @@ Each tool is gated by a capability:
 | `preview_tx` | `preview_transaction` |
 | `execute_tx` | `execute_transaction`, `get_execution_status` |
 
-The **stdio** transport (the `docker run -i` wallet image) is process-trusted —
-whoever launches it owns the machine — so it grants **all** capabilities by
-default. To run a restricted (e.g. read-only) agent, set `RUSTOK_MCP_CAPABILITIES`
-to a comma-separated subset, e.g. `RUSTOK_MCP_CAPABILITIES=read_wallet`. The
-network-facing **SSE** transport ignores this and stays gated until a client
-grants capabilities on connect.
+The **stdio** process and HTTP gateway default to `read_wallet`. Explicit process grants use `read_wallet,preview_tx,execute_tx` or a subset; unknown tokens fail closed. Initialize can narrow, never enlarge or reset the process ceiling. Unmapped tools/routes are denied; health remains available. `get_execution_status` requires execute_tx, so a read-only session cannot poll an old payment.
+
+`rustok connect` records one literal capability grant and ignores ambient capability exports for new registrations. Existing explicit valid subsets/none are preserved; implicit/invalid grants migrate to read-only. Expansion requires a human terminal confirmation before any secret/config mutation, separately from core policy/PIN. Raw `rustok start` can forward an explicit operator environment grant. The separate SSE session initialization contract is preserved; an unset SSE ceiling leaves the first initialization to declare its session set, which does not expand the gateway's process ceiling.
 
 ## No spending policy
 

@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -410,6 +411,30 @@ def test_concurrent_commit_refuses_second_installer(host: Host) -> None:
     ).read_bytes()
 
 
+@pytest.mark.parametrize("failure", ["installer", "blob", "missing"])
+def test_published_bootstrap_refuses_before_executing_download(host: Host, failure: str) -> None:
+    skill = (ROOT / "skills/rustok-wallet-tui/SKILL.md").read_text()
+    block = next(
+        block.split("```", 1)[0]
+        for block in skill.split("```sh\n")[1:]
+        if "@INSTALLER_SHA256@" in block
+    )
+    block = block.replace("@INSTALLER_SHA256@", sha(INSTALLER))
+    if failure == "installer":
+        (host.assets / "install.sh").write_text("#!/bin/sh\ntouch compromised\n")
+    elif failure == "blob":
+        host.env["STUB_BLOB_FAIL"] = "1"
+    else:
+        (Path(host.env["PATH"]) / "cosign").unlink()
+    script = host.assets / "bootstrap.sh"
+    script.write_text(block)
+    result = host.run(script)
+    assert result.returncode != 0
+    assert "podman pull" not in host.calls()
+    assert "cosign verify ghcr" not in host.calls()
+    assert not (host.home / ".local").exists()
+
+
 def test_failed_claude_add_restores_a_config_actually_removed_by_cli(host: Host) -> None:
     host.record(runtime=True)
     path = host.home / ".claude.json"
@@ -447,6 +472,45 @@ def test_packaging_rejects_asset_substitution_before_verifying_or_publishing(
     with pytest.raises(ValueError, match="asset differs"):
         module.build(host.assets, "0.12.0", COMMIT, package=True)
     assert not (host.assets / "wallet-skill.zip").exists()
+
+
+def test_packaging_exact_bytes_and_read_only_retry_check(
+    host: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = importlib.util.spec_from_file_location(
+        "release_builder", ROOT / "scripts/build-wallet-release.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for name, value in host.env.items():
+        monkeypatch.setenv(name, value)
+    module.build(host.assets, "0.12.0", COMMIT, package=False)
+    module.build(host.assets, "0.12.0", COMMIT, package=True)
+    archive_path = host.assets / "wallet-skill.zip"
+    with zipfile.ZipFile(archive_path) as archive:
+        assert sorted(archive.namelist()) == sorted(
+            [
+                "SKILL.md",
+                "claw.json",
+                "install.sh",
+                "release.manifest",
+                "release.manifest.sigstore.json",
+            ]
+        )
+        assert archive.read("install.sh") == INSTALLER.read_bytes()
+        assert archive.read("SKILL.md") == (host.assets / "SKILL.md").read_bytes()
+        assert sha(INSTALLER).encode() in archive.read("SKILL.md")
+        assert b"@INSTALLER_SHA256@" not in archive.read("SKILL.md")
+    before = {path.name: path.read_bytes() for path in host.assets.iterdir() if path.is_file()}
+    module.build(host.assets, "0.12.0", COMMIT, package=False, check=True)
+    assert before == {
+        path.name: path.read_bytes() for path in host.assets.iterdir() if path.is_file()
+    }
+    with zipfile.ZipFile(archive_path, "a") as archive:
+        archive.writestr("unexpected.txt", "foreign")
+    with pytest.raises(ValueError, match="unexpected members"):
+        module.build(host.assets, "0.12.0", COMMIT, package=False, check=True)
 
 
 @pytest.mark.parametrize("answer,granted", [("GRANT", True), ("CANCEL", False)])
