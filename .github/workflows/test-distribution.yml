@@ -22,9 +22,9 @@ jobs:
       - name: Run shellcheck
         run: |
           if command -v shellcheck >/dev/null 2>&1; then
-            shellcheck scripts/*.sh
+            shellcheck scripts/*.sh cli/rustok
           else
-            docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:stable scripts/*.sh
+            docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:stable scripts/*.sh cli/rustok
           fi
 
   secret-scan:
@@ -123,3 +123,14 @@ jobs:
       # is silently not selected reports the same green as one that ran.
       - name: Ask the shipped image whether it takes the PIN the person chose
         run: uv run pytest tests/e2e/test_one_pin_is_what_the_image_does_e2e.py -m e2e -q
+
+  release-shell-contracts:
+    name: Installer and client transition contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+      - run: uv sync --dev --frozen
+      - run: sh tests/install/run-tests.sh
+      - run: uv run sh tests/shim/run-tests.sh
+      - run: uv run pytest tests/test_release_delivery.py

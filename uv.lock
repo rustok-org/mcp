@@ -888,7 +888,7 @@ wheels = [
 
 [[package]]
 name = "rustok-mcp"
-version = "0.11.0"
+version = "0.12.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -909,6 +909,7 @@ dev = [
     { name = "pyte" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pyyaml" },
     { name = "ruff" },
 ]
 
@@ -932,6 +933,7 @@ dev = [
     { name = "pyte", specifier = ">=0.8" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "ruff", specifier = ">=0.9" },
 ]
 

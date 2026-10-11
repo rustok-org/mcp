@@ -1,100 +1,27 @@
 #!/bin/sh
-# rustok installer — one command to a verified wallet shim.
-#
-#   curl --proto '=https' --tlsv1.2 -fsSL \
-#     https://raw.githubusercontent.com/rustok-org/mcp/wallet-tui-vX.Y.Z/scripts/install.sh | sh
-#
-# The tag namespace is wallet-tui-vX.Y.Z. A bare vX.Y.Z tag does not exist and
-# that URL 404s — this header is copied by people, so it must be runnable.
-#
-# What it does: pulls the wallet image BY DIGEST (content-addressed — you get
-# exactly those bytes or nothing), installs the `rustok` shim into ~/.local/bin,
-# and adds it to PATH. If cosign is available it ALSO verifies the image's
-# signature against THIS repo's publishing workflow — an optional provenance
-# layer, never a prerequisite: integrity comes from the digest, cosign proves
-# who built it. A signature that fails to verify still refuses to install.
-#
-# What it deliberately does NOT do (epic invariant #1): it never touches a
-# secret, a keystore volume or your wallet. Creating the wallet — the 12-word
-# phrase, and asks you to choose an approval PIN — is a separate step YOU run in your own terminal
-# afterwards: `rustok init`. The installer runs over a pipe; the recovery phrase
-# must never pass through one.
-#
-# POSIX sh on purpose: `curl | sh` ignores the shebang and runs under /bin/sh.
+# Run only after the published bootstrap verifies this file and its signed manifest.
+# sh ./install.sh --manifest ./release.manifest --bundle ./release.manifest.sigstore.json
 set -eu
-
+umask 077
 : "${SHELL:=/bin/sh}"
-
-# --- release-pinned constants (filled by the release step) --------------------
-# WALLET_DIGEST and SHIM_SHA256 are immutable identities, NOT mutable tags: the
-# tag :vX.Y.Z can be repointed at a different image and a git tag can be force-
-# pushed elsewhere, but a @sha256: digest and a content hash are bound to their
-# exact bytes. Both start as fail-closed placeholders — an unfilled release
-# cannot pull or fetch anything, it fails loudly instead of installing something
-# unverified.
-#
-# The shim used to be pinned by COMMIT. A commit SHA cannot exist before the
-# commit that carries the shim, so every release passed through a state where
-# the pin named the previous release's shim — and the test guarding it could
-# never be green during the very flow it guarded (it skipped in CI, where
-# actions/checkout clones at depth 1, and failed locally). A content hash is
-# computable from the working tree, so the new shim and its correct pin land in
-# the same commit. Same guarantee, no chicken-and-egg.
-#
-# Why the hash and not just the tag the shim is fetched from: docs/INSTALL.md
-# tells people to download this script, READ it, then run that same file. That
-# splits the two fetches in time. A tag moved in between would hand them a
-# different shim while the script they read stayed the same — the hash is what
-# makes "what you read is what runs" true for the shim too.
-WALLET_VERSION="0.11.0"
+WALLET_VERSION="0.12.0"
+# Filled in the pin stage; used by the release-asset generator and image guards.
 WALLET_DIGEST="sha256:4b9507923904656429b4d73b832dc700953ce053d8cea2fe9d76c28474521782"
-SHIM_SHA256="5e6323829ff2459a178b52363a62c5948a3e53c8bdd325cfd71a4e813cf43a7a"
-
-IMAGE_REPO="ghcr.io/rustok-org/rustok-wallet-tui"
+SHIM_SHA256="2008bffe7ae5483f5c352955eedab5df41ffab4412f36c9ea1a3195a3f51aa45"
 RAW_BASE="https://raw.githubusercontent.com/rustok-org/mcp"
-# The one identity cosign pins to: the workflow that builds AND signs the image.
-# The ref MUST match the ref the publish ran on. wallet-publish.yml is
-# workflow_dispatch, and its own self-verify pins `@${github.ref}` — so signer
-# and verifier agree only if both use the SAME ref. Pinned to refs/heads/main:
-# that is the default ref a workflow_dispatch runs on, so the RELEASE PROCESS
-# (4.2) dispatches wallet-publish from main. If a future release instead tags
-# the commit and dispatches FROM that tag, this must change to
-# @refs/tags/v<version> — it is a FIELD change, not a value the release fills.
 COSIGN_IDENTITY="https://github.com/rustok-org/mcp/.github/workflows/wallet-publish.yml@refs/heads/main"
 COSIGN_ISSUER="https://token.actions.githubusercontent.com"
-
 say() { printf 'rustok-install: %s\n' "$*"; }
-die() { printf 'rustok-install: %s\n' "$*" 1>&2; exit 1; }
-
-# Guarded before use: under `set -u` a missing HOME (stripped containers, CI,
-# systemd units without Environment=HOME) would abort with the shell's own
-# message instead of ours, from a line the reader cannot map to a cause.
-[ -n "${HOME:-}" ] \
-    || die "HOME is not set, so there is nowhere to install to — expected ~/.local/bin"
-
+die() { printf 'rustok-install: %s\n' "$*" >&2; exit 1; }
+[ -n "${HOME:-}" ] || die "HOME is not set"
 INSTALL_DIR="$HOME/.local/bin"
 SHIM_PATH="$INSTALL_DIR/rustok"
-
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/rustok"
 detect_engine() {
-    if command -v podman >/dev/null 2>&1; then
-        echo podman
-    elif command -v docker >/dev/null 2>&1; then
-        echo docker
-    else
-        die "neither podman nor docker found — install podman (recommended): https://podman.io/getting-started/installation"
-    fi
+    if command -v podman >/dev/null 2>&1; then echo podman
+    elif command -v docker >/dev/null 2>&1; then echo docker
+    else die "neither podman nor docker found"; fi
 }
-
-# The sha256 of a file, printed bare, or nothing at all when no tool can do it.
-#
-# Three names because the tool is not the same everywhere and its absence must
-# not be mistaken for a pass: `sha256sum` ships with GNU coreutils (Linux),
-# macOS has `shasum -a 256` from perl by default, and `openssl` is the fallback
-# on anything stripped down. openssl prints `SHA256(f)= h` on 1.x and
-# `SHA2-256(f)= h` on 3.x, so the suffix after `= ` is what we take.
-#
-# Prints nothing rather than dying here: the caller decides what an unverifiable
-# shim means, and it decides to refuse.
 sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" | cut -d' ' -f1
@@ -105,45 +32,53 @@ sha256_of() {
     fi
 }
 
-cosign_state() {
-    # Two states on purpose, keyed on whether cosign RUNS — not on whether a
-    # file by that name is in PATH.
-    #
-    # `command -v` answers the wrong question and answers it differently per
-    # shell: for a present-but-non-executable file /bin/sh in POSIX mode says
-    # no while bash says yes. Since we ship as `curl … | sh`, keying on it made
-    # the most common breakage (a download that lost its +x bit) report
-    # "cosign is not installed" — a lie about the user's machine.
-    #
-    # Nor is there a usable exit code to split "missing" from "broken": an
-    # executable file the kernel refuses returns 2, 126 or 127 depending on its
-    # bytes (measured: random garbage 2, truncated ELF 126, near-text 127). Any
-    # single-code rule misfiles one of them. Both states lead to the same
-    # action anyway — install by digest, provenance unchecked — so we do not
-    # pretend to distinguish them and say both possibilities out loud instead.
-    cosign version >/dev/null 2>&1 && { echo works; return 0; }
-    echo unavailable
+# BEGIN release manifest v1 parser (also embedded in the standalone shim).
+# Output fields are consumed by the installer/update; both standalone copies share this parser.
+# shellcheck disable=SC2034
+read_release_manifest() {
+    release_manifest=$1
+    [ -f "$release_manifest" ] || die "release manifest is missing — install a signed release first"
+    [ "$(tail -c 1 "$release_manifest" | od -An -tu1 | tr -d ' \n')" = 10 ] \
+        || die "release manifest must end with LF"
+    LC_ALL=C grep -aEq '[^ -~]' "$release_manifest" && die "release manifest must contain printable ASCII and LF only"
+    release_seen='|'
+    release_count=0
+    while IFS='=' read -r release_key release_value; do
+        case "$release_seen" in *"|$release_key|"*) die "duplicate release manifest field" ;; esac
+        release_seen="$release_seen$release_key|"
+        release_count=$((release_count + 1))
+        case "$release_key" in
+            format) [ "$release_value" = rustok-wallet-release-v1 ] || die "unsupported release manifest format" ;;
+            wallet_version)
+                printf '%s\n' "$release_value" | LC_ALL=C grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || die "invalid wallet version"
+                release_version=$release_value ;;
+            source_commit)
+                [ "${#release_value}" -eq 40 ] || die "invalid source commit"
+                case "$release_value" in *[!0-9a-f]*) die "invalid source commit" ;; esac
+                release_commit=$release_value ;;
+            image_ref)
+                case "$release_value" in ghcr.io/rustok-org/rustok-wallet-tui@sha256:*) ;; *) die "invalid wallet image repository" ;; esac
+                release_digest=${release_value#ghcr.io/rustok-org/rustok-wallet-tui@sha256:}
+                [ "${#release_digest}" -eq 64 ] || die "invalid wallet image digest"
+                case "$release_digest" in *[!0-9a-f]*) die "invalid wallet image digest" ;; esac
+                release_image=$release_value ;;
+            installer_sha256|shim_sha256)
+                [ "${#release_value}" -eq 64 ] || die "invalid release file hash"
+                case "$release_value" in *[!0-9a-f]*) die "invalid release file hash" ;; esac
+                case "$release_key" in installer_sha256) release_installer_sha=$release_value ;; shim_sha256) release_shim_sha=$release_value ;; esac ;;
+            *) die "unknown release manifest field" ;;
+        esac
+    done < "$release_manifest"
+    [ "$release_count" -eq 6 ] || die "incomplete release manifest"
 }
+# END release manifest v1 parser.
 
-# Set when provenance was skipped, so the closing summary can repeat it. The
-# skip is announced where it happens — in the middle of a long install log,
-# which is exactly where it scrolls away: the first third party to install this
-# wallet did not notice, and worked out from the outside that the signature had
-# never been checked. The last lines are the ones that get read.
-PROVENANCE_SKIPPED=0
-
-skip_provenance() {
-    # $1 — the honest reason, $2 — the image ref. Never phrased as a security
-    # event: nothing here says anything about the image, only about the tool.
-    PROVENANCE_SKIPPED=1
-    say "$1 — skipping the signature check."
-    say "this is not an error: the image is pinned by digest ($WALLET_DIGEST),"
-    say "so you get exactly those bytes or nothing. cosign proves WHO built them (provenance),"
-    say "which you can check any time later, once cosign works:"
-    say "  cosign verify $2 --certificate-identity $COSIGN_IDENTITY --certificate-oidc-issuer $COSIGN_ISSUER"
-    say "note: that check needs cosign 3 or newer — 2.x cannot see our signatures at all"
+require_cosign() {
+    cosign_version=$(cosign version 2>/dev/null) || die "cosign is unavailable or will not run; trusted cosign 3+ is required; install it independently from a trusted package manager"
+    cosign_major=$(printf '%s\n' "$cosign_version" | sed -n 's/^GitVersion:[[:space:]]*v\([0-9][0-9]*\)\..*/\1/p')
+    case "$cosign_major" in ''|*[!0-9]*) die "cannot determine cosign version" ;; esac
+    [ "$cosign_major" -ge 3 ] || die "cosign 3+ is required for OCI referrers"
 }
-
 profile_file() {
     # Match the shell so the PATH line is actually sourced; `uninstall` removes
     # the same marker block from any of these, so writing to one is safe.
@@ -160,13 +95,14 @@ profile_file() {
 }
 
 manual_path_line() {
+    quoted_dir=$(printf '%s' "$INSTALL_DIR" | sed "s/'/'\\\\''/g")
     # $PATH and $path stay literal on purpose — they must expand in the user's
     # shell when they paste the line, not here.
     # shellcheck disable=SC2016
     case "${SHELL##*/}" in
         fish) printf 'fish_add_path %s' "$INSTALL_DIR" ;;
         csh | tcsh) printf 'set path = (%s $path)' "$INSTALL_DIR" ;;
-        *) printf 'export PATH="%s:$PATH"' "$INSTALL_DIR" ;;
+        *) printf "export PATH='%s':\$PATH" "$quoted_dir" ;;
     esac
 }
 
@@ -207,7 +143,8 @@ add_to_path() {
         # $INSTALL_DIR expands now (via %s); $PATH MUST stay literal so it
         # expands at the user's shell startup, not at install time.
         # shellcheck disable=SC2016
-        printf 'export PATH="%s:$PATH"\n' "$INSTALL_DIR"
+        quoted_dir=$(printf '%s' "$INSTALL_DIR" | sed "s/'/'\\\\''/g")
+        printf "export PATH='%s':\$PATH\n" "$quoted_dir"
         printf '# <<< rustok installer <<<\n'
     } >>"$prof" 2>/dev/null || true
     # Report what is actually in the file, not whether the write "returned" ok.
@@ -225,97 +162,52 @@ add_to_path() {
 }
 
 main() {
-    engine="$(detect_engine)"
-    command -v curl >/dev/null 2>&1 \
-        || die "curl is required to fetch the shim — install it (dnf/apt install curl)"
-
-    image="${IMAGE_REPO}@${WALLET_DIGEST}"
-
-    # 1) Provenance FIRST when it is possible at all (cheapest gate, downloads
-    #    no image bytes): a wrong-identity image is rejected before anything
-    #    lands on disk. Ratified order (decision #2) is unchanged — what changed
-    #    (Р-7а) is that a MISSING or UNRUNNABLE cosign no longer stops the
-    #    install. Integrity does not depend on it: the pull below is by digest.
-    #    Only a working cosign that says "no" refuses, and it refuses hard.
-    case "$(cosign_state)" in
-        works)
-            say "verifying the wallet image signature ($WALLET_VERSION)…"
-            cosign verify "$image" \
-                --certificate-identity "$COSIGN_IDENTITY" \
-                --certificate-oidc-issuer "$COSIGN_ISSUER" >/dev/null 2>&1 \
-                || die "cosign could NOT verify $image against this repo's publishing workflow — refusing to install.
-  Either the signature does not match (an unsigned or tampered image, or a release whose signed
-  publish has not run yet), OR the check could not complete — keyless verification reaches the
-  Sigstore transparency log over the network, so no connectivity, a rate limit or an outdated
-  cosign fail here too.
-  On 'no signatures found', check your version first: cosign 2.x cannot SEE our signatures at all
-  (they are stored as OCI referrers, and 2.x looks for a .sig tag). Two ways forward, both fine:
-  upgrade to cosign 3+ and re-run, or remove cosign and re-run — provenance is optional, the
-  install then proceeds by digest, which is what fixes the bytes you get either way.
-  Nothing has been installed. See https://github.com/rustok-org/mcp/blob/main/docs/TROUBLESHOOTING.md
-  (an absolute link on purpose: installing over a pipe, you have no docs/ tree here)."
-            say "signature verified — built by this repo's publishing workflow."
-            ;;
-        *)
-            skip_provenance "cosign is unavailable — either it is not installed, or it is there but will not run (no execute bit, wrong architecture, missing libc, a truncated download)" "$image"
-            ;;
-    esac
-
-    # 2) Pull by digest. NOT called "the verified image" — the branch above may
-    #    have skipped verification, and the pull is what the digest guarantees,
-    #    not what cosign did.
-    say "pulling the image by digest…"
-    "$engine" pull "$image" >/dev/null \
-        || die "'$engine' failed to pull the image — check the daemon/machine and your network"
-
-    # 3) Fetch the shim over a hardened TLS channel and verify it against
-    #    SHIM_SHA256 before it is ever made executable, then install atomically.
-    #    The URL is derived from WALLET_VERSION rather than being its own pinned
-    #    identity: it is only an address, and the hash is what binds the bytes.
-    # Every write below is checked. They used to be bare: a failure produced the
-    # shell's own unbranded error, and two of them fired AFTER the work had
-    # already succeeded — reporting a failed install that had in fact worked.
-    mkdir -p "$INSTALL_DIR" \
-        || die "could not create $INSTALL_DIR — check the permissions on your home directory"
-    shim_tmp="$SHIM_PATH.rustok-tmp"
-    say "fetching the rustok shim…"
-    curl --proto '=https' --tlsv1.2 -fsSL \
-        "$RAW_BASE/wallet-tui-v$WALLET_VERSION/cli/rustok" -o "$shim_tmp" \
-        || { rm -f "$shim_tmp"; die "failed to fetch the shim over TLS — refusing to install a partial copy"; }
-    # Verified BEFORE chmod +x: an unverified file never becomes executable.
-    fetched_sha="$(sha256_of "$shim_tmp")" || fetched_sha=""
-    if [ -z "$fetched_sha" ]; then
-        rm -f "$shim_tmp"
-        die "no sha256 tool found (tried sha256sum, shasum, openssl) — refusing to install a shim we cannot verify. Install GNU coreutils, perl's shasum, or openssl, then re-run."
-    fi
-    if [ "$fetched_sha" != "$SHIM_SHA256" ]; then
-        rm -f "$shim_tmp"
-        die "the shim does not match the hash this installer was published with — the bytes at that URL changed since then. Expected $SHIM_SHA256, got $fetched_sha. Refusing to install."
-    fi
-    chmod +x "$shim_tmp" \
-        || { rm -f "$shim_tmp"; die "could not make the shim executable in $INSTALL_DIR — check its permissions"; }
-    # Say it out loud: whatever was there is about to be gone. A `rustok` from
-    # another source, or a symlink someone set up by hand, is replaced silently
-    # otherwise — and the log gives them nothing to notice it by.
-    if [ -e "$SHIM_PATH" ] || [ -L "$SHIM_PATH" ]; then
-        say "replacing the existing $SHIM_PATH"
-    fi
-    mv "$shim_tmp" "$SHIM_PATH" \
-        || { rm -f "$shim_tmp"; die "failed to install the shim into $INSTALL_DIR"; }
-    say "installed the rustok shim -> $SHIM_PATH"
-
-    # 4) PATH.
+    [ "$#" -eq 4 ] && [ "$1" = --manifest ] && [ "$3" = --bundle ] \
+        || die "usage: sh ./install.sh --manifest ./release.manifest --bundle ./release.manifest.sigstore.json (no pipe execution)"
+    manifest_path=$2
+    bundle_path=$4
+    read_release_manifest "$manifest_path"
+    [ "$release_version" = "$WALLET_VERSION" ] || die "manifest version differs from this installer"
+    [ -f "$bundle_path" ] || die "signature bundle is missing"
+    require_cosign
+    manifest_identity="https://github.com/rustok-org/mcp/.github/workflows/release-shelf.yml@refs/tags/wallet-tui-v$WALLET_VERSION"
+    cosign verify-blob "$manifest_path" --bundle "$bundle_path" \
+        --certificate-identity "$manifest_identity" --certificate-oidc-issuer "$COSIGN_ISSUER" >/dev/null 2>&1 \
+        || die "signed release manifest signature verification failed (bad signature/identity or network/transparency log unavailable). Use trusted cosign 3+; see https://github.com/rustok-org/mcp/blob/main/docs/TROUBLESHOOTING.md — nothing installed"
+    [ "$(sha256_of "$0")" = "$release_installer_sha" ] || die "installer bytes do not match signed release manifest"
+    [ "$release_image" = "ghcr.io/rustok-org/rustok-wallet-tui@$WALLET_DIGEST" ] || die "image differs from this release installer"
+    [ "$release_shim_sha" = "$SHIM_SHA256" ] || die "shim hash differs from this release installer"
+    engine=$(detect_engine)
+    command -v curl >/dev/null 2>&1 || die "curl is required"
+    cosign verify "$release_image" --certificate-identity "$COSIGN_IDENTITY" \
+        --certificate-oidc-issuer "$COSIGN_ISSUER" >/dev/null 2>&1 \
+        || die "wallet image signature verification failed — nothing installed"
+    stage_dir=$(mktemp -d) || die "cannot create download staging directory"
+    install_lock=''
+    shim_tmp=''
+    manifest_tmp=''
+    trap 'rm -rf "$stage_dir"; [ -z "$shim_tmp" ] || rm -f "$shim_tmp"; [ -z "$manifest_tmp" ] || rm -f "$manifest_tmp"; [ -z "$install_lock" ] || rmdir "$install_lock"' EXIT
+    trap 'exit 1' HUP INT TERM
+    curl --proto '=https' --tlsv1.2 -fsSL "$RAW_BASE/$release_commit/cli/rustok" -o "$stage_dir/rustok" \
+        || die "shim download failed — previous installation preserved"
+    [ "$(sha256_of "$stage_dir/rustok")" = "$release_shim_sha" ] || die "shim checksum mismatch — previous installation preserved"
+    "$engine" pull "$release_image" >/dev/null || die "verified image pull failed — previous installation preserved"
+    mkdir -p "$INSTALL_DIR" "$DATA_DIR" || die "could not create installation directories"
+    mkdir "$DATA_DIR/install.lock" 2>/dev/null || die "installation is busy or a previous crash left $DATA_DIR/install.lock; inspect it before removing the stale lock"
+    install_lock="$DATA_DIR/install.lock"
+    shim_tmp=$(mktemp "$INSTALL_DIR/.rustok.XXXXXX") || die "cannot stage shim atomically"
+    manifest_tmp=$(mktemp "$DATA_DIR/.release.XXXXXX") || die "cannot stage manifest atomically"
+    cp "$stage_dir/rustok" "$shim_tmp" || die "cannot stage shim"
+    chmod +x "$shim_tmp" || die "could not make the shim executable"
+    cp "$manifest_path" "$manifest_tmp" || die "cannot stage release record"
+    if [ -e "$SHIM_PATH" ] || [ -L "$SHIM_PATH" ]; then say "replacing the existing $SHIM_PATH"; fi
+    mv "$shim_tmp" "$SHIM_PATH" || die "shim commit failed — previous manifest preserved"
+    shim_tmp=''
+    mv "$manifest_tmp" "$DATA_DIR/release.manifest" || die "release record commit failed; shim installed but previous digest retained (fresh installs refuse to run)"
+    manifest_tmp=''
+    say "signature verified; installed $release_version at $release_image"
     add_to_path
-
-    # 5) Next steps — the installer's job ends here; the wallet is the human's.
-    say "done. Before running, you can inspect this script and the shim you just installed."
-    if [ "$PROVENANCE_SKIPPED" -eq 1 ]; then
-        say "one thing to know: the image signature was NOT checked — cosign was unavailable."
-        say "you have the right bytes (pinned by digest), but not proof of who built them."
-        say "to check provenance later, install cosign 3 or newer and run the verify command printed above."
-    fi
-    say "next (in YOUR terminal, never through an agent): rustok init   — you choose a 6-digit PIN, it prints your 12-word phrase once"
-    say "to roll back to a previous version, re-run the installer from that version's tag: $RAW_BASE/wallet-tui-v<older>/scripts/install.sh"
+    say "next in your own terminal: rustok init — you choose a 6-digit PIN, and see your recovery phrase once"
+    say "running wallets were left untouched; complete pending and active operations before a human restart"
 }
-
 main "$@"

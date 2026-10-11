@@ -24,6 +24,7 @@ previous image, so a text that got ahead of the bytes turns this red mid-chain
 — which is the guard doing its job, not a reason to silence it.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -55,6 +56,9 @@ MINTED = re.compile(r"Transaction-approval PIN", re.IGNORECASE)
 
 def _pinned_image() -> str:
     """The exact bytes this tree ships — the reference a user's installer pulls."""
+    if candidate := os.environ.get("RUSTOK_E2E_IMAGE"):
+        assert re.fullmatch(r"(?:[^\s]+@)?sha256:[0-9a-f]{64}", candidate)
+        return candidate
     match = re.search(r'^WALLET_DIGEST="([^"]+)"$', INSTALL_SH.read_text(), re.MULTILINE)
     assert match, "install.sh carries no WALLET_DIGEST — nothing to hold the texts against"
     digest = match.group(1)

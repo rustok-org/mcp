@@ -29,6 +29,7 @@ has to ride in the digest-pin PR. During prep `WALLET_DIGEST` still names the
 previous image, so a text that got ahead of the bytes turns this red mid-chain.
 """
 
+import os
 import re
 import shutil
 import uuid
@@ -59,6 +60,9 @@ REFUSAL = re.compile(
 
 def _pinned_image() -> str:
     """The exact bytes this tree ships — the reference a user's installer pulls."""
+    if candidate := os.environ.get("RUSTOK_E2E_IMAGE"):
+        assert re.fullmatch(r"(?:[^\s]+@)?sha256:[0-9a-f]{64}", candidate)
+        return candidate
     match = re.search(r'^WALLET_DIGEST="([^"]+)"$', INSTALL_SH.read_text(), re.MULTILINE)
     assert match, "install.sh carries no WALLET_DIGEST — nothing to hold the texts against"
     digest = match.group(1)

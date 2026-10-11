@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-10-11
+
+### Changed
+- New and implicit MCP registrations grant `read_wallet` only. Explicit valid
+  subsets survive reconnect/update; malformed grants cannot partially grant
+  writes. Capability expansion requires confirmation in the user's terminal.
+- Install and update verify a signed release manifest and exact installer bytes
+  before execution, then verify the OCI signature before pulling the image.
+  Trusted cosign 3+ is required. All normal launches and generated registrations
+  use the installed immutable digest; `update --release X.Y.Z` selects a signed
+  release explicitly, and the default refreshes the installed release.
+- Update leaves running wallets alone and reports partial client migrations.
+  Stop requires human confirmation after pending decisions and active execution
+  outcomes. Unknown outcomes require manual investigation, without automatic
+  replay. Session previews and status still disappear after restart.
+- Uninstall explains why the encrypted volume alone cannot restore a wallet
+  after password deletion; PIN changes do not re-encrypt the keystore and
+  restoring the same phrase does not revoke the old key.
+- Release assets bind the full source commit, installer, shim and image; the
+  published skill contains the exact installer hash and verified manifest bundle.
+  Ready release assets are verified on retry and never automatically rewritten.
+
+### Security
+- Core 0.5.0 applies the same read-only/strict-invalid capability ceiling at HTTP
+  routes. Its TLS dependency update fixes RUSTSEC-2026-0285 without new audit
+  exceptions. Message and typed-data signing remain refused in every policy.
+- Confirmed unlimited autonomy can still spend the full balance. Host shell
+  access and shared-volume sessions remain outside per-client isolation; this
+  release adds no spending limits or durable approval queue.
+
 ## [0.11.0] — 2026-08-20
 
 ### Added

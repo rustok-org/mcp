@@ -11,8 +11,8 @@ name: Release Shelf
 # a step that lived only in someone's memory. It is not in the checklist either
 # (2026-08-17). This workflow is that memory, made mechanical.
 #
-# It deliberately does NOT touch the image, the tags, or the signature. The worst
-# it can do is write a wrong body or badge, both fixable with `gh release edit`.
+# It verifies the existing OCI signature and signs the manifest under the tag's
+# identity. Only a complete, verified draft is published; ready assets are immutable.
 
 on:
   push:
@@ -20,7 +20,8 @@ on:
       - "wallet-tui-v*"
 
 permissions:
-  contents: write # create a release; nothing else is needed, nothing else is granted
+  contents: write # release assets
+  id-token: write # keyless manifest signing
 
 concurrency:
   # Per tag, and never cancelled: a half-written release is worse than a slow one.
@@ -47,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${TAG#wallet-tui-v}"
-          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$'; then
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::tag '$TAG' does not carry a version this workflow understands (expected wallet-tui-vX.Y.Z)"
             exit 1
           fi
@@ -64,9 +65,9 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --json tagName >/dev/null 2>&1; then
+          if gh release view "$TAG" --json isDraft --jq 'select(.isDraft == false) | "ready"' 2>/dev/null | grep -qx ready; then
             echo "already=true" >> "$GITHUB_OUTPUT"
-            echo "a release for $TAG already exists — leaving it untouched"
+            echo "a published release for $TAG already exists — leaving all assets and manual edits untouched"
           else
             echo "already=false" >> "$GITHUB_OUTPUT"
           fi
@@ -88,7 +89,7 @@ jobs:
             inside { print }
           ' CHANGELOG.md > /tmp/release-notes.md
           if [ ! -s /tmp/release-notes.md ]; then
-            echo "::error::CHANGELOG.md has no section for $VERSION — the release would have no description. Add '## [$VERSION] — <date>' and re-push the tag."
+            echo "::error::CHANGELOG.md has no section for $VERSION. Prepare complete notes before a new release; preserve the existing tag."
             exit 1
           fi
           echo "notes: $(wc -l < /tmp/release-notes.md) lines"
@@ -124,7 +125,41 @@ jobs:
             echo "$VERSION is not above the current latest ($CURRENT) — leaving the badge where it is"
           fi
 
-      - name: Create the release
+      - name: Install cosign
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+
+      - name: Verify an existing published release without rewriting it
+        if: steps.existing.outputs.already == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          SOURCE_COMMIT=$(git rev-parse HEAD)
+          gh release download "$TAG" --dir published-assets
+          python3 scripts/build-wallet-release.py --output published-assets --version "$VERSION" --commit "$SOURCE_COMMIT" --check
+          IMAGE=$(sed -n 's/^image_ref=//p' published-assets/release.manifest)
+          cosign verify "$IMAGE" --certificate-identity 'https://github.com/rustok-org/mcp/.github/workflows/wallet-publish.yml@refs/heads/main' --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+
+      - name: Assemble and sign the exact release
+        if: steps.existing.outputs.already == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          SOURCE_COMMIT=$(git rev-parse HEAD)
+          python3 scripts/build-wallet-release.py --output release-assets --version "$VERSION" --commit "$SOURCE_COMMIT"
+          IDENTITY="https://github.com/rustok-org/mcp/.github/workflows/release-shelf.yml@refs/tags/$TAG"
+          ISSUER="https://token.actions.githubusercontent.com"
+          IMAGE=$(sed -n 's/^image_ref=//p' release-assets/release.manifest)
+          cosign verify "$IMAGE" --certificate-identity 'https://github.com/rustok-org/mcp/.github/workflows/wallet-publish.yml@refs/heads/main' --certificate-oidc-issuer "$ISSUER"
+          cosign sign-blob --yes --bundle release-assets/release.manifest.sigstore.json release-assets/release.manifest
+          cosign verify-blob release-assets/release.manifest --bundle release-assets/release.manifest.sigstore.json --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER"
+          python3 scripts/build-wallet-release.py --output release-assets --version "$VERSION" --commit "$SOURCE_COMMIT" --package
+
+      - name: Upload draft, verify uploaded bytes, then publish
         if: steps.existing.outputs.already == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -133,8 +168,18 @@ jobs:
           LATEST_FLAG: ${{ steps.latest.outputs.flag }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" \
-            --title "$VERSION" \
-            --notes-file /tmp/release-notes.md \
-            "$LATEST_FLAG"
-          echo "released $TAG ($LATEST_FLAG)" >> "$GITHUB_STEP_SUMMARY"
+          # A failed upload never leaves a ready release. Only an existing draft
+          # can be resumed/clobbered; the published-release check above is immutable.
+          if gh release view "$TAG" --json isDraft >/dev/null 2>&1; then
+            gh release view "$TAG" --json isDraft --jq .isDraft | grep -qx true
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* --draft --latest=false --verify-tag --title "$VERSION" --notes-file /tmp/release-notes.md
+          fi
+          mkdir downloaded-assets
+          gh release download "$TAG" --dir downloaded-assets
+          for name in install.sh rustok release.manifest release.manifest.sigstore.json SKILL.md wallet-skill.zip; do
+            cmp "release-assets/$name" "downloaded-assets/$name"
+          done
+          gh release edit "$TAG" --draft=false "$LATEST_FLAG"
+          echo "published complete signed release $TAG ($LATEST_FLAG)" >> "$GITHUB_STEP_SUMMARY"

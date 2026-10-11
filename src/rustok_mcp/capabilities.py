@@ -49,7 +49,7 @@ def parse_capabilities(values: Iterable[str]) -> set[Capability]:
         try:
             result.add(Capability(val))
         except ValueError:
-            logger.warning("Unknown capability ignored: %s", val)
+            logger.warning("Unknown capability ignored")
             continue
     return result
 
@@ -70,30 +70,26 @@ def extract_rustok_capabilities(params: object) -> set[Capability]:
 
 
 def resolve_stdio_capabilities(raw: str | None) -> set[Capability]:
-    """Resolve the capabilities granted to the process-trusted stdio transport.
+    """Resolve the process ceiling: implicit grants are read-only.
 
-    Whoever launches the stdio container owns the local machine, so stdio is not
-    a security boundary — it defaults to *all* capabilities (matching the
-    "stdio is not gated" contract). An explicit comma-separated value restricts
-    it (e.g. ``read_wallet`` for a read-only agent). A set-but-unparseable value
-    resolves to the empty set and logs a warning, so a typo never silently gates
-    every tool.
-
-    Args:
-        raw: The raw ``RUSTOK_MCP_CAPABILITIES`` value, or ``None`` when unset.
-
-    Returns:
-        The granted capability set.
+    Explicit lists grant exactly their names; any unknown nonempty token denies
+    the entire grant. ``none`` selects no tools. Empty list items are ignored.
+    The separate historical SSE initialization contract is unchanged.
     """
     if raw is None or not raw.strip():
-        return set(Capability)
-    caps = parse_capabilities(part.strip() for part in raw.split(","))
-    if not caps:
-        logger.warning(
-            "RUSTOK_MCP_CAPABILITIES set but no valid capabilities parsed (%r) — "
-            "all tools are gated",
-            raw,
-        )
+        return {Capability.READ_WALLET}
+    if raw.strip() == "none":
+        return set()
+    caps: set[Capability] = set()
+    for part in raw.split(","):
+        name = part.strip()
+        if not name:
+            continue
+        try:
+            caps.add(Capability(name))
+        except ValueError:
+            logger.warning("Invalid RUSTOK_MCP_CAPABILITIES — all tools are gated")
+            return set()
     return caps
 
 
@@ -127,7 +123,7 @@ def ceiling_for_policy_mode(mode: str | None) -> set[Capability] | None:
 def resolve_sse_capabilities(raw: str | None) -> set[Capability] | None:
     """Operator ceiling for SSE sessions (audit B1), or ``None`` when unset.
 
-    Unlike stdio (process-trusted, defaults to *all*), an unset value keeps
+    Unlike stdio (defaults to read-only), an unset value keeps
     the historical SSE contract: the session starts gated and the first
     ``initialize`` declares the set. A set value seeds the session ceiling —
     the first ``initialize`` may then only narrow it, matching stdio.

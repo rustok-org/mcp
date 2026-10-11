@@ -90,6 +90,7 @@ def file_wallet(chain: Chain, image: str, tmp_path: Path, password_secret: str) 
             anvil_url=chain.url_from_container,
             stderr_path=tmp_path / f"{name}.stderr.log",
             password_args=password_args,
+            capabilities="read_wallet,preview_tx,execute_tx",
         )
         try:
             yield Wallet(name=name, address=address, pin=pin, mcp=mcp)

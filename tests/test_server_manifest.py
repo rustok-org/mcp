@@ -28,6 +28,11 @@ def _server() -> dict[str, Any]:
     return json.loads(SERVER_JSON.read_text(encoding="utf-8"))
 
 
+def test_registry_description_fits_the_declared_schema() -> None:
+    # ServerDetail.description in the declared 2025-12-11 primary schema.
+    assert 0 < len(_server()["description"]) <= 100
+
+
 def test_server_manifest_version_matches_the_package() -> None:
     """A registry listing that announces the wrong version misdirects installs."""
     expected = manifest_version()
@@ -39,7 +44,7 @@ def test_server_manifest_version_matches_the_package() -> None:
     )
 
 
-def test_server_manifest_image_tag_matches_the_package() -> None:
+def test_server_manifest_image_digest_matches_the_installer() -> None:
     """The OCI identifier is what a reader actually pulls.
 
     This is the half that rotted worst: the version field was one release behind
@@ -47,6 +52,12 @@ def test_server_manifest_image_tag_matches_the_package() -> None:
     a month earlier than the listing claimed.
     """
     expected = manifest_version()
+    pin = re.search(
+        r'^WALLET_DIGEST="(sha256:[0-9a-f]{64})"$',
+        (REPO_ROOT / "scripts/install.sh").read_text(),
+        re.MULTILINE,
+    )
+    assert pin, "installer carries no usable image digest"
     packages = _server()["packages"]
     oci = [p for p in packages if p.get("registryType") == "oci"]
     assert oci, "server.json declares no OCI package — the listing installs nothing"
@@ -54,11 +65,10 @@ def test_server_manifest_image_tag_matches_the_package() -> None:
     stale = []
     for package in oci:
         identifier = package["identifier"]
-        match = re.search(r":v(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$", identifier)
-        if match is None:
-            stale.append(f"{identifier!r} does not end in a :vX.Y.Z tag")
-        elif match.group("version") != expected:
-            stale.append(f"{identifier!r} is not v{expected}")
+        if identifier != f"ghcr.io/rustok-org/rustok-wallet-tui@{pin[1]}":
+            stale.append(f"{identifier!r} differs from the immutable installer pin")
+        if package.get("version") != expected:
+            stale.append(f"package version {package.get('version')!r} is not {expected}")
 
     assert not stale, (
         "server.json points at an image that is not this release:\n  "

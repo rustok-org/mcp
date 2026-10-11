@@ -18,7 +18,7 @@
 #     rustok-wallet-tui:0.8.3 create-wallet
 # Run (MCP stdio): the same run without `create-wallet`, plus `-e RUSTOK_RPC_URLS_1=…`.
 
-ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.4.5
+ARG CORE_IMAGE=ghcr.io/rustok-org/rustok-core:v0.5.0
 ARG CONSOLE_IMAGE=ghcr.io/rustok-org/rustok-console:v0.3.3
 
 # What the finished image will say about itself when the console asks. The
@@ -32,8 +32,8 @@ ARG CONSOLE_IMAGE=ghcr.io/rustok-org/rustok-console:v0.3.3
 # measured, not assumed — buildah passes the reference through untouched, so the
 # panel would have shown the whole `ghcr.io/…` string as a version number. A
 # check that refuses is worth more than an expansion that silently lies.
-ARG WALLET_VERSION=0.11.0
-ARG CORE_VERSION=v0.4.5
+ARG WALLET_VERSION=0.12.0
+ARG CORE_VERSION=v0.5.0
 
 # --- Core/Gateway binaries (private source; public binary image) ---
 FROM ${CORE_IMAGE} AS core
@@ -49,7 +49,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
-COPY README.md ./
+COPY PACKAGE.md ./
 COPY src/ ./src/
 RUN uv sync --frozen --no-dev
 

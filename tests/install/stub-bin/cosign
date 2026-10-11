@@ -17,14 +17,14 @@ if [ "${STUB_COSIGN_BROKEN:-0}" = "1" ]; then
 fi
 
 case "${1:-}" in
-    verify)
+    verify|verify-blob)
         if [ "${STUB_COSIGN_FAIL:-0}" = "1" ]; then
             echo "Error: no signatures found" 1>&2
             exit 10
         fi
         exit 0
         ;;
-    version) echo "stub-cosign 0.0.0"; exit 0 ;;
+    version) echo "GitVersion: v${STUB_COSIGN_VERSION:-3.0.3}"; exit 0 ;;
     *)
         echo "stub: unexpected cosign verb: $*" 1>&2
         exit 64

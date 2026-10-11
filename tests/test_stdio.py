@@ -32,8 +32,8 @@ async def test_stdio_initialize_roundtrip() -> None:
     assert "error" not in response
 
 
-async def test_stdio_default_exposes_all_tools(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A standard MCP client (caps object, no rustok list) sees all 7 tools over stdio."""
+async def test_stdio_default_exposes_only_read_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A standard MCP client (caps object, no rustok list) sees only read tools over stdio."""
     monkeypatch.delenv("RUSTOK_MCP_CAPABILITIES", raising=False)
     requests = (
         json.dumps(
@@ -53,14 +53,7 @@ async def test_stdio_default_exposes_all_tools(monkeypatch: pytest.MonkeyPatch) 
     lines = [line for line in stdout.read().splitlines() if line.strip()]
     tools_response = json.loads(lines[1])
     names = {tool["name"] for tool in tools_response["result"]["tools"]}
-    assert names == {
-        "get_wallet_context",
-        "get_balances",
-        "get_positions",
-        "preview_transaction",
-        "execute_transaction",
-        "get_execution_status",
-    }
+    assert names == {"get_wallet_context", "get_balances", "get_positions"}
 
 
 async def test_stdio_parse_error() -> None:

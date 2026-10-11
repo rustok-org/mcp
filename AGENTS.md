@@ -60,17 +60,19 @@ shellcheck scripts/*.sh
 The order below is not style — it is the only order that assembles. The image
 digest does not exist until the publish runs, the publish requires the bumped
 version already on `main`, and the git tag must land on the commit that carries
-the filled pins, because users fetch `install.sh` **by tag**. A tag cut before
+the filled pins, because the release manifest binds the final tagged checkout. A tag cut before
 the pins are filled is dead permanently.
 
 **1 — prep (PR):**
-- [ ] Version bumped in **all 9 points** — `pyproject.toml`, which the others
-      answer to, plus the 8 that `tests/version_points.py` declares, one entry
+- [ ] Version bumped in **all 8 points** — `pyproject.toml`, which the others
+      answer to, plus the 7 that `tests/version_points.py` declares, one entry
       each. Which places those are is not listed here and not remembered;
       `test_every_version_point_matches_the_manifest` holds all of them. The number in this line is checked against that list by
       `test_the_count_in_the_prose_is_the_count_in_the_list`, so it cannot go
       stale the way "six" did for two releases while there were ten. Add a point
-      to the registry, not an assertion to a test
+      to the registry, not an assertion to a test. Registry image identifiers
+      are immutable digests, held against WALLET_DIGEST separately; package
+      version is held here. Digest pins are filled in the pin PR after publish.
 - [ ] Published prose is bumped too, and it is NOT in that count: install URLs
       and `podman run` examples live in `README.md`, `docs/INSTALL.md`,
       `docs/TROUBLESHOOTING.md`, `docs/CONFIGURATION.md` and the body of
@@ -125,15 +127,14 @@ the pins are filled is dead permanently.
 
 **4 — tag & publish (ops):**
 - [ ] Tag `wallet-tui-v<X.Y.Z>` on the step-3 merge commit — **last**, because
-      the documented install command fetches `install.sh` through this tag and
-      the shim beside it
+      the generated skill binds exact installer/manifest assets for this tag
 - [ ] The GitHub Release writes itself from that tag (`release-shelf.yml`): body
       from the `CHANGELOG.md` section, "Latest" computed against the current one.
       **Nothing to do here on an ordinary release — but check it appeared.** It
       is a step that used to live in memory alone, and memory lost 0.9.8 and
       0.10.0 (both tagged, published, signed, and invisible on the releases page
       until 2026-08-17). If the run failed, the usual cause is a missing
-      CHANGELOG section: add it and re-push the tag
+      CHANGELOG section: preserve the tag and prepare complete notes for a new release
 - [ ] **Break-glass / manual publish:** no tag push means no release — create it
       by hand, body from the same CHANGELOG section
 - [ ] **Withdrawing a version** (`0.9.6 — WITHDRAWN, use 0.9.7` is the precedent)

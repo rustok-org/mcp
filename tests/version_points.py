@@ -82,19 +82,6 @@ def _by_json_key(*keys: str | int) -> Callable[[str], str]:
     return read
 
 
-def _tag_in_json(*keys: str | int) -> Callable[[str], str]:
-    """A JSON value that is an image reference, reduced to its bare version."""
-    read_value = _by_json_key(*keys)
-
-    def read(text: str) -> str:
-        value = read_value(text)
-        match = re.search(r":v([0-9]+\.[0-9]+\.[0-9]+)$", value)
-        assert match, f"{keys}: {value!r} does not end in a :vX.Y.Z tag"
-        return match.group(1)
-
-    return read
-
-
 @dataclass(frozen=True)
 class VersionPoint:
     """One place a human has to edit when the version changes."""
@@ -124,9 +111,9 @@ VERSION_POINTS: tuple[VersionPoint, ...] = (
         _by_pattern(r'^WALLET_VERSION="(.+)"$'),
     ),
     VersionPoint(
-        "cli/rustok (DEFAULT_IMAGE tag)",
+        "cli/rustok (DEFAULT_WALLET_VERSION)",
         REPO_ROOT / "cli" / "rustok",
-        _by_pattern(r'^DEFAULT_IMAGE="ghcr\.io/rustok-org/rustok-wallet-tui:v(.+)"$'),
+        _by_pattern(r'^DEFAULT_WALLET_VERSION="(.+)"$'),
     ),
     # Added in 0.9.3: the number the built image states about itself, which the
     # console reads and shows to a human. A drift here is the quietest of them —
@@ -146,18 +133,9 @@ VERSION_POINTS: tuple[VersionPoint, ...] = (
         _by_json_key("version"),
     ),
     VersionPoint(
-        "server.json (image identifier)",
+        "server.json (package version)",
         REPO_ROOT / "server.json",
-        _tag_in_json("packages", 0, "identifier"),
-    ),
-    # The Smithery listing. It was part of the bump once — CHANGELOG 0.5.0 lists
-    # it by name — and then fell out of every list: it sat on v0.9.2 through
-    # eight releases while the storefront told people to run that image. Nothing
-    # looked at it, which is the entire subject of this file.
-    VersionPoint(
-        "smithery.yaml (image)",
-        REPO_ROOT / "smithery.yaml",
-        _by_pattern(r"ghcr\.io/rustok-org/rustok-wallet-tui:v([0-9]+\.[0-9]+\.[0-9]+)"),
+        _by_json_key("packages", 0, "version"),
     ),
 )
 
