@@ -39,7 +39,9 @@ all — lives in [docs/CAVEATS.md](https://github.com/rustok-org/mcp/blob/main/d
 | **Outside the model** | An agent with **shell / `docker exec` access to the container** can read secrets and bypass client isolation. Direct message and typed-data signing are refused by the core in all wallet modes; a compromised host can still steal the private key. That is why the console is a **separate window, not an agent command**. Trusting your own agent is the user's call, the same as never pasting a seed phrase into an untrusted tool. |
 
 **Never claim** the agent (or a prompt-injected agent) "cannot move funds." What is
-true: keys stay local, and **on-chain sends** are human-gated in the console.
+true: keys stay local, and supervised sends wait for approval in the console.
+Once the user confirms autonomous mode, an execute grant can spend the full
+wallet balance without approval of each payment.
 
 ### The mode switch, and why a send may still park
 
@@ -183,6 +185,32 @@ one — the old PIN is not needed. This changes the approval PIN, not keystore e
 > user's own terminal (window 2). Do not ask the user for their PIN or their
 > phrase in this chat, ever.
 
+## Stopping and uninstalling
+
+`rustok stop` stops the selected wallet process. `read_only` refuses new writes;
+removing a client registration removes its launch entry but does not stop live
+sessions. None of these actions deletes stored secrets or revokes the private
+key. Before stopping for teardown, stop new requests,
+resolve pending approvals and wait for active execution outcomes as described
+under maintenance below. Never automatically replay an unknown payment.
+
+**Before uninstalling, explain that stored keyring passwords are deleted. An
+encrypted volume alone is not a recoverable backup.** The user must confirm they
+have their recovery phrase backed up offline before proceeding; never ask them
+to paste it into chat.
+
+The user runs `rustok uninstall` in their own terminal. It deregisters supported
+clients, stops wallets and removes stored passwords/RPC secrets, the installed
+shim/release record and the installer PATH block. Encrypted key volumes remain.
+Check reported warnings for registrations or other state that still need manual
+removal; do not describe a partial teardown as complete.
+
+To delete key volumes too, choose `rustok uninstall --purge-keys` **instead of**
+ordinary uninstall. It requires the user's own terminal and the exact
+`delete my keys` confirmation before changes. Without the recovery phrase,
+deleting those keys makes the funds unrecoverable. These are human maintenance
+commands, not agent commands.
+
 ## Where the balance you show comes from
 
 The wallet reads chains through an RPC node. Since 0.11.0 it carries two public
@@ -238,11 +266,12 @@ address and every balance. A client may narrow its own session further in
 | `execute_transaction` | execute_tx | Submit a previewed transaction `{preview_id}` — parked for human approval on a supervised wallet, released by the core on one whose owner confirmed autonomous mode; a `pending` result carries `next_step` for the human |
 | `get_execution_status` | execute_tx | Poll a parked execution `{preview_id}` → `pending` / `executed` (+`tx_hash`) / `denied` / `expired` / `failed` (+`error_reason`), with the `not_after_unix` deadline. **`executed` means broadcast, not on-chain success** — see below |
 
-### ERC-20 tokens are opt-in — an empty list is not an empty wallet
+### ERC-20 balances use a configured registry
 
-The wallet reports the tokens the **user registered**, and never goes looking for
-others. A wallet holding USDC shows no USDC until USDC is registered on that
-chain:
+The wallet reports tokens in its configured registry and does not discover every
+token the address holds. On carried chains, the default registry includes USDC
+(and USDC.e on Arbitrum). An explicit `RUSTOK_TOKENS_<chain>` value **replaces**
+that chain's carried registry rather than adding to it. To select a registry:
 
 ```bash
 -e RUSTOK_TOKENS_1="USDC:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48:6"
@@ -263,11 +292,13 @@ empty wallet is the likeliest way to be wrong here — and it has already happen
 ## Behavioral guidelines
 
 1. **Always `preview_transaction` first** and show its decoded call + simulation (revert check) + risk level so the user gives informed approval.
-2. **The money path is preview → summary card → `execute_transaction` → human.**
-   `execute_transaction` only parks the transaction (`state: "pending"`) — the user
-   releases it in a separate terminal window by running `rustok console` (see
-   the onboarding above). Never offer to run the console command yourself
-   and never ask the user to paste the approval PIN into this chat.
+2. **The money path is preview → summary card → `execute_transaction` → core policy.**
+   In supervised mode, the transaction waits for human approval (`state: "pending"`)
+   in a separate terminal running `rustok console`. Once the user confirms
+   autonomous mode, execution can broadcast without approval of each payment;
+   an execute grant can spend the full wallet balance. Report the actual returned
+   state rather than promising that a send only waits. Never offer to run the
+   console yourself or ask the user to paste the approval PIN into chat.
 3. **`executed` means the transaction was broadcast, not that it succeeded.**
    The wallet reports the hash the moment the network accepted the transaction
    for inclusion; a transaction that reverts on-chain still costs its gas and

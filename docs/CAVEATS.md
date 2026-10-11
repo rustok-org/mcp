@@ -42,8 +42,10 @@ failure timeouts.
 ## Keys and the approval gate
 
 **What holds.** Private keys stay in your local volume. On the console edition,
-`execute_transaction` is parked and needs your approval in a **separate console
-window**, with a PIN for high-risk items. `keystore.json` and `approval-pin.json`
+supervised `execute_transaction` calls wait for your approval in a **separate
+console window**, with a PIN for high-risk items. Once you confirm autonomous
+mode, execution can broadcast without approval of each payment; an execute
+grant can spend the full wallet balance. `keystore.json` and `approval-pin.json`
 are owner-only (`0600`), and installs that predate that are narrowed at startup.
 The keyring password that encrypts the keystore is 32 random bytes the shim
 generates — stronger than anything a person would type — and lives in the
@@ -100,7 +102,8 @@ random rather than yours.
   block them.
 
 **Never claim** that a prompt-injected agent "cannot move funds". What is true:
-keys stay local, and on-chain sends are human-gated *on the console edition*.
+keys stay local, supervised sends wait for console approval, and human-confirmed
+autonomy permits sends without approval of each payment.
 
 ## Installation and updates
 

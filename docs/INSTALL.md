@@ -108,8 +108,11 @@ Restart the client afterwards so it picks up the new MCP server.
 
 ## 4. Approve transactions — `rustok console`
 
-The console is a **separate window the agent cannot drive**. Transactions that
-move funds are parked by the wallet until you release them here:
+The console is a **separate window the agent cannot drive**. In supervised mode,
+transactions wait for you to release them here. Once you confirm autonomous mode
+in the console, an execute grant can spend the full wallet balance without
+approval of each payment. Opening the console is not a per-payment gate in that
+mode:
 
 ```bash
 rustok console      # also the default: bare `rustok` does the same
